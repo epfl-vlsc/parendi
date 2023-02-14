@@ -101,6 +101,7 @@
 #include "V3VariableOrder.h"
 #include "V3Waiver.h"
 #include "V3Width.h"
+#include "V3IfConversion.h"
 
 #include <ctime>
 
@@ -393,6 +394,9 @@ static void process() {
         // Create delayed assignments
         // This creates lots of duplicate ACTIVES so ActiveTop needs to be after this step
         V3Delayed::delayedAll(v3Global.rootp());
+
+        // Remove AstIf from active blocks for Manticore
+        V3IfConversion::predicatedAll(v3Global.rootp());
 
         // Make Active's on the top level.
         // Differs from V3Active, because identical clocks may be pushed
