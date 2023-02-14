@@ -2910,6 +2910,25 @@ public:
     }
     bool off() const { return m_off; }
 };
+
+class AstPredicatedStmt final : public AstNodeStmt {
+    // A predicated statement with potential side-effects
+    // @astgen op1 := condp : AstNodeExpr
+    // @astgen op2 := stmtp : AstNodeStmt
+public:
+    AstPredicatedStmt(FileLine* fl, AstNodeExpr* condp, AstNodeStmt* stmtp):
+        ASTGEN_SUPER_PredicatedStmt(fl) {
+        this->condp(condp);
+        this->stmtp(stmtp);
+    }
+    ASTGEN_MEMBERS_AstPredicatedStmt;
+
+    bool isGateOptimizable() const override { return false; }
+    bool isGateDedupable() const override { return true; }
+    bool same(const AstNode* /*samep*/) const override { return true; }
+
+};
+
 class AstPrintTimeScale final : public AstNodeStmt {
     // Parents: stmtlist
     string m_name;  // Parent module name

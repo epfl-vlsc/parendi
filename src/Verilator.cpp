@@ -336,6 +336,9 @@ static void process() {
             V3Table::tableAll(v3Global.rootp());
         }
 
+        // Remove AstIf from active blocks for Manticore
+        V3IfConversion::predicatedAll(v3Global.rootp());
+
         // Cleanup
         V3Const::constifyAll(v3Global.rootp());
         V3Dead::deadifyDTypesScoped(v3Global.rootp());
@@ -394,9 +397,6 @@ static void process() {
         // Create delayed assignments
         // This creates lots of duplicate ACTIVES so ActiveTop needs to be after this step
         V3Delayed::delayedAll(v3Global.rootp());
-
-        // Remove AstIf from active blocks for Manticore
-        V3IfConversion::predicatedAll(v3Global.rootp());
 
         // Make Active's on the top level.
         // Differs from V3Active, because identical clocks may be pushed

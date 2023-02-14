@@ -52,7 +52,6 @@ private:
 
     AstActive* m_activep = nullptr;  // curret activate block
 
-    bool m_inIf = false;
     bool m_inLoop = false;  // In a loop, do not convert the ifs
     bool m_inInitial = false;  // in initial block;
     bool m_inDly = false;  // inside a delayed assignment
@@ -62,12 +61,13 @@ private:
     VarMap m_modVarMap;  // table of new variable names created under module
     VDouble0 m_statsRemoved;  // number of removed ifs, for statistics tracking
     std::unordered_map<const AstVarScope*, int> m_scopeVecMap;  //
-    AstIf* m_ifp = nullptr;  // last if node
+    AstIf* m_ifp;
+    std::pair<AstIf*, bool> m_inIf;  // last if node, then (true) or else branch (false)
     std::vector<AstNodeAssign*>
         m_assignCollection;  // collection of assignment in either thensp or elsesp
     // std::vector<AstAssignDly*> m_assignDlyCollections; // like the one above, but for delayed
     // assignments (i.e., lhs <= rhs)
-    std::vector<AstNode*> m_hoisted;
+    std::vector<AstNodeStmt*> m_hoisted;
     V3UniqueNames m_lvFreshName;  // For generating fresh names for temprary variable names
 
     // VISITORS
@@ -92,54 +92,82 @@ private:
     }
 
     void visit(AstNodeAssign* assignp) override {
-        if (m_ifp) {
+        if (m_inIf.first) {
             UINFO(20, assignp << endl);
-            m_assignCollection.push_back(assignp);
+
+            FileLine* fl = assignp->fileline();
+            AstNodeExpr* defaultp = assignp->lhsp()->cloneTree(true);
+            { AccessModifierVisitor{defaultp, VAccess::READ}; }
+
+            AstNodeExpr* condp = nullptr;
+            AstNodeExpr* origCondp = m_inIf.first->condp()->cloneTree(true);
+            if (m_inIf.second) { // then branch
+                condp = origCondp;
+            } else {
+                condp = new AstLogNot{origCondp->fileline(), origCondp};
+            }
+
+            AstNodeExpr* rhsp = assignp->rhsp()->cloneTree(true);
+            AstCond* ternaryp = new AstCond{fl, condp,
+                                            assignp->rhsp()->cloneTree(true), defaultp};
+            AstNodeExpr* lhsp = assignp->lhsp()->cloneTree(true);
+            AstNodeAssign* newAssignp = assignp->cloneType(lhsp, ternaryp);
+            m_hoisted.push_back(newAssignp);
+
+            // delete the transformed assignment
+            UINFO(20, "Unlinking " << assignp << endl);
+            assignp->unlinkFrBack();
+            VL_DO_DANGLING(pushDeletep(assignp), assignp);
+        }
+    }
+
+    void visit(AstNodeStmt* stmtp) override {
+        if (m_inIf.first) {
+            UINFO(20, stmtp << endl);
+            AstNodeExpr* condp = nullptr;
+            AstNodeExpr* origCondp = m_inIf.first->condp()->cloneTree(true);
+            if (m_inIf.second) {  // then branch
+                condp = origCondp;
+            } else {
+                condp = new AstLogNot{origCondp->fileline(), origCondp};
+            }
+            AstNodeStmt* stmtCopyp = stmtp->cloneTree(
+                /*Don't clone next, want to wrap individual statements*/
+                false);
+
+            m_hoisted.push_back(new AstPredicatedStmt(stmtp->fileline(), condp, stmtCopyp));
+            UINFO(20, "Unlinking " << stmtp << endl);
+            // deleete it
+            stmtp->unlinkFrBack();
+            VL_DO_DANGLING(pushDeletep(stmtp), stmtp);
         }
     }
 
     void visit(AstIf* ifp) override {
-        VL_RESTORER(m_ifp);
+        VL_RESTORER(m_inIf);
+        AstNode* nextp = ifp;
         {
-            m_ifp = ifp;
+            VL_RESTORER(m_hoisted);
+            m_inIf = std::make_pair(ifp, /* in then */ true);
             UINFO(10, "(got if) " << ifp << endl);
-            VL_RESTORER(m_assignCollection);
             UINFO(10, "Visiting THEN" << endl);
-            m_assignCollection.clear();  // clear the stack of assignments
+            m_hoisted.clear();  // clear the stack of assignments
             iterateAndNextNull(ifp->thensp());
-            AstBegin* assignBlockp = nullptr;
-            AstNode* nextp = ifp;
-            for (AstNodeAssign* assignp : m_assignCollection) {
-                FileLine* fl = assignp->fileline();
-                AstNodeExpr* defaultp = assignp->lhsp()->cloneTree(true);
-                { AccessModifierVisitor{defaultp, VAccess::READ}; }
-
-                AstNodeExpr* rhsp = assignp->rhsp()->cloneTree(true);
-                AstCond* ternaryp = new AstCond{fl, ifp->condp()->cloneTree(true),
-                                                assignp->rhsp()->cloneTree(true), defaultp};
-                AstNodeExpr* lhsp = assignp->lhsp()->cloneTree(true);
-                AstNodeAssign* newAssignp = assignp->cloneType(lhsp, ternaryp);
-
-                // newAssignp->user1(true);
-                // AstNode* b = ifp->backp()
-                // AstNode* n = ifp->isUnlinkFrBackWithNext();
-                // append the ternary assignment right after the if-then-else block
-
-                nextp->addNextHere(newAssignp);
+            for(AstNodeStmt* newp: m_hoisted) {
+                nextp->addNextHere(newp);
                 nextp = nextp->nextp();
-                // remove the original assignment inside the if
-                UINFO(20, "Unlinking " << assignp << endl);
-                assignp->unlinkFrBack();
-
-                VL_DO_DANGLING(pushDeletep(assignp), assignp);
-
-                // assignp
             }
         }
-        {
-            VL_RESTORER(m_assignCollection);
-            m_ifp = ifp;
+        if (ifp->elsesp()) {
+            VL_RESTORER(m_hoisted);
+            m_inIf = std::make_pair(ifp, false /*not in then, in else*/);
+            m_hoisted.clear();
             UINFO(10, "Visiting ELSE" << endl);
+            iterateAndNextNull(ifp->elsesp());
+            for(AstNodeStmt* newp: m_hoisted) {
+                nextp->addNextHere(newp);
+                nextp = nextp->nextp();
+            }
             // iterateAndNextNull(ifp->elsesp());
         }
     }
@@ -149,6 +177,7 @@ private:
         VL_RESTORER(m_modp);
         {
             m_modp = nodep;
+            m_inIf = std::make_pair(nullptr, false);
             m_lvFreshName.reset();
             AstNode::user1ClearTree();
             iterateChildren(nodep);
@@ -158,6 +187,7 @@ private:
         VL_RESTORER(m_scopep);
         {
             m_scopep = nodep;
+
             iterateChildren(nodep);
         }
     }

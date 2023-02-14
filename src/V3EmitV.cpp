@@ -126,6 +126,14 @@ class EmitVBaseVisitor VL_NOT_FINAL : public EmitCBaseVisitor {
         iterateAndNextConstNull(nodep->stmtsp());
         putqs(nodep, "*/\n");
     }
+     void visit(AstPredicatedStmt* nodep) {
+        puts("if /*predicated*/(");
+        iterateAndNextConstNull(nodep->condp());
+        puts(") begin\n");
+        iterateAndNextConstNull(nodep->stmtp());
+        putqs(nodep, "end\n");
+
+    }
     void visit(AstNodeAssign* nodep) override {
         if (VN_IS(nodep, AssignForce)) puts("force ");
         iterateAndNextConstNull(nodep->lhsp());
