@@ -32,12 +32,12 @@ class AccessModifierVisitor final : public VNVisitor {
 private:
     const VAccess m_flag;
 
-    void visit(AstNodeVarRef* vrefp) {
-        vrefp->access(m_flag);
-    }
+    void visit(AstNodeVarRef* vrefp) { vrefp->access(m_flag); }
     void visit(AstNode* nodep) { iterateChildren(nodep); }
+
 public:
-    explicit AccessModifierVisitor(AstNodeExpr* nodep, const VAccess& flag): m_flag(flag) {
+    explicit AccessModifierVisitor(AstNodeExpr* nodep, const VAccess& flag)
+        : m_flag(flag) {
         iterate(nodep);
     }
 };
@@ -46,7 +46,7 @@ class IfConversionVisitor final : public VNVisitor {
 private:
     // STATE
     // Cleared on module
-    // AstVarRef::user1() -> bool. Set true if already processed
+    // AstAssign::user1() -> bool. Set true if already processed
 
     const VNUser1InUse m_inuser1;
 
@@ -63,8 +63,11 @@ private:
     VDouble0 m_statsRemoved;  // number of removed ifs, for statistics tracking
     std::unordered_map<const AstVarScope*, int> m_scopeVecMap;  //
     AstIf* m_ifp = nullptr;  // last if node
-    std::vector<AstAssign*>
+    std::vector<AstNodeAssign*>
         m_assignCollection;  // collection of assignment in either thensp or elsesp
+    // std::vector<AstAssignDly*> m_assignDlyCollections; // like the one above, but for delayed
+    // assignments (i.e., lhs <= rhs)
+    std::vector<AstNode*> m_hoisted;
     V3UniqueNames m_lvFreshName;  // For generating fresh names for temprary variable names
 
     // VISITORS
@@ -84,32 +87,11 @@ private:
         }
     }
 
-    // void creatFreshVar()
-
-    void visit(AstVarRef* vrefp) override {
-        if (!vrefp->user1() && m_ifp && vrefp->access().isWriteOrRW()) {
-            UINFO(21, vrefp << endl);
-            auto fl = vrefp->fileline();
-            AstVar* const freshVarp
-                = new AstVar{fl, VVarType::MODULETEMP, m_lvFreshName.get(vrefp), vrefp->dtypep()};
-            // create a scope and append it the closest enclosing scope
-            AstVarScope* vscp = new AstVarScope{fl, m_scopep, freshVarp};
-            m_scopep->varsp()->addNext(vscp);
-            AstNode* const abovep = vrefp->backp();
-            auto newrefp = new AstVarRef{fl, vscp, VAccess::WRITE};
-            UINFO(22,
-                  "Replacing " << vrefp->varp()->name() << " with  " << freshVarp->name() << endl);
-            newrefp->user1(true);
-            VL_DO_DANGLING(pushDeletep(vrefp), vrefp);
-            // append the variable to the module
-            m_modp->addStmtsp(freshVarp);
-
-            // AstNode* const origStmts = m_modp->stmtsp()->unlinkFrBackWithNext();
-            // m_modp->addStmtsp(freshVarp);
-            // m_modp->addStmtsp(origStmts);
-        }
+    AstNodeAssign* mkWithRhsp(AstNodeAssign* nodep, AstNodeExpr* rhsp) {
+        return nodep->cloneType(nodep->lhsp()->cloneTree(true), rhsp);
     }
-    void visit(AstAssign* assignp) override {
+
+    void visit(AstNodeAssign* assignp) override {
         if (m_ifp) {
             UINFO(20, assignp << endl);
             m_assignCollection.push_back(assignp);
@@ -122,36 +104,43 @@ private:
             m_ifp = ifp;
             UINFO(10, "(got if) " << ifp << endl);
             VL_RESTORER(m_assignCollection);
-            {
-                UINFO(10, "Visiting THEN" << endl);
-                iterateAndNextNull(ifp->thensp());
-                for (AstAssign* assignp : m_assignCollection) {
-                    FileLine* fl = assignp->fileline();
-                    AstNodeExpr* lhsp = assignp->lhsp()->cloneTree(true);
-                    AstNodeExpr* defaultp = assignp->lhsp()->cloneTree(true);
-                    { AccessModifierVisitor {defaultp, VAccess::READ}; }
+            UINFO(10, "Visiting THEN" << endl);
+            m_assignCollection.clear();  // clear the stack of assignments
+            iterateAndNextNull(ifp->thensp());
+            AstBegin* assignBlockp = nullptr;
+            AstNode* nextp = ifp;
+            for (AstNodeAssign* assignp : m_assignCollection) {
+                FileLine* fl = assignp->fileline();
+                AstNodeExpr* defaultp = assignp->lhsp()->cloneTree(true);
+                { AccessModifierVisitor{defaultp, VAccess::READ}; }
 
-                    AstNodeExpr* rhsp = assignp->rhsp()->cloneTree(true);
-                    AstCond* ternaryp
-                        = new AstCond{fl, ifp->condp()->cloneTree(true), rhsp, defaultp};
-                    AstAssign* newAssignp = new AstAssign{fl, lhsp, ternaryp};
-                    // AstNode *const abovep = ifp->abovep();
-                    // AstNode* b = ifp->backp()
-                    // AstNode* n = ifp->isUnlinkFrBackWithNext();
-                    // ifp->backp()->addNext(newAssignp);
-                    // assignp
-                    // VL_DO_DANGLING(pushDeletep(assignp), assignp);
+                AstNodeExpr* rhsp = assignp->rhsp()->cloneTree(true);
+                AstCond* ternaryp = new AstCond{fl, ifp->condp()->cloneTree(true),
+                                                assignp->rhsp()->cloneTree(true), defaultp};
+                AstNodeExpr* lhsp = assignp->lhsp()->cloneTree(true);
+                AstNodeAssign* newAssignp = assignp->cloneType(lhsp, ternaryp);
 
-                }
+                // newAssignp->user1(true);
+                // AstNode* b = ifp->backp()
+                // AstNode* n = ifp->isUnlinkFrBackWithNext();
+                // append the ternary assignment right after the if-then-else block
+
+                nextp->addNextHere(newAssignp);
+                nextp = nextp->nextp();
+                // remove the original assignment inside the if
+                UINFO(20, "Unlinking " << assignp << endl);
+                assignp->unlinkFrBack();
+
+                VL_DO_DANGLING(pushDeletep(assignp), assignp);
+
+                // assignp
             }
         }
         {
             VL_RESTORER(m_assignCollection);
             m_ifp = ifp;
-            {
-                UINFO(10, "Visiting ELSE" << endl);
-                iterateAndNextNull(ifp->elsesp());
-            }
+            UINFO(10, "Visiting ELSE" << endl);
+            // iterateAndNextNull(ifp->elsesp());
         }
     }
 
