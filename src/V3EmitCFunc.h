@@ -1066,6 +1066,13 @@ public:
             puts(")");
         }
     }
+    void visit(AstPredicatedStmt* nodep) {
+        puts("/*predicated*/if (");
+        iterateAndNextConstNull(nodep->condp());
+        puts("){\n");
+        iterateAndNextConstNull(nodep->stmtp());
+        puts("}\n");
+    }
     void visit(AstMemberSel* nodep) override {
         iterateAndNextNull(nodep->fromp());
         putbs("->");

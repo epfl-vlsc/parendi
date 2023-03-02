@@ -28,6 +28,8 @@
 #include <stack>
 VL_DEFINE_DEBUG_FUNCTIONS;
 
+
+// Simple visitor that modifies the access flag in an expression
 class AccessModifierVisitor final : public VNVisitor {
 private:
     const VAccess m_flag;
@@ -42,6 +44,72 @@ public:
     }
 };
 
+/// Hoists all AstIf::condp() evaluation out of the loop so that every
+/// condp() is strictly a AstVarRef.
+/// This is required step before IfConversionVisitor, where statements inside
+/// the if are also brought up into ternary statements of predicated statements.
+/// If we do not "atomize" condp() expression, IfConversionVisitor will duplicated
+/// them which is bad for performance and also is incorrect with impure expressions
+
+class IfConditionAsAtomVisitor final : public VNVisitor {
+private:
+    V3UniqueNames m_condFreshName;  // generate unique names for if-else conditions
+    AstScope* m_scopep = nullptr;
+    AstNodeModule* m_modp = nullptr;
+
+    /// VISITORS
+    void visit(AstModule* nodep) override {
+        UINFO(4, "MOD  " << nodep << endl);
+        VL_RESTORER(m_modp);
+        {
+            m_modp = nodep;
+            m_condFreshName.reset();
+            iterateChildren(nodep);
+        }
+    }
+    void visit(AstScope* nodep) override {
+        VL_RESTORER(m_scopep);
+        {
+            m_scopep = nodep;
+            iterateChildren(nodep);
+        }
+    }
+    void visit(AstIf* ifp) {
+        if (!m_modp) { return; }  // in case not in a module
+        UINFO(10, "Visiting AstIf " << ifp << endl);
+        AstNodeExpr* origCondp = ifp->condp();
+        // no need to make the condition a VarRef if already a VarRef
+        if (VN_IS(origCondp, VarRef)) { return; }
+        // create a new variable
+        const std::string vname = m_condFreshName.get("ifcond");
+        FileLine* const fl = origCondp->fileline();
+        AstVar* const varp = new AstVar{fl, VVarType::MODULETEMP, vname, VFlagLogicPacked{}, 1};
+        // // add it to the module
+        m_modp->addStmtsp(varp);
+        // create a var scope, so that we can reference it just before the AstIf
+        AstVarScope* const vscp = new AstVarScope{fl, m_scopep, varp};
+        m_scopep->addVarsp(vscp);
+
+        // // create a reference
+        AstVarRef* const vrefp = new AstVarRef{fl, vscp, VAccess::WRITE};
+        // create an assignment
+        AstAssign* const assignp = new AstAssign{fl, vrefp, origCondp->cloneTree(true)};
+
+        origCondp->replaceWith(new AstVarRef{fl, vscp, VAccess::READ});
+        VL_DO_DANGLING(origCondp->deleteTree(), origCondp);
+        ifp->addHereThisAsNext(assignp);
+        iterateAndNextNull(ifp->thensp());
+        iterateAndNextNull(ifp->elsesp());
+        // AstVarScope* vscp = new AstVar
+    }
+    void visit(AstNode* nodep) { iterateChildren(nodep); }
+
+public:
+    explicit IfConditionAsAtomVisitor(AstNetlist* nodep)
+        : m_condFreshName("__Vlvcond") {
+        iterate(nodep);
+    }
+};
 class IfConversionVisitor final : public VNVisitor {
 private:
     // STATE
@@ -101,15 +169,14 @@ private:
 
             AstNodeExpr* condp = nullptr;
             AstNodeExpr* origCondp = m_inIf.first->condp()->cloneTree(true);
-            if (m_inIf.second) { // then branch
+            if (m_inIf.second) {  // then branch
                 condp = origCondp;
             } else {
                 condp = new AstLogNot{origCondp->fileline(), origCondp};
             }
 
             AstNodeExpr* rhsp = assignp->rhsp()->cloneTree(true);
-            AstCond* ternaryp = new AstCond{fl, condp,
-                                            assignp->rhsp()->cloneTree(true), defaultp};
+            AstCond* ternaryp = new AstCond{fl, condp, assignp->rhsp()->cloneTree(true), defaultp};
             AstNodeExpr* lhsp = assignp->lhsp()->cloneTree(true);
             AstNodeAssign* newAssignp = assignp->cloneType(lhsp, ternaryp);
             m_hoisted.push_back(newAssignp);
@@ -137,7 +204,7 @@ private:
 
             m_hoisted.push_back(new AstPredicatedStmt(stmtp->fileline(), condp, stmtCopyp));
             UINFO(20, "Unlinking " << stmtp << endl);
-            // deleete it
+            // delete it
             stmtp->unlinkFrBack();
             VL_DO_DANGLING(pushDeletep(stmtp), stmtp);
         }
@@ -153,7 +220,7 @@ private:
             UINFO(10, "Visiting THEN" << endl);
             m_hoisted.clear();  // clear the stack of assignments
             iterateAndNextNull(ifp->thensp());
-            for(AstNodeStmt* newp: m_hoisted) {
+            for (AstNodeStmt* newp : m_hoisted) {
                 nextp->addNextHere(newp);
                 nextp = nextp->nextp();
             }
@@ -164,7 +231,7 @@ private:
             m_hoisted.clear();
             UINFO(10, "Visiting ELSE" << endl);
             iterateAndNextNull(ifp->elsesp());
-            for(AstNodeStmt* newp: m_hoisted) {
+            for (AstNodeStmt* newp : m_hoisted) {
                 nextp->addNextHere(newp);
                 nextp = nextp->nextp();
             }
@@ -205,6 +272,8 @@ public:
 
 void V3IfConversion::predicatedAll(AstNetlist* nodep) {
     UINFO(2, __FUNCTION__ << ": " << endl);
+    { IfConditionAsAtomVisitor{nodep}; }  // desctory the visitor
+    V3Global::dumpCheckGlobalTree("ifcondtion", 0, dumpTree() >= 1);
     { IfConversionVisitor{nodep}; }  // desctory the visitor
     V3Global::dumpCheckGlobalTree("ifconversion", 0, dumpTree() >= 1);
 }
