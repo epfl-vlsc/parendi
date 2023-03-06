@@ -2914,12 +2914,12 @@ public:
 class AstPredicatedStmt final : public AstNodeStmt {
     // A predicated statement with potential side-effects
     // @astgen op1 := condp : AstNodeExpr
-    // @astgen op2 := stmtp : AstNodeStmt
+    // @astgen op2 := stmtp : List[AstNodeStmt]
 public:
     AstPredicatedStmt(FileLine* fl, AstNodeExpr* condp, AstNodeStmt* stmtp):
         ASTGEN_SUPER_PredicatedStmt(fl) {
         this->condp(condp);
-        this->stmtp(stmtp);
+        this->addStmtp(stmtp);
     }
     ASTGEN_MEMBERS_AstPredicatedStmt;
 

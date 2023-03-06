@@ -283,14 +283,14 @@ private:
     AstNodeProcedure* m_procp = nullptr;
     AstScope* m_scopep = nullptr;
     std::map<AstVarScope*, AstVarScope*> m_subst;
-    std::vector<std::pair<AstVarRef*, AstNodeExpr*>> m_assignps;
+
     struct Lhs {
         AstSel* selp = nullptr;
         AstNodeAssign* assignp = nullptr;
         AstArraySel* aselp = nullptr;
         AstNodeExpr* rhsp = nullptr;
         AstNodeExpr* lhsp = nullptr;
-        bool valid() const { return lhsp != nullptr; }
+
         bool dly() const { return VN_IS(assignp, AssignDly); }
     } m_lhsp;
     /// VISITORS
@@ -308,11 +308,11 @@ private:
         m_subst.insert({origp, newp});
     }
     void visit(AstVarRef* nodep) {
-
+        bool isLvalue = nodep->access().isWriteOrRW();
         if (!m_scopep || nodep->user1()) { return; }  // not in a module
         UINFO(3, "visiting VarRef " << nodep << endl);
         nodep->user1(true);
-        if (!m_lhsp.valid()) {
+        if (!isLvalue) {
             auto substIt = m_subst.find(nodep->varScopep());
             if (substIt != m_subst.end()) {
                 // replace the var ref
@@ -350,22 +350,20 @@ private:
             // let's handle the easy case first
             FileLine* flp = nodep->fileline();
             if (!m_lhsp.aselp && !m_lhsp.selp) {
-                if (m_subst.find(nodep->varScopep()) == m_subst.end()) {
-                    // if the variable has not been assigned yet, there is no need to rename it
-                    // renaming it would be correct but is less efficient
-                    if (!m_lhsp.dly()) { updateSubst(nodep->varScopep(), nodep->varScopep()); }
-                } else {
-                    // there has been at least one assignment to the variable
-                    // create a fresh variable and replace the reference, then notify
-                    // m_subst of the new name
-                    AstVarScope* const vscp = m_scopep->createTempLike(
-                        m_lvFreshName.get(nodep->name()), nodep->varScopep());
-                    AstVarRef* const newp = new AstVarRef{nodep->fileline(), vscp, VAccess::WRITE};
-                    newp->user1(true);
 
-                    if (!m_lhsp.dly()) { updateSubst(nodep->varScopep(), vscp); }
-                    VL_DO_DANGLING(pushDeletep(nodep), nodep);
-                }
+                // create a fresh variable and replace the reference, then notify
+                // m_subst of the new name.
+                // Note this may as well be the first assignment, and eventhough there is
+                // no real need for renaming we do it so that at the end the "original name"
+                // is used as a single assignment, non-blocking style.
+                AstVarScope* const vscp = m_scopep->createTempLike(
+                    m_lvFreshName.get(nodep->name()), nodep->varScopep());
+                AstVarRef* const newp = new AstVarRef{nodep->fileline(), vscp, VAccess::WRITE};
+                newp->user1(true);
+                if (!m_lhsp.dly()) { updateSubst(nodep->varScopep(), vscp); }
+                nodep->replaceWith(newp);
+                VL_DO_DANGLING(pushDeletep(nodep), nodep);
+
             } else if (!m_lhsp.aselp && m_lhsp.selp) {
                 // read-modify-write on scalar 1-d(packed array)
                 // we rename the variable whether it has been assigned before or not
@@ -375,8 +373,8 @@ private:
                     static_cast<int>(VN_AS(m_lhsp.selp->widthp(), Const)->num().toUInt()));
                 AstNodeExpr* oldLhsp = m_lhsp.assignp->lhsp();
                 AstNodeExpr* oldRhsp = m_lhsp.assignp->rhsp();
-                AstVarScope* const vscp
-                    = m_scopep->createTempLike(m_lvFreshName.get(nodep), nodep->varScopep());
+                AstVarScope* const vscp = m_scopep->createTempLike(
+                    m_lvFreshName.get(nodep->name()), nodep->varScopep());
                 AstVarRef* const newp = new AstVarRef{flp, vscp, VAccess::WRITE};
                 newp->user1(true);
                 oldLhsp->replaceWith(newp);
@@ -403,51 +401,35 @@ private:
                 newp->fromp()->user1(true);
                 AstNodeExpr* oldLhsp = m_lhsp.assignp->lhsp();
                 AstNodeExpr* oldRhsp = m_lhsp.assignp->rhsp();
-                oldLhsp->replaceWith(oldLhsp->cloneTree(true));
-                oldRhsp->replaceWith(oldRhsp->cloneTree(true));
-                // VL_DO_DANGLING(pushDeletep(oldLhsp), oldLhsp);
-                // VL_DO_DANGLING(pushDeletep(oldRhsp), oldRhsp);
+                oldLhsp->replaceWith(newp);
+                oldRhsp->replaceWith(newExprp);
+                VL_DO_DANGLING(pushDeletep(oldLhsp), oldLhsp);
+                VL_DO_DANGLING(pushDeletep(oldRhsp), oldRhsp);
             }
         }
     }
-    V3Number mkMask(FileLine* const flp, int w) {
-        V3Number m{flp, w, 0};
-        m.setMask(w);
-        return m;
-    }
+
     AstNodeExpr* readModifyWriteExpr(FileLine* const flp, AstNodeExpr* const oldValuep,
                                      int lhsWidth, int sliceWidth) {
-        V3Number lhsMask = mkMask(flp, lhsWidth);
-        V3Number rhsMask = mkMask(flp, sliceWidth);
+        V3Number lhsMask{flp, lhsWidth, 0};
+        V3Number rhsMask{flp, lhsWidth, 0};
+        lhsMask.setMask(lhsWidth);
+        rhsMask.setMask(sliceWidth);
 
-        AstNodeExpr* const lsbpShiftedp
-            = new AstShiftL{flp, new AstConst{flp, rhsMask}, m_lhsp.selp->lsbp()->cloneTree(true)};
-        // clang-format off
-        AstAnd* const oldExprp = new AstAnd{
-            flp,
-            oldValuep,
-            new AstSub{
-                flp,
-                new AstConst{flp, lhsMask},
-                new AstShiftL{
-                    flp,
-                    new AstConst{flp, rhsMask},
-                    m_lhsp.selp->lsbp()->cloneTree(true),
-                    lhsWidth
-                }
-            }
-        };
-        AstOr* const newExprp = new AstOr{
-            flp,
-            oldExprp,
-            new AstShiftL{flp,
-                m_lhsp.rhsp->cloneTree(true),
-                m_lhsp.selp->lsbp()->cloneTree(true),
-                sliceWidth
-            }
-        };
-        // clang-format on
-        return newExprp;
+        AstNodeExpr* const bitMaskp
+            = new AstSub{flp, new AstConst{flp, lhsMask},
+                         new AstShiftL{flp, new AstConst{flp, rhsMask},
+                                       m_lhsp.selp->lsbp()->cloneTree(true), lhsWidth}};
+
+        AstAnd* const oldExprp = new AstAnd{flp, oldValuep, bitMaskp};
+        AstShiftL* const rhsShiftedp = new AstShiftL{
+            flp, m_lhsp.rhsp->cloneTree(true), m_lhsp.selp->lsbp()->cloneTree(true), lhsWidth};
+        AstAnd* const newContrp
+            = new AstAnd{flp, rhsShiftedp, new AstNot{flp, bitMaskp->cloneTree(true)}};
+
+        AstOr* const newExprp = new AstOr{flp, oldExprp, newContrp};
+        // return newExprp;
+        return V3Const::constifyEdit(newExprp);
     }
     void visit(AstVarScope* nodep) {
         auto dims = nodep->dtypep()->dimensions(true);
@@ -457,40 +439,37 @@ private:
         }
     }
     void visit(AstSel* nodep) {
+        // default iteration of fromp[lsbp :+ widthp] is fromp, lsbp, then widthp.
+        // We want to first visit lsbp though, since we are renaming it and the
+        // fromp needs to see the renamed version
+        iterate(nodep->lsbp());
         VL_RESTORER(m_lhsp);
         {
-            // default iteration of fromp[lsbp :+ widthp] is fromp, lsbp, then widthp.
-            // We want to first visit lsbp though, since we are renaming it and the
-            // fromp needs to see the renamed version
             m_lhsp.selp = nodep;
-            iterate(nodep->lsbp());
             iterate(nodep->fromp());
         }
     }
 
     void visit(AstArraySel* nodep) {
+        // reverse iteration order
+        // iterate the bitp first, i.e., reverse order.
+        // This helps with the AstVarRef visitor since we first rename
+        // bitp(), and then fromp() which is essentially a left hand-side value.
+        iterate(nodep->bitp());
         VL_RESTORER(m_lhsp);
         {
-            // reverse iteration order
-            // UASSERT_OBJ(!m_lhsp.aselp, nodep, "multidimensional unpacked array not supported
-            // yet\n");
             m_lhsp.aselp = nodep;
-            // iterate the bitp first, i.e., reverse order.
-            // This helps with the AstVarRef visitor since we first rename
-            // bitp(), and then fromp() which is essentially a left value.
-            iterate(nodep->bitp());
             iterate(nodep->fromp());
         }
     }
 
     void visit(AstNodeAssign* nodep) {
         if (!m_procp) { return; }  // nothing to do
+        iterate(nodep->rhsp());
         VL_RESTORER(m_lhsp);
         {
-            iterate(nodep->rhsp());
             m_lhsp.lhsp = nodep->lhsp();  // set after iteration, don't move up
             m_lhsp.rhsp = nodep->rhsp();  // set after iteration
-
             m_lhsp.assignp = nodep;
             iterate(nodep->lhsp());
         }
