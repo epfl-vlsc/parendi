@@ -126,6 +126,105 @@ public:
         iterate(nodep);
     }
 };
+class RemoveDelayedVisitor final : public VNVisitor {
+private:
+    enum class Phase : uint8_t { NOP, CHECK, REPLACE };
+    Phase m_phase = Phase::NOP;
+    bool m_inDly = false;
+    V3UniqueNames m_oldNames;
+    std::map<AstVarScope*, AstVarScope*> m_dlyd;
+    AstScope* m_scopep = nullptr;
+
+    /// VISITORS
+    void visit(AstAlways* nodep) {
+        VL_RESTORER(m_phase);
+        {
+            m_phase = Phase::CHECK;
+            // iterate the children and collect all VarScopes that are an lhs
+            iterateChildren(nodep);
+            UASSERT_OBJ(m_scopep, nodep,
+                        "Expected valid scope in procecural block " << nodep << endl);
+            // we now have a list all VarScopes that are an lvalue in some AssignDly
+            // for each one, we create a new "oldValue" VarScope and replace the
+            // lvalue references of them in the block
+            for (auto& subst : m_dlyd) {
+                auto oldp
+                    = m_scopep->createTempLike(m_oldNames.get(subst.first->name()), subst.first);
+                subst.second = oldp;
+            }
+            // iterate again to replace the rvalue references, and turn every AssignDly to Assign
+            m_phase = Phase::REPLACE;
+            iterateChildren(nodep);
+            // now initialize the "oldValues"
+            for (const auto& subst : m_dlyd) {
+
+                AstVarRef* const lp
+                    = new AstVarRef{subst.second->fileline(), subst.second, VAccess::WRITE};
+                AstVarRef* const lSelfp = lp->cloneTree(true);
+                lSelfp->access(VAccess::READ);
+                AstVarRef* const rp
+                    = new AstVarRef{subst.first->fileline(), subst.first, VAccess::READ};
+
+                AstVarRef* const rSelfp = rp->cloneTree(true);
+                rSelfp->access(VAccess::WRITE);
+                // for every x <= expr add the following to the begining of the procedure
+                // x_old = x
+                // x = x_old
+                // note the reverse order of adding statements
+                nodep->stmtsp()->addHereThisAsNext(new AstAssign{rp->fileline(), rSelfp, lSelfp});
+                nodep->stmtsp()->addHereThisAsNext(new AstAssign{rp->fileline(), lp, rp});
+                // x = x_old is a redundant assignment, but we add it so that the code generated
+                // by the IfConverionVisitor is slighty more understandable.
+            }
+        }
+    }
+
+    void visit(AstAssignDly* nodep) {
+        VL_RESTORER(m_inDly);
+        if (m_phase == Phase::CHECK) {
+            m_inDly = true;
+            iterate(nodep->lhsp());
+        } else if (m_phase == Phase::REPLACE) {
+            m_inDly = false;
+            iterateChildren(nodep);
+            nodep->replaceWith(new AstAssign{nodep->fileline(), nodep->lhsp()->cloneTree(true),
+                                             nodep->rhsp()->cloneTree(true)});
+            VL_DO_DANGLING(pushDeletep(nodep), nodep);
+        }
+    }
+    void visit(AstVarRef* nodep) {
+        if (m_phase == Phase::CHECK && m_inDly && nodep->access().isWriteOrRW()
+            && VN_IS(nodep->varScopep()->dtypep(), BasicDType)) {
+            // lvalue in a delayed assignment that is a simple type, i.e., only
+            // packed arrays
+            m_dlyd.emplace(nodep->varScopep(), nullptr);
+        } else if (m_phase == Phase::REPLACE && nodep->access().isReadOnly()) {
+            // rvalue need to be replaced
+            auto it = m_dlyd.find(nodep->varScopep());
+            if (it != m_dlyd.end()) {
+                AstVarScope* newVscp = (*it).second;
+                nodep->replaceWith(new AstVarRef{nodep->fileline(), newVscp, nodep->access()});
+                VL_DO_DANGLING(pushDeletep(nodep), nodep);
+            }
+        }
+    }
+    void visit(AstScope* nodep) {
+        VL_RESTORER(m_scopep);
+        {
+            m_scopep = nodep;
+            m_dlyd.clear();
+            iterateChildren(nodep);
+        }
+    }
+
+    void visit(AstNode* nodep) { iterateChildren(nodep); }
+
+public:
+    explicit RemoveDelayedVisitor(AstNetlist* nodep)
+        : m_oldNames("__VrvOld") {
+        iterate(nodep);
+    }
+};
 class IfConversionVisitor final : public VNVisitor {
 private:
     // STATE
@@ -280,7 +379,7 @@ private:
 
     V3UniqueNames m_lvFreshName;
 
-    AstNodeProcedure* m_procp = nullptr;
+    AstAlways* m_procp = nullptr;
     AstScope* m_scopep = nullptr;
     std::map<AstVarScope*, AstVarScope*> m_subst;
 
@@ -290,7 +389,6 @@ private:
         AstArraySel* aselp = nullptr;
         AstNodeExpr* rhsp = nullptr;
         AstNodeExpr* lhsp = nullptr;
-
         bool dly() const { return VN_IS(assignp, AssignDly); }
     } m_lhsp;
     /// VISITORS
@@ -307,7 +405,7 @@ private:
         if (m_subst.find(origp) != m_subst.end()) { m_subst.erase(origp); }
         m_subst.insert({origp, newp});
     }
-    void visit(AstVarRef* nodep) {
+    void visit(AstVarRef* nodep) override {
         bool isLvalue = nodep->access().isWriteOrRW();
         if (!m_scopep || nodep->user1()) { return; }  // not in a module
         UINFO(3, "visiting VarRef " << nodep << endl);
@@ -360,7 +458,13 @@ private:
                     m_lvFreshName.get(nodep->name()), nodep->varScopep());
                 AstVarRef* const newp = new AstVarRef{nodep->fileline(), vscp, VAccess::WRITE};
                 newp->user1(true);
-                if (!m_lhsp.dly()) { updateSubst(nodep->varScopep(), vscp); }
+                UASSERT_OBJ(
+                    !m_lhsp.dly(), nodep,
+                    "Did not expect blocking assignment here. Make sure blocking assignments "
+                    "are removed.");
+
+                updateSubst(nodep->varScopep(), vscp);
+
                 nodep->replaceWith(newp);
                 VL_DO_DANGLING(pushDeletep(nodep), nodep);
 
@@ -379,7 +483,8 @@ private:
                 newp->user1(true);
                 oldLhsp->replaceWith(newp);
                 oldRhsp->replaceWith(newExprp);
-                if (!m_lhsp.dly()) { updateSubst(nodep->varScopep(), vscp); }
+                UASSERT_OBJ(!m_lhsp.dly(), nodep, "Make sure blocking assignments are removed!");
+                updateSubst(nodep->varScopep(), vscp);
                 VL_DO_DANGLING(pushDeletep(oldLhsp), oldLhsp);
                 VL_DO_DANGLING(pushDeletep(oldRhsp), oldRhsp);
             } else if (m_lhsp.aselp && !m_lhsp.selp) {
@@ -431,14 +536,14 @@ private:
         // return newExprp;
         return V3Const::constifyEdit(newExprp);
     }
-    void visit(AstVarScope* nodep) {
+    void visit(AstVarScope* nodep) override {
         auto dims = nodep->dtypep()->dimensions(true);
         if (dims.first > 1 || dims.second > 1) {
             nodep->v3warn(E_UNSUPPORTED,
                           "multidimensional (packed/unpacked) arrays not supported");
         }
     }
-    void visit(AstSel* nodep) {
+    void visit(AstSel* nodep) override {
         // default iteration of fromp[lsbp :+ widthp] is fromp, lsbp, then widthp.
         // We want to first visit lsbp though, since we are renaming it and the
         // fromp needs to see the renamed version
@@ -450,7 +555,7 @@ private:
         }
     }
 
-    void visit(AstArraySel* nodep) {
+    void visit(AstArraySel* nodep) override {
         // reverse iteration order
         // iterate the bitp first, i.e., reverse order.
         // This helps with the AstVarRef visitor since we first rename
@@ -463,7 +568,7 @@ private:
         }
     }
 
-    void visit(AstNodeAssign* nodep) {
+    void visit(AstNodeAssign* nodep) override {
         if (!m_procp) { return; }  // nothing to do
         iterate(nodep->rhsp());
         VL_RESTORER(m_lhsp);
@@ -475,7 +580,7 @@ private:
         }
     }
 
-    void visit(AstScope* nodep) {
+    void visit(AstScope* nodep) override {
         VL_RESTORER(m_scopep);
         {
             m_scopep = nodep;
@@ -484,18 +589,28 @@ private:
             iterateChildren(nodep);
         }
     }
-    void visit(AstNodeProcedure* nodep) {
+    void visit(AstAlways* nodep) override {
         UINFO(3, "Visiting Always" << nodep);
         VL_RESTORER(m_procp);
         {
             m_procp = nodep;
             m_subst.clear();
             iterateChildren(nodep);
+            // persist every substitution
+            // e.g., r = r_last_assign
+            for (auto it = m_subst.crbegin(); it != m_subst.crend(); it++) {
+                FileLine* const flp = it->first->fileline();
+                AstVarRef* const lp = new AstVarRef{flp, it->first, VAccess::WRITE};
+                AstVarRef* const rp = new AstVarRef{flp, it->second, VAccess::READ};
+                AstAssign* const newp = new AstAssign{it->first->fileline(), lp, rp};
+                nodep->addStmtsp(newp);
+            }
         }
+        V3Const::constifyEdit(nodep);
     }
 
     /// FALLBACK VISITOR
-    void visit(AstNode* nodep) { iterateChildren(nodep); }
+    void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
 public:
     explicit SingleAssignmentVisitor(AstNetlist* nodep)
@@ -503,8 +618,44 @@ public:
         iterate(nodep);
     }
 };
+
+class ExpandExprVisitor final : public VNVisitor {
+private:
+    V3UniqueNames m_rvTempExpr;
+    AstNodeStmt* m_stmtp = nullptr;
+
+    inline bool isAtom(AstNode* nodep) { return VN_IS(nodep, VarRef) || VN_IS(nodep, Const); }
+    inline bool isSimpleExpr(AstNodeExpr* nodep) {
+        if (auto biop = VN_CAST(nodep, NodeBiop)) {
+            return isAtom(biop->lhsp()) && isAtom(biop->rhsp());
+        } else if (auto triop = VN_CAST(nodep, NodeTriop)) {
+            return isAtom(triop->lhsp()) && isAtom(triop->rhsp()) && isAtom(triop->thsp());
+        } else if (auto unop = VN_CAST(nodep, NodeUniop)) {
+            return isAtom(unop->lhsp());
+        } else {
+            return false;
+        }
+    }
+
+    void visi void visitor(AstNodeStmt* nodep) override {
+        VL_RESTORER(m_stmtp);
+        {
+            m_stmtp = nodep;
+            iterateChildren(nodep);
+        }
+    }
+    void visitor(AstNode* nodep) override { iterateChildren(nodep); }
+
+public:
+    explicit ExpandExprVisitor(AstNetlist* nodep)
+        : m_rvTempExpr("__VrvTmpExpr") {
+        iterate(nodep);
+    }
+};
 void V3IfConversion::predicatedAll(AstNetlist* nodep) {
     UINFO(2, __FUNCTION__ << ": " << endl);
+    { RemoveDelayedVisitor{nodep}; }
+    V3Global::dumpCheckGlobalTree("dlyremove", 0, dumpTree() >= 1);
     { IfConditionAsAtomVisitor{nodep}; }  // desctory the visitor
     V3Global::dumpCheckGlobalTree("ifcondtion", 0, dumpTree() >= 1);
     { IfConversionVisitor{nodep}; }  // desctory the visitor
