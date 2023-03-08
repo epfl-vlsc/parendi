@@ -20,6 +20,7 @@
 
 #include "V3Ast.h"
 #include "V3Const.h"
+#include "V3Dead.h"
 #include "V3Global.h"
 #include "V3Stats.h"
 #include "V3UniqueNames.h"
@@ -556,7 +557,6 @@ private:
     }
 
     void visit(AstArraySel* nodep) override {
-        // reverse iteration order
         // iterate the bitp first, i.e., reverse order.
         // This helps with the AstVarRef visitor since we first rename
         // bitp(), and then fromp() which is essentially a left hand-side value.
@@ -568,8 +568,9 @@ private:
         }
     }
 
+
     void visit(AstNodeAssign* nodep) override {
-        if (!m_procp) { return; }  // nothing to do
+        if (!m_procp) { return; }  // nothing to do, AssignW handled differently
         iterate(nodep->rhsp());
         VL_RESTORER(m_lhsp);
         {
@@ -606,7 +607,6 @@ private:
                 nodep->addStmtsp(newp);
             }
         }
-        V3Const::constifyEdit(nodep);
     }
 
     /// FALLBACK VISITOR
@@ -619,13 +619,33 @@ public:
     }
 };
 
-class ExpandExprVisitor final : public VNVisitor {
+/// Turns the nested expression into something that resembles three address code, e.g.,
+/// a = expr1 + (expr2 | (expr3 & expr4 ));
+/// becomes
+/// at1 = expr1;
+/// at2 = expr2;
+/// ....
+/// aa = at3 & at4;
+/// ab = at2 | aa;
+/// ac = at1 + at2;
+class ThreeAddressCodeConversionVisitor final : public VNVisitor {
 private:
+    /// STATE
+    /// clear on varscope
+    /// AstNodeExpr::user1() -> bool true if node can not be simplified
+    const VNUser1InUse m_inuser1;
+
     V3UniqueNames m_rvTempExpr;
     AstNodeStmt* m_stmtp = nullptr;
+    AstNodeExpr* m_exprp = nullptr;
+    AstScope* m_vscp = nullptr;
+    bool m_expand = false;
 
-    inline bool isAtom(AstNode* nodep) { return VN_IS(nodep, VarRef) || VN_IS(nodep, Const); }
-    inline bool isSimpleExpr(AstNodeExpr* nodep) {
+    inline bool isAtom(const AstNode* const nodep) const {
+        return VN_IS(nodep, VarRef) || VN_IS(nodep, Const);
+    }
+    inline bool isSimpleExpr(const AstNodeExpr* const nodep) const {
+
         if (auto biop = VN_CAST(nodep, NodeBiop)) {
             return isAtom(biop->lhsp()) && isAtom(biop->rhsp());
         } else if (auto triop = VN_CAST(nodep, NodeTriop)) {
@@ -633,21 +653,68 @@ private:
         } else if (auto unop = VN_CAST(nodep, NodeUniop)) {
             return isAtom(unop->lhsp());
         } else {
-            return false;
+            return isAtom(nodep);
         }
     }
 
-    void visi void visitor(AstNodeStmt* nodep) override {
+    void visit(AstNodeExpr* nodep) override {
+        if (isAtom(nodep) || nodep->user1() == true) {
+            // cannot simplify an atom, or have already tried simplifying, e.g., with SFormatF
+            return;
+        }
+        const bool simple = isSimpleExpr(nodep);
+        if ((simple && !VN_IS(nodep->abovep(), NodeAssign)) || !simple) {
+            UINFO(3, "Simplifiying " << nodep << "with type " << nodep->dtypep() << endl);
+            nodep->user1(true);
+            iterateChildren(nodep);
+            bool memoryWrite
+                = VN_IS(nodep, ArraySel)  // is it memory access
+                  && VN_IS(VN_AS(nodep, ArraySel)->fromp(), VarRef)  // is memory access simple
+                  && VN_AS(VN_AS(nodep, ArraySel)->fromp(), VarRef)
+                         ->access()
+                         .isWriteOrRW();  // is it a write (LV)?
+            if (VN_IS(nodep->dtypep(), BasicDType)
+                && VN_AS(nodep->dtypep(), BasicDType)->keyword().isIntNumeric() && !memoryWrite) {
+                // only create assignments for basic "int" types
+                // this include: bit, logic, byte, int, ...
+                // but does not include string, or unpacked arrays (memories)
+                AstVarScope* const newlvp
+                    = m_vscp->createTemp(m_rvTempExpr.get("rvExpr"), nodep->dtypep());
+                AstNodeAssign* assignp = nullptr;
+                AstVarRef* lhsp = new AstVarRef{nodep->fileline(), newlvp, VAccess::WRITE};
+                AstNodeExpr* rhsp = nodep->cloneTree(true);
+                if (VN_IS(m_stmtp, AssignW)) {
+                    assignp = new AstAssignW{nodep->fileline(), lhsp, rhsp};
+                } else {
+                    assignp = new AstAssign{nodep->fileline(), lhsp, rhsp};
+                }
+                nodep->replaceWith(new AstVarRef{nodep->fileline(), newlvp, VAccess::READ});
+                VL_DO_DANGLING(pushDeletep(nodep), nodep);
+                m_stmtp->addHereThisAsNext(assignp);
+            }
+        }
+    }
+
+    void visit(AstScope* nodep) override {
+        VL_RESTORER(m_vscp);
+        {
+            m_vscp = nodep;
+            AstNode::user1ClearTree();
+            iterateChildren(nodep);
+        }
+    }
+    void visit(AstNodeStmt* nodep) override {
         VL_RESTORER(m_stmtp);
         {
             m_stmtp = nodep;
             iterateChildren(nodep);
         }
     }
-    void visitor(AstNode* nodep) override { iterateChildren(nodep); }
+
+    void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
 public:
-    explicit ExpandExprVisitor(AstNetlist* nodep)
+    explicit ThreeAddressCodeConversionVisitor(AstNetlist* nodep)
         : m_rvTempExpr("__VrvTmpExpr") {
         iterate(nodep);
     }
@@ -662,4 +729,8 @@ void V3IfConversion::predicatedAll(AstNetlist* nodep) {
     V3Global::dumpCheckGlobalTree("ifconversion", 0, dumpTree() >= 1);
     { SingleAssignmentVisitor{nodep}; }  // destroy the visitor
     V3Global::dumpCheckGlobalTree("singleAssignment", 0, dumpTree() >= 1);
+    { ThreeAddressCodeConversionVisitor{nodep}; }
+    V3Global::dumpCheckGlobalTree("tac", 0, dumpTree() >= 1);
+    V3Const::constifyAll(nodep);
+    V3Dead::deadifyAll(nodep);
 }
