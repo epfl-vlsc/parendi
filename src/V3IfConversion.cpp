@@ -141,6 +141,7 @@ private:
         VL_RESTORER(m_phase);
         {
             m_phase = Phase::CHECK;
+            m_dlyd.clear();
             // iterate the children and collect all VarScopes that are an lhs
             iterateChildren(nodep);
             UASSERT_OBJ(m_scopep, nodep,
@@ -213,7 +214,7 @@ private:
         VL_RESTORER(m_scopep);
         {
             m_scopep = nodep;
-            m_dlyd.clear();
+            // m_dlyd.clear();
             iterateChildren(nodep);
         }
     }
