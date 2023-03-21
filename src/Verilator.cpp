@@ -22,6 +22,8 @@
 #include "V3Begin.h"
 #include "V3Branch.h"
 #include "V3Broken.h"
+#include "V3BspDly.h"
+#include "V3BspSched.h"
 #include "V3CCtors.h"
 #include "V3CUse.h"
 #include "V3Case.h"
@@ -101,7 +103,6 @@
 #include "V3VariableOrder.h"
 #include "V3Waiver.h"
 #include "V3Width.h"
-#include "V3IfConversion.h"
 
 #include <ctime>
 
@@ -336,8 +337,11 @@ static void process() {
             V3Table::tableAll(v3Global.rootp());
         }
 
+        // remove AstAssignW and order statements, leaves out a single clocked block
+        // and a single comb block
+        // V3MasmAlwaysAll::alwaysAll(v3Global.rootp());
         // Remove AstIf from active blocks for Manticore
-        V3IfConversion::predicatedAll(v3Global.rootp());
+        // V3IfConversion::predicatedAll(v3Global.rootp());
 
         // Cleanup
         V3Const::constifyAll(v3Global.rootp());
@@ -348,9 +352,15 @@ static void process() {
         // (May convert some ALWAYS to combo blocks, so should be before V3Gate step.)
         V3Active::activeAll(v3Global.rootp());
 
+
         // Split single ALWAYS blocks into multiple blocks for better ordering chances
         if (v3Global.opt.fSplit()) V3Split::splitAlwaysAll(v3Global.rootp());
         V3SplitAs::splitAsAll(v3Global.rootp());
+
+        // Make more delayed assignment to enable more parallelization oppurtunities with BSP
+        // for poplar. This pass may have performance implications for single-thread mode
+        // so should be optionally enabled for BSP only
+        V3BspDly::mkDlys(v3Global.rootp()); /*should be after activeAll*/
 
         // Create tracing sample points, before we start eliminating signals
         if (v3Global.opt.trace()) V3TraceDecl::traceDeclAll(v3Global.rootp());
@@ -406,10 +416,14 @@ static void process() {
         if (v3Global.opt.stats()) V3Stats::statsStageAll(v3Global.rootp(), "PreOrder");
 
         // Schedule the logic
-        V3Sched::schedule(v3Global.rootp());
+        if (v3Global.opt.poplar()) {
+            V3BspSched::schedule(v3Global.rootp());
+        } else {
+            V3Sched::schedule(v3Global.rootp());
+            // Convert sense lists into IF statements.
+            V3Clock::clockAll(v3Global.rootp());
+        }
 
-        // Convert sense lists into IF statements.
-        V3Clock::clockAll(v3Global.rootp());
 
         // Cleanup any dly vars or other temps that are simple assignments
         // Life must be done before Subst, as it assumes each CFunc under

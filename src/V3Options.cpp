@@ -442,7 +442,11 @@ void V3Options::ccSet() {  // --cc
     m_outFormatOk = true;
     m_systemC = false;
 }
-
+void V3Options::poplarSet() { // --poplar
+    m_outFormatOk = true;
+    m_systemC = false;
+    m_poplar = true;
+}
 //######################################################################
 // File searching
 
@@ -1085,6 +1089,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
 
     DECL_OPTION("-CFLAGS", CbVal, callStrSetter(&V3Options::addCFlags));
     DECL_OPTION("-cc", CbCall, [this]() { ccSet(); });
+    DECL_OPTION("-poplar", CbCall, [this]() { poplarSet(); });
     DECL_OPTION("-cdc", OnOff, &m_cdc);
     DECL_OPTION("-clk", CbVal, callStrSetter(&V3Options::addClocker));
     DECL_OPTION("-no-clk", CbVal, callStrSetter(&V3Options::addNoClocker));
