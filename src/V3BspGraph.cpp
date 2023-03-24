@@ -305,6 +305,7 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
                                                      const std::vector<CompVertex*>& postp) {
     // STATE
     //  AnyVertex::userp()  -> non nullptr, pointer to the clone
+    //  AnyVertex::user()   -> vertex visited
     //  DepEdge::user()     -> true if cloned
     //
     graphp->userClearVertices();
@@ -335,51 +336,7 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
                 toVisit.push(fromp);
             }
         }
-        // follow from def to although there is never an edge defp -> commitp
-        // we do this to realize colocation constraints when one is accessed
-        // in multiple always blocks.
-        // Consider the following:
-        // logic [31:0] x [0:255];
-        // always @(posedge) x[i] = f(a, b, c);
-        // always @(posedge) begin
-        //      x[k] = f(z);
-        //      y <= x[j];
-        // end
-        // Here we need to make sure that x (a memory) is in the same process
-        // as the one that is created by the post assignment to y
-        // Backwards traversal from the post assignment to y will need to also
-        // collect the first always block since we can not copy the whole memory
-        // since j may equal i at runtime so they should both be local to
-        // the process that compute y.
-        //
-        // Note that even if all assignments to x where non-blocking, we would
-        // still want to do this to avoid copying whole memory blocks between
-        // processes at the end of each clock.
-        // Another example is with packed logic:
-        // logic [31:0] packed_multidriven;
-        // always @(posedge) packed_multidriven[i +: 8] = something1;
-        // always @(posedge) begin
-        //      packed_multidriven[j +: 8] = something2;
-        //      y <= packed_multidriven;
-        // end
-        // Here we should also have both blocks in the process that computes y
-        // In general, we consider only post assignments as the final value
-        // of BSP processes. Clocked non-blocking assignments in general do
-        // not make up their own processes, rather they are always absorbed
-        // into other ones. If a design has no non-blocking assignments then
-        // there is essentially no parallelism since there would be no sink node!
-        // V3BspDly actually tries to remove most blocking assignments to increase
-        // the potential parallelsim, but won't do it when there are multiple
-        // drivers.
-        // That said, with V3BspDly, you should not get something like:
-        // always @(posedge clock) v = something;
-        // always @(posedge clcok) w <= f(v);
-        // always @(posedge clock) z <= g(v);
-        // Rather you would have non-blocking assignments to both v and w.
-        // But if you end up with something like above, then our algorithm
-        // ends up localizing/duplicating v = something in the processes
-        // formed for w and z.
-
+        // Special handling of multidriven sequential block (packed or unpacked)
         if (ConstrDefVertex* const defp = dynamic_cast<ConstrDefVertex* const>(headp)) {
             auto commitp = defp->vscp()->user1u().to<ConstrCommitVertex*>();
             if (commitp && !commitp->user() && !commitp->inEmpty()) {
@@ -396,7 +353,7 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         AnyVertex* origp = reinterpret_cast<AnyVertex*>(itp->userp());
         UASSERT_OBJ(origp, itp, "expected original vertex pointer");
         for (V3GraphEdge* eitp = origp->inBeginp(); eitp; eitp = eitp->inNextp()) {
-            // if (eitp->user()) { continue; /*already processed*/ }
+            if (eitp->user()) { continue; /*already processed*/ }
             if (!eitp->fromp()->userp()) { continue; /*not part of the partition*/ }
             auto newFromp = reinterpret_cast<AnyVertex*>(eitp->fromp()->userp());
             auto fromCompp = dynamic_cast<CompVertex*>(newFromp);
@@ -411,7 +368,7 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
                 // should not happen
                 UASSERT(false, "invalid pointer types!");
             }
-            // eitp->user(1);
+            eitp->user(1);
         }
     }
     return builderp;
@@ -498,9 +455,7 @@ std::vector<std::vector<CompVertex*>> groupVertices(const std::unique_ptr<DepGra
                     // check if the commit actually goes to an AssignPost or AlwaysPost
                     auto succp = dynamic_cast<CompVertex*>(commitp->outBeginp()->top());
                     UASSERT_OBJ(succp, commitp, "invalid type!");
-                    UASSERT_OBJ(VN_IS(succp->nodep(), AssignPost)
-                                    || VN_IS(succp->nodep(), AlwaysPost),
-                                succp->nodep(), "expected post assignment");
+
                     UASSERT_OBJ(sets.contains(succp), succp, "not in disjoint sets!");
                     if (!succp->user() && VN_IS(succp->nodep(), AlwaysPost)) {
                         UINFO(3, "Union " << vtxp << " and  " << succp << endl);
@@ -570,9 +525,7 @@ DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
         auto asLogicVtxp = dynamic_cast<CompVertex*>(itp);
         if (asLogicVtxp && asLogicVtxp->outEmpty()) {
             sinks.push_back(asLogicVtxp);
-            UASSERT_OBJ(VN_IS(asLogicVtxp->nodep(), AssignPost)
-                            || VN_IS(asLogicVtxp->nodep(), AlwaysPost),
-                        asLogicVtxp->nodep(), "non-post node as sink vertex!");
+
         }
         if (auto asCommitVtxp = dynamic_cast<ConstrCommitVertex*>(itp)) {
             asCommitVtxp->vscp()->user1u(VNUser{asCommitVtxp});
@@ -580,10 +533,53 @@ DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
     }
     UASSERT(!sinks.empty(),
             "Empty sink set, perhaps there are no non-blocking assignments in the graph?");
-    // handy function to get the commit vertex of a varscop
+    // OUTLINE OF THE PARTITIONING ALGORITHM
+    // Using the graph we have just created above, we can create N parallel processes
+    // to execute on N cores. We star the partitioning by finding a maximal set of
+    // "compatible" processes and then iteratively merge them to have fewer
+    // processes. By maximal, we mean that there are an infinite number of cores
+    // that we can run the code on.
+    // In BSP, we assume all computation is local and only values updated by
+    // AstAssignPost can be communicated between cores. This readily means that
+    // even AstAlwaysPost needs to be completely local. Hence if in the path
+    // to compute some AstAssignPost, we reference (read) some DEF vertex that
+    // also reaches an AlwaysPost, we need to group the AstAssignPost and AstAlwaysPost
+    // together. We do this because we do not want to duplicate "memories"
+    // (unpacked arrays) and frankly, that won't work for something like:
+    // b1: always @(posedge) a <= mem[raddr];
+    // b2: always @(posedge) if (wen) mem[waddr] <= something
+    // There is no way (at least I do not think there is) to compute b1 and b2
+    // on two separate cores and not copy the whole memory from b2 to b1 on every
+    // cycle.
+    // groupVertices takes care of this and essentially ensure that b1 and b2 end
+    // up on the same core.
+    // Once we have the groupings, we can start from the AstAssignPost and AstAlwaysPost
+    // vertices in each group and collect (backwards traversal) everything needed
+    // for their computation. This works fine as long as there are no blocking assignments
+    // to unpacked arrays, or as long as all sequential writes to a variable are contained
+    // withing one block for instance:
+    // logic [31:0] upacked_multidriven;
+    // always @(posedge) unpacked_multidriven[i] = something1;
+    // always @(posedge) begin
+    //      packed_multidriven[j] = something2;
+    //      y <= packed_multidriven;
+    // end
+    // Will create a commit vertex with 2 predecessors for upacked_multidriven.
+    // Notices that since the assignment is blocking, there will not be an AlwaysPost
+    // vertex for upacked_multidriven so grouping is not enough to ensure both
+    // always blocks endup on the same core. Here we follow DEF x to COMMIT x
+    // and then collect all that drives the COMMIT for the block that references
+    // DEF x. This ensures that both writes are contained within the same process.
+    // Notice how this also extends to multidriven packed arrays.
+    // From the explanation above, you can probably see that read-only packed or
+    // unpacked arrays will never limit parallelism since they never commit nor
+    // drive an AstAlwaysPost, hence they get duplicated on demand.
+    // Lastly, keep in mind that the same situation applies for sink nodes
+    // that are simply Always blocks (e.g., always_ff $display(...)). These
+    // vertices may also have to be grouped accordingly should a multidriven
+    // signal or non-blocking unpacked array appears on the RHS.
+    
 
-    // We need to collect all vertices bakwards-reachable from sinks. Those are the minumum
-    // set of vertices required for computed all that the post assignment depends on.
     for (const auto& vtxp : groupVertices(graphp, sinks)) {
         partitions.emplace_back(backwardTraverseAndCollect(graphp, vtxp));
     }

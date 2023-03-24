@@ -196,6 +196,8 @@ void schedule(AstNetlist* netlistp) {
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs
     std::vector<std::unique_ptr<DepGraph>> splitGraphpsp = DepGraphBuilder::splitIndependent(graphp);
+
+    //
     std::exit(0);
     // cr
 }
