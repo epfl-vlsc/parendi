@@ -44,6 +44,10 @@ set(HEADERS
     V3Begin.h
     V3Branch.h
     V3Broken.h
+    V3BspDly.h
+    V3BspGraph.h
+    V3BspModules.h
+    V3BspSched.h
     V3Case.h
     V3Cast.h
     V3CCtors.h
@@ -183,6 +187,10 @@ set(COMMON_SOURCES
     V3Begin.cpp
     V3Branch.cpp
     V3Broken.cpp
+    V3BspDly.cpp
+    V3BspGraph.cpp
+    V3BspModules.cpp
+    V3BspSched.cpp
     V3CCtors.cpp
     V3CUse.cpp
     V3Case.cpp
@@ -300,6 +308,8 @@ set(COMMON_SOURCES
     V3ParseGrammar.cpp
     V3ParseLex.cpp
     V3PreProc.cpp
+    V3IfConversion.cpp
+
 )
 
 SET(COVERAGE_SOURCES
@@ -328,7 +338,7 @@ configure_file(config_build.h.in config_build.h @ONLY)
 
 add_custom_command(
     OUTPUT V3Ast__gen_forward_class_decls.h V3Dfg__gen_forward_class_decls.h
-    DEPENDS ./V3Ast.h ${ASTGEN}
+    DEPENDS ./V3Ast.h ./V3AstNodeOther.h ./V3AstNodeExpr.h ${ASTGEN}
     COMMAND ${PYTHON3} ARGS
     ${ASTGEN} -I "${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --dfgdef V3DfgVertices.h --classes
 )
@@ -494,7 +504,10 @@ if (WIN32)
         YY_NO_UNISTD_H
     )
     target_include_directories(${verilator} PRIVATE ../platform/win32)
-    target_link_libraries(${verilator} PRIVATE bcrypt psapi)
+    target_link_libraries(${verilator} PRIVATE bcrypt psapi Threads::Threads)
+else()
+target_link_libraries(${verilator} PRIVATE Threads::Threads)
 endif()
+
 
 install(TARGETS ${verilator})

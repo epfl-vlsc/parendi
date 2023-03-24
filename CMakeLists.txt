@@ -23,7 +23,7 @@ project(Verilator
 option(DEBUG_AND_RELEASE_AND_COVERAGE
     "Builds both the debug and release binaries, overriding CMAKE_BUILD_TYPE. Not supported under MSBuild.")
 
-set(PYTHON3 python)
+set(PYTHON3 python3)
 set(CMAKE_INSTALL_DATADIR ${CMAKE_INSTALL_PREFIX})
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -46,9 +46,9 @@ if (MSVC)
     endif()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20")
 else()
-    if (NOT DEFINED ENV{FLEX_INCLUDE})
-        message(FATAL_ERROR "Please set environment variable FLEX_INCLUDE to the directory containing FlexLexer.h")
-    endif()
+    # if (NOT DEFINED ENV{FLEX_INCLUDE})
+    #     message(FATAL_ERROR "Please set environment variable FLEX_INCLUDE to the directory containing FlexLexer.h")
+    # endif()
     set(WIN_FLEX_BISON "$ENV{FLEX_INCLUDE}")
     if (WIN32 AND NOT MINGW)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
@@ -57,6 +57,7 @@ endif()
 
 find_package(BISON)
 find_package(FLEX)
+find_package(Threads REQUIRED)
 
 # Build
 #set_property(GLOBAL PROPERTY JOB_POOLS one_job=1)
