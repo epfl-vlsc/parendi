@@ -45,6 +45,11 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 
 class BspDlyInsertVisitor final : public VNVisitor {
 private:
+    // NODE STATE
+    //  clear on scope
+    //  AstVarScope::user1()     -> number of always blocks that write to this variable
+    //
+    VNUser1InUse user1InUse;
     V3UniqueNames m_lvNames;
     AstScope* m_scope = nullptr;
     bool m_inClocked = false;
@@ -67,7 +72,10 @@ private:
                 if (vrefp->access().isWriteOrRW() /*is lhs*/
                     && VN_IS(vrefp->varScopep()->dtypep(), BasicDType) /*is not memory*/) {
                     // create a temp variable
-                    if (blockingVscp.find(vrefp->varScopep()) == blockingVscp.end()) {
+                    if (vrefp->varScopep()->user1()
+                        > 1) {  // don't promote to delayed assignment if it has multiple drivers
+                        vrefp->v3warn(MULTIDRIVEN, "Variable may have multiple drivers");
+                    } else if (blockingVscp.find(vrefp->varScopep()) == blockingVscp.end()) {
                         // create a temp variable
                         AstVarScope* const subst = m_scope->createTempLike(
                             m_lvNames.get(vrefp->name()), vrefp->varScopep());
@@ -85,7 +93,7 @@ private:
                 AstVarScope* const subst = it->second;
                 AstVarRef* newp = new AstVarRef{vrefp->fileline(), subst, vrefp->access()};
                 vrefp->replaceWith(newp);
-                UINFO(4, "replacing " << vrefp->name() << endl);
+                UINFO(4, "replacing " << vrefp << endl);
                 pushDeletep(vrefp);
             }
         });
@@ -131,6 +139,17 @@ private:
         VL_RESTORER(m_scope);
         m_scope = nodep;
         m_lvNames.reset();
+        AstNode::user1ClearTree();
+
+        // mark the variables with the number of always blocks that modify them
+        nodep->foreach([](AstAlways* alwaysp) {
+            alwaysp->foreach([](AstVarRef* vrefp) {
+                if (vrefp->access().isWriteOrRW()) {
+                    vrefp->varScopep()->user1(vrefp->varScopep()->user1() + 1);
+                }
+            });
+        });
+
         iterateChildren(nodep);
     }
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
