@@ -18,5 +18,176 @@
 #ifndef VERILATOR_V3BSPGRAPH_H_
 #define VERILATOR_V3BSPGRAPH_H_
 
+#include "config_build.h"
+#include "verilatedos.h"
 
+#include "V3Ast.h"
+#include "V3Graph.h"
+#include "V3Sched.h"
+namespace V3BspSched {
+
+//=============================================================================
+class CompVertex;
+class ConstrVertex;
+class AnyVertex;
+//=============================================================================
+// Graph type
+
+class DepGraph final : public V3Graph {
+public:
+    // METHODS
+    // All edges are noncuttable, but there is never and edge between two compute vertices
+    inline void addEdge(CompVertex* fromp, ConstrVertex* top);
+    inline void addEdge(ConstrVertex* fromp, CompVertex* top);
+};
+
+//=============================================================================
+// Vertex types
+
+// abstract vertex type, all other types are derived from BspDepVertex
+class AnyVertex VL_NOT_FINAL : public V3GraphVertex {
+private:
+    AstSenTree* m_domainp = nullptr;
+
+protected:
+    // CONSTRUCTOR
+    AnyVertex(DepGraph* graphp, AstSenTree* domainp)
+        : V3GraphVertex{graphp}
+        , m_domainp{domainp} {}
+    ~AnyVertex() override = default;
+
+public:
+    // METHODS
+    bool isClocked() const { return m_domainp != nullptr; }
+    AstSenTree* domainp() const { return m_domainp; }
+    void domainp(AstSenTree* domainp) {
+        UASSERT(!m_domainp, "Domain should only be set once");
+        m_domainp = domainp;
+    }
+
+    virtual AnyVertex* clone(DepGraph* graphp) const = 0;
+};
+
+class CompVertex final : public AnyVertex {
+private:
+    AstNode* const m_nodep;  // the logic represented by this vertex
+    AstScope* const m_scopep;  // the scope that m_nodep belongs to
+public:
+    CompVertex(DepGraph* graphp, AstScope* scopep, AstNode* nodep, AstSenTree* domainp)
+        : AnyVertex{graphp, domainp}
+        , m_nodep{nodep}
+        , m_scopep{scopep} {
+        UASSERT_OBJ(scopep, nodep, "logic requires scope!");
+        UASSERT(nodep, "Can not have null logic!");
+    }
+    ~CompVertex() override = default;
+
+    AstNode* nodep() const { return m_nodep; }
+    AstScope* scopep() const { return m_scopep; }
+
+    CompVertex* clone(DepGraph* graphp) const override {
+        return new CompVertex{graphp, scopep(), nodep(), domainp()};
+    }
+    // LCOV_EXCL_START // Debug code
+    string name() const override {
+        return (cvtToHex(m_nodep) + "\\n" + cvtToStr(m_nodep->typeName()) + "\\n"
+                + cvtToStr(m_nodep->fileline()));
+    }
+    string dotShape() const override { return VN_IS(m_nodep, Active) ? "doubleoctogon" : "rect"; }
+    // LCOV_EXCEL_STOP
+};
+
+class ConstrVertex VL_NOT_FINAL : public AnyVertex {
+private:
+    AstVarScope* const m_vscp;  // the variable scope that this ordering constraint references
+public:
+    ConstrVertex(DepGraph* graphp, AstVarScope* vscp)
+        : AnyVertex{graphp, nullptr}
+        , m_vscp{vscp} {}
+    ~ConstrVertex() override = default;
+
+    // ACCESSOR
+    AstVarScope* vscp() const { return m_vscp; }
+
+    // LCOV_EXCL_START // Debug code
+    string dotShape() const override final { return "ellipse"; }
+    virtual string nameSuffix() const = 0;
+    string name() const override final {
+        return cvtToHex(m_vscp) + " " + nameSuffix() + "\\n " + m_vscp->name();
+    }
+    // LCOV_EXCL_STOP
+};
+
+class ConstrInitVertex final : public ConstrVertex {
+public:
+    // CONSTRUCTOR
+    ConstrInitVertex(DepGraph* graphp, AstVarScope* vscp)
+        : ConstrVertex{graphp, vscp} {}
+    ~ConstrInitVertex() override = default;
+    ConstrInitVertex* clone(DepGraph* graphp) const override {
+        return new ConstrInitVertex{graphp, vscp()};
+    }
+    // LCOV_EXCL_START // Debug code
+    string nameSuffix() const override { return "INIT"; }
+    string dotColor() const override { return "grey"; }
+    // LCOV_EXCL_STOP
+};
+
+class ConstrDefVertex final : public ConstrVertex {
+public:
+    // CONSTRUCTOR
+    ConstrDefVertex(DepGraph* graphp, AstVarScope* vscp)
+        : ConstrVertex{graphp, vscp} {}
+    ~ConstrDefVertex() override = default;
+    ConstrDefVertex* clone(DepGraph* graphp) const override {
+        return new ConstrDefVertex{graphp, vscp()};
+    }
+    // LCOV_EXCL_START // Debug code
+    string nameSuffix() const override { return "DEF"; }
+    string dotColor() const override { return "green"; }
+    // LCOV_EXCL_STOP
+};
+
+class ConstrCommitVertex final : public ConstrVertex {
+public:
+    // CONSTRUCTOR
+    ConstrCommitVertex(DepGraph* graphp, AstVarScope* vscp)
+        : ConstrVertex{graphp, vscp} {}
+    ~ConstrCommitVertex() override = default;
+    ConstrCommitVertex* clone(DepGraph* graphp) const override {
+        return new ConstrCommitVertex{graphp, vscp()};
+    }
+    // LCOV_EXCL_START // Debug code
+    string nameSuffix() const override { return "COMMIT"; }
+    string dotColor() const override { return "red"; }
+    // LCOV_EXCL_STOP
+};
+
+//==============================================================================
+// edge type
+class DepEdge final : public V3GraphEdge {
+    friend class DepGraph;
+
+private:
+    DepEdge(DepGraph* graphp, AnyVertex* fromp, AnyVertex* top)
+        : V3GraphEdge{graphp, fromp, top, 1, false /*not cuttable*/} {}
+    ~DepEdge() override = default;
+
+public:
+    string dotColor() const override { return "red"; }
+};
+
+void DepGraph::addEdge(CompVertex* fromp, ConstrVertex* top) { new DepEdge{this, fromp, top}; }
+void DepGraph::addEdge(ConstrVertex* fromp, CompVertex* top) { new DepEdge{this, fromp, top}; }
+
+//==============================================================================
+// builder class
+
+class DepGraphBuilder final {
+public:
+    static std::unique_ptr<DepGraph> build(const V3Sched::LogicByScope& logics);
+    static std::vector<std::unique_ptr<DepGraph>>
+    splitIndependent(const std::unique_ptr<DepGraph>& graphp);
+};
+};  // namespace V3BspSched
 #endif

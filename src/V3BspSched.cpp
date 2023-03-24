@@ -74,6 +74,7 @@
 
 // reuse some code from V3Sched
 #include "V3Ast.h"
+#include "V3BspGraph.h"
 #include "V3EmitCBase.h"
 #include "V3EmitV.h"
 #include "V3Order.h"
@@ -139,7 +140,6 @@ void schedule(AstNetlist* netlistp) {
     // we will try to use as much code from V3Sched as possible, though some
     // stuff about timing and multiple clock domains are simply not considered
     // at all, hence we do less here (future work should handle multiple clock domains as well)
-
     const auto addSizeStat = [](const string& name, const V3Sched::LogicByScope& lbs) {
         uint64_t size = 0;
         lbs.foreachLogic([&](AstNode* nodep) { size += nodep->nodeCount(); });
@@ -151,8 +151,12 @@ void schedule(AstNetlist* netlistp) {
     V3Sched::LogicClasses logicClasses = details::gatherLogicClasses(netlistp);
 
     // Step 2. handle initial and static
-    UASSERT(logicClasses.m_static.empty() && logicClasses.m_initial.empty()
-                && logicClasses.m_final.empty(),
+    if (!logicClasses.m_static.empty())
+        logicClasses.m_static.front().second->v3warn(E_UNSUPPORTED, "static initialization not implemented yet");
+    if (!logicClasses.m_initial.empty())
+        logicClasses.m_initial.front().second->v3warn(E_UNSUPPORTED, "initial block not implemented yet");
+
+    UASSERT(logicClasses.m_final.empty(),
             "static, initial, and final not implemented yet!");
 
     // Step 3. check for comb cycles and error
@@ -164,7 +168,6 @@ void schedule(AstNetlist* netlistp) {
     }
 
     // Step 4. not really needed to settle the logic since we expect no inputs
-
 
     // Step 5. partition the logic into pre-active, active, and NBA regions.
     // In this mode, only a non-empty NBA region is valid. Any other non-empty
@@ -182,10 +185,19 @@ void schedule(AstNetlist* netlistp) {
             E_UNSUPPORTED, "Only modules with a single clock at the top is supported with BSP");
     }
 
+    V3Sched::LogicByScope& nbaLogic = logicRegions.m_nba;
+    // Step 6. make a fine-grained dependence graph. This graph is different from
+    // the V3Order graph in many ways but the most notably difference is wrt ordering
+    // of combinational logic. This graph pushes combinational logic before clocked
+    // logic, in parallel with AssignPre logic.
+    const std::unique_ptr<DepGraph> graphp = DepGraphBuilder::build(nbaLogic);
+    graphp->dumpDotFilePrefixed("nba_orig");
 
+    // Step 7. Break the dependence graph into a maximal set of indepdent parallel
+    // graphs
+    std::vector<std::unique_ptr<DepGraph>> splitGraphpsp = DepGraphBuilder::splitIndependent(graphp);
+    std::exit(0);
     // cr
-
-
 }
 
 };  // namespace V3BspSched
