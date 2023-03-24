@@ -34,11 +34,15 @@ class AnyVertex;
 // Graph type
 
 class DepGraph final : public V3Graph {
+private:
+    AstModule* m_modp = nullptr;
 public:
     // METHODS
     // All edges are noncuttable, but there is never and edge between two compute vertices
     inline void addEdge(CompVertex* fromp, ConstrVertex* top);
     inline void addEdge(ConstrVertex* fromp, CompVertex* top);
+    inline AstModule* modp() const { return m_modp; }
+    inline void modp(AstModule* modp) { m_modp = modp; }
 };
 
 //=============================================================================

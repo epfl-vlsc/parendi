@@ -75,6 +75,7 @@
 // reuse some code from V3Sched
 #include "V3Ast.h"
 #include "V3BspGraph.h"
+#include "V3BspModules.h"
 #include "V3EmitCBase.h"
 #include "V3EmitV.h"
 #include "V3Order.h"
@@ -82,6 +83,7 @@
 #include "V3SenExprBuilder.h"
 #include "V3Stats.h"
 
+VL_DEFINE_DEBUG_FUNCTIONS;
 namespace V3BspSched {
 namespace details {
 V3Sched::LogicClasses gatherLogicClasses(AstNetlist* netlistp) {
@@ -152,12 +154,13 @@ void schedule(AstNetlist* netlistp) {
 
     // Step 2. handle initial and static
     if (!logicClasses.m_static.empty())
-        logicClasses.m_static.front().second->v3warn(E_UNSUPPORTED, "static initialization not implemented yet");
+        logicClasses.m_static.front().second->v3warn(E_UNSUPPORTED,
+                                                     "static initialization not implemented yet");
     if (!logicClasses.m_initial.empty())
-        logicClasses.m_initial.front().second->v3warn(E_UNSUPPORTED, "initial block not implemented yet");
+        logicClasses.m_initial.front().second->v3warn(E_UNSUPPORTED,
+                                                      "initial block not implemented yet");
 
-    UASSERT(logicClasses.m_final.empty(),
-            "static, initial, and final not implemented yet!");
+    UASSERT(logicClasses.m_final.empty(), "static, initial, and final not implemented yet!");
 
     // Step 3. check for comb cycles and error
     logicClasses.m_hybrid = V3Sched::breakCycles(netlistp, logicClasses.m_comb);
@@ -195,9 +198,15 @@ void schedule(AstNetlist* netlistp) {
 
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs
-    std::vector<std::unique_ptr<DepGraph>> splitGraphpsp = DepGraphBuilder::splitIndependent(graphp);
+    std::vector<std::unique_ptr<DepGraph>> splitGraphsp
+        = DepGraphBuilder::splitIndependent(graphp);
 
-    //
+    // Step 8. Merge the, skipped for now.
+
+    // Step 9. Create a module for each DepGraph. To do this we also need to determine
+    // whether a varialbe is solely referenced locally or by multiple cores.
+    std::vector<AstModule*> modulesp = V3BspModules::makeModules(netlistp, splitGraphsp);
+    // AstClass
     std::exit(0);
     // cr
 }
