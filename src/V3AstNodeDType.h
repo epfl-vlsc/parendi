@@ -977,6 +977,27 @@ public:
         return false;
     }
 };
+class AstPoplarTensorDType final : public AstNodeDType {
+    // Poplar tensor data type
+private:
+    int m_numElems = 0;
+public:
+    AstPoplarTensorDType(FileLine* fl, int numElems)
+        : ASTGEN_SUPER_PoplarTensorDType(fl) {
+            m_numElems = numElems;
+        }
+    ASTGEN_MEMBERS_AstPoplarTensorDType;
+    bool isCompound() const  override { return false; }
+    AstBasicDType* basicp() const override { return nullptr; }
+    AstNodeDType* skipRefp() const override { return nullptr; }
+    AstNodeDType* skipRefToConstp() const override { return nullptr; }
+    AstNodeDType* skipRefToEnump() const override { return nullptr; }
+    int widthAlignBytes() const override { return 0; }
+    int widthTotalBytes() const override { return 0; }
+    bool similarDType(const AstNodeDType* samep) const override {
+        return VN_IS(samep, PoplarTensorDType);
+    }
+};
 class AstPoplarVectorDType final : public AstNodeDType {
     // Poplar Vector data type
 private:

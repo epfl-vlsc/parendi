@@ -1102,6 +1102,21 @@ AstBasicDType* AstTypeTable::findLogicBitDType(FileLine* fl, VBasicDTypeKwd kwd,
     }
     return newp;
 }
+AstPoplarVectorDType* AstTypeTable::findPoplarVectorDType(int numElems, int alignment) {
+    auto key = std::make_pair(numElems, alignment);
+    const auto it = m_vectorTypesp.find(key);
+    if (it != m_vectorTypesp.end()) { return it->second; }
+    auto nodep = new AstPoplarVectorDType{this->fileline(), numElems, alignment};
+    m_vectorTypesp.emplace(key, nodep);
+    return nodep;
+}
+AstPoplarTensorDType* AstTypeTable::findPoplarTensorDType(int numElems) {
+    const auto it = m_tensorTypesp.find(numElems);
+    if (it != m_tensorTypesp.end()) { return it->second; }
+    auto nodep = new AstPoplarTensorDType{this->fileline(), numElems};
+    m_tensorTypesp.emplace(numElems, nodep);
+    return nodep;
+}
 
 AstBasicDType* AstTypeTable::findInsertSameDType(AstBasicDType* nodep) {
     const VBasicTypeKey key{nodep->width(), nodep->widthMin(), nodep->numeric(), nodep->keyword(),
