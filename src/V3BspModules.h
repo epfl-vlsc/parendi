@@ -30,8 +30,8 @@ namespace V3BspSched {
 
 class V3BspModules final {
 public:
-    static std::vector<AstModule*>
-    makeModules(AstNetlist* origp, const std::vector<std::unique_ptr<DepGraph>>& partitionsp);
+    static void makeModules(AstNetlist* origp,
+                            const std::vector<std::unique_ptr<DepGraph>>& partitionsp);
 };
 };  // namespace V3BspSched
 #endif

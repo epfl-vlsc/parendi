@@ -34,8 +34,9 @@ class VarScopeReferences {
 private:
     DepGraph* m_producer = nullptr;
     std::vector<DepGraph*> m_consumer;
-    AstVarScope* m_newp = nullptr;  // substition var scope from the writer graphp
-    AstPoplarVertexClass* m_popClassp = nullptr;  // the poplar vertex class that prodces the value
+    AstPoplarCopyEndPoint* m_sourcep = nullptr;
+    std::vector<AstPoplarCopyEndPoint*> m_targets;
+
 public:
     inline bool isClocked() const { return m_producer != nullptr; }
     inline bool isOwned(const std::unique_ptr<DepGraph>& graphp) const {
@@ -59,15 +60,14 @@ public:
         m_producer = graphp.get();
     }
 
-    std::pair<AstPoplarVertexClass*, AstVarScope*> newp() const {
-        return std::make_pair(m_popClassp, m_newp);
+    void sourcep(AstPoplarCopyEndPoint* nodep) {
+        UASSERT_OBJ(!nodep || !m_sourcep, m_sourcep, "source end point already set!");
+        m_sourcep = nodep;
     }
-    void newp(AstPoplarVertexClass* classp, AstVarScope* newp) {
-        UASSERT_OBJ(!m_newp, m_newp, "newp already set in VarScopeReferences!");
-        UASSERT_OBJ(!m_popClassp, m_popClassp, "classp already set in VarScopeReferences");
-        m_newp = newp;
-        m_popClassp = classp;
-    }
+    AstPoplarCopyEndPoint* sourcep() const { return m_sourcep; }
+
+    void addTargetp(AstPoplarCopyEndPoint* nodep) { m_targets.push_back(nodep); }
+    std::vector<AstPoplarCopyEndPoint*>& targetsp() { return m_targets; }
 
     DepGraph* producer() const { return m_producer; }
     void consumer(const std::unique_ptr<DepGraph>& graphp) { m_consumer.push_back(graphp.get()); }
@@ -80,10 +80,9 @@ class ModuleBuilderImpl final {
 private:
     // NODE STATE
     //      VarScope::user1     -> consumers and producer of the variable
-    //      VarScope::user2     -> true if added to partition
-    //      VarScope::user3p    -> substition inside each partition (clear on partitions)
     VNUser1InUse user1InUse;
-    VNUser1InUse user2InUse;
+    VNUser2InUse user2InUse;
+    VNUser3InUse user3InUse;
     AstUser1Allocator<AstVarScope, VarScopeReferences> m_vscpRefs;
     V3UniqueNames m_modNames;
     V3UniqueNames m_ctorNames;
@@ -133,6 +132,9 @@ private:
         AstPoplarVertexClass* const classp
             = new AstPoplarVertexClass{m_netlistp->fileline(), m_modNames.get("process")};
 
+        auto makeInstancep = [&classp]() {
+            return new AstPoplarVertexClassInstance{classp->fileline(), classp};
+        };
         modp->addStmtsp(newScopep);
         newScopep->addBlocksp(classp);
         classp->computep(computep);
@@ -140,13 +142,15 @@ private:
         V3UniqueNames inputNames{"__VbspInput"};
         V3UniqueNames outputNames{"__VbspOutput"};
         V3UniqueNames localNames{"__VbspLocal"};
-
+        //      VarScope::user2     -> true if added to partition
+        //      VarScope::user3p    -> substition inside each partition (clear on partitions)
         AstNode::user2ClearTree();
         AstNode::user3ClearTree();
         std::vector<std::pair<AstVarScope*, AstVarScope*>> inputsp;
         std::vector<std::pair<AstVarScope*, AstVarScope*>> outputsp;
         std::vector<std::pair<AstVarScope*, AstVarScope*>> localsp;
         std::vector<std::pair<AstVarScope*, AstVarScope*>> memsp;
+
         for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
             if (ConstrVertex* constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
                 AstVarScope* const vscp = constrp->vscp();
@@ -156,8 +160,8 @@ private:
                     // to create an input variable
                     auto& refInfo = m_vscpRefs(vscp);
                     AstVarScope* newVscp = newScopep->createTempLike(vscp->name(), vscp);
+                    vscp->user3p(newVscp);
                     if (VN_IS(vscp->dtypep(), BasicDType)) {
-                        vscp->user3p(newVscp);
                         if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
                             // a persistent variable that is owned, i.e., written
                             // by a blocked logic contained withing the current
@@ -167,8 +171,16 @@ private:
                             // variable is owed/produced here but also referenced
                             // by others
                             outputsp.emplace_back(vscp, newVscp);
-                            refInfo.newp(classp, newVscp);  // set this to use later when
-                                                            // creating AstPoplarCopyOperations
+                            // create a copy end point used in the poplar program
+                            AstPoplarCopyEndPoint* sourcep = new AstPoplarCopyEndPoint{
+                                vscp->fileline(), makeInstancep(),
+                                new AstPoplarVarSlice{
+                                    vscp->fileline(),
+                                    new AstVarRef{vscp->fileline(), newVscp, VAccess::READ}}};
+                            // append it to the user1p
+                            refInfo.sourcep(sourcep);
+                            // refInfo.sourc(classp, newVscp);  // set this to use later when
+                            // creating AstPoplarCopyOperations
                             if (refInfo.isConsumed(graphp)) {
                                 localsp.emplace_back(vscp, newVscp);
                             }
@@ -176,6 +188,13 @@ private:
                             UASSERT_OBJ(refInfo.isConsumed(graphp), vscp, "Unexpected reference!");
                             // not produced here but consumed
                             inputsp.emplace_back(vscp, newVscp);
+                            // similar to an output, we need a copy end point
+                            AstPoplarCopyEndPoint* targetp = new AstPoplarCopyEndPoint{
+                                vscp->fileline(), makeInstancep(),
+                                new AstPoplarVarSlice{
+                                    vscp->fileline(),
+                                    new AstVarRef{vscp->fileline(), newVscp, VAccess::WRITE}}};
+                            refInfo.addTargetp(targetp);
                         }
                     } else if (VN_IS(vscp->dtypep(), UnpackArrayDType)) {
                         UASSERT_OBJ(refInfo.isLocal(), vscp, "memory should be local!");
@@ -201,10 +220,10 @@ private:
         classp->addVarsp(memoryMembersp);
 
         auto addMemberVar = [this, &modp, &newScopep, &computep](const AstVarScope* const origp,
-                                                                 V3UniqueNames& freshNames,
+                                                                 const std::string& name,
                                                                  const VDirection dir) {
             AstVar* const newVarp
-                = new AstVar{origp->fileline(), VVarType::VAR, freshNames.get(origp->name()),
+                = new AstVar{origp->fileline(), VVarType::VAR, name,
                              m_netlistp->typeTablep()->findPoplarVectorDType(origp->widthWords())};
             newVarp->direction(dir);
             modp->addStmtsp(newVarp);
@@ -241,30 +260,37 @@ private:
               };
 
         for (const auto& inp : inputsp) {
-            AstVarScope* vscp = addMemberVar(inp.second, inputNames, VDirection::INPUT);
-            inputMembersp->addVarScopesp(vscp);
+            AstVarScope* vscp
+                = addMemberVar(inp.second, inputNames.get(inp.second->name()), VDirection::INPUT);
+            inputMembersp->addVarsp(new AstVarRef{vscp->fileline(), vscp, VAccess::READ});
             addVectorRead(vscp, inp.second, 0);
         }
         uint32_t localOffset = 0;
         for (const auto& locp : localsp) {
-            if (!localMembersp->varScopesp()) {
-                AstVarScope* vscp = addMemberVar(locp.second, localNames, VDirection::INOUT);
-                localMembersp->addVarScopesp(vscp);
+            if (!localMembersp->varsp()) {
+                AstVarScope* vscp
+                    = addMemberVar(locp.second, localNames.get("localArray"), VDirection::INOUT);
+                localMembersp->addVarsp(new AstVarRef{vscp->fileline(), vscp, VAccess::READWRITE});
             }
-            AstVarScope* vscp = localMembersp->varScopesp();
+            AstVarScope* vscp = localMembersp->varsp()->varScopep();
             addVectorRead(vscp, locp.second, localOffset);
             addVectorWrite(vscp, locp.second, localOffset);
             localOffset += vscp->widthWords();
         }
         for (const auto& outp : outputsp) {
-            AstVarScope* vscp = addMemberVar(outp.second, outputNames, VDirection::OUTPUT);
-            outputMembersp->addVarScopesp(vscp);
+            AstVarScope* vscp = addMemberVar(outp.second, outputNames.get(outp.second->name()),
+                                             VDirection::OUTPUT);
+            outputMembersp->addVarsp(new AstVarRef{vscp->fileline(), vscp, VAccess::WRITE});
             addVectorWrite(vscp, outp.second, 0);
         }
 
-        for (const auto& memp : memsp) { memoryMembersp->addVarScopesp(memp.second); }
+        for (const auto& memp : memsp) {
+            memoryMembersp->addVarsp(
+                new AstVarRef{memp.second->fileline(), memp.second, VAccess::READWRITE});
+        }
 
         // add the computation
+        UINFO(5, "Ordering computation" << endl);
         graphp->order();  // order the computation
         for (V3GraphVertex* itp = graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
             if (CompVertex* vtxp = dynamic_cast<CompVertex*>(itp)) {
@@ -272,10 +298,10 @@ private:
                 AstNode* nodep = vtxp->nodep();
                 UASSERT(nodep, "nullptr vertex");
                 UASSERT_OBJ(VN_IS(nodep, Always) || VN_IS(nodep, AlwaysPost)
-                                || VN_IS(nodep, AssignPre),
-                            nodep, "unexpected node type!");
-                UASSERT_OBJ(!nodep->nextp(), nodep, "Did not expect nextp");
-
+                                || VN_IS(nodep, AssignPost) || VN_IS(nodep, AssignPre),
+                            nodep, "unexpected node type " << nodep->prettyName() << endl);
+                // UASSERT_OBJ(!nodep->nextp(), nodep, "Did not expect nextp");
+                UINFO(10, "Cloning " << nodep << endl);
                 AstNode* nodeCopyp = nodep->cloneTree(false);
                 nodeCopyp->foreach([](AstVarRef* vrefp) {
                     // replace with the new variables
@@ -304,7 +330,43 @@ private:
         return poplarVertexClassModsp;
     }
 
-    AstPoplarProgramConstructor* makeProgram(const std::vector)
+    AstModule* makePoplarProgram() {
+        // AstVarScope::user2 -> true if variable already processed
+        // AstPoplarVertexClassInstance::user2 -> true if already added to the program
+        AstNode::user2ClearTree();
+
+        UASSERT_OBJ(m_originalTopModp, m_netlistp, "not top module!");
+        AstPoplarProgramConstructor* programp
+            = new AstPoplarProgramConstructor{m_netlistp->fileline()};
+        // add the copy operation
+        m_originalTopModp->foreach([&programp, this](AstVarScope* vscp) {
+            // create copy operations for each
+            if (vscp->user2()) return;
+            vscp->user2(true);
+            // create the copy operations
+            auto& refInfo = m_vscpRefs(vscp);
+            AstPoplarCopyEndPoint* sourcep = refInfo.sourcep();
+            const auto& targetsp = refInfo.targetsp();
+            UASSERT(!refInfo.sourcep() | !refInfo.targetsp().empty(),
+                    "a source requires at least one target");
+            for (AstPoplarCopyEndPoint* tp : refInfo.targetsp()) {
+                AstPoplarCopyOperation* copyp = new AstPoplarCopyOperation{
+                    vscp->fileline(), refInfo.sourcep()->cloneTree(false), tp->cloneTree(false)};
+                programp->addCopiesp(copyp);
+                tp->deleteTree();  // delete it since no longer in use
+            }
+            refInfo.targetsp()
+                .clear();  // clear vector since it should now be all deallocated pointers
+            if (refInfo.sourcep()) {
+                refInfo.sourcep()->deleteTree();
+                refInfo.sourcep(nullptr);
+            }  // delete since cloned
+        });
+        AstModule* modp
+            = new AstModule{m_originalTopModp->fileline(), m_modNames.get("program_ctor"), true};
+        modp->addStmtsp(programp);
+        return modp;
+    }
 
 public:
     explicit ModuleBuilderImpl(AstNetlist* netlistp,
@@ -321,35 +383,42 @@ public:
             m_originalTopModp = VN_AS(m_topScopep->scopep()->modp(), Module);
         });
         // 1. Determine producer and consumers
+        UINFO(3, "Resolving references" << endl);
         computeReferences();
         // 2. Create modules that contain poplar "Vertex" classes
-        std::vector<AstModule*> makeModules();
-        // 3. create a poplar program that contains all the modules plus
-        // the communication code
+        UINFO(3, "Creating submodules" << endl);
+        std::vector<AstModule*> submodp = makeModules();
+        // 3. create program containing Vertex instances and copy operations
+        UINFO(3, "Creating poplar program" << endl);
+        AstModule* programCtorp = makePoplarProgram();
+        programCtorp->foreach([&submodp](AstPoplarProgramConstructor* ctorp) {
+            for (AstModule* modp : submodp) {
+                AstPoplarVertexClassInstance* instp = nullptr;
+                modp->foreach([&instp, &modp](AstPoplarVertexClass* classp) {
+                    UASSERT_OBJ(!instp, modp, "multiple classes inside one module!");
+                    instp = new AstPoplarVertexClassInstance{classp->fileline(), classp};
+                });
+                ctorp->addInstsp(instp);
+            }
+        });
+        // Delete the original modules
+        AstNodeModule* oldModsp = m_netlistp->modulesp()->unlinkFrBackWithNext();
+        VL_DO_DANGLING(oldModsp->deleteTree(), oldModsp);
+        m_netlistp->addModulesp(programCtorp);
+        for (AstModule* modp : submodp) { m_netlistp->addModulesp(modp); }
     }
     std::vector<AstModule*> modules() const { return m_modulesp; }
 };
 }  // namespace
 
-std::vector<AstModule*>
-V3BspModules::makeModules(AstNetlist* netlistp,
-                          const std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
+void V3BspModules::makeModules(AstNetlist* netlistp,
+                               const std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
 
-    // We create one module per graph. Basically each module will have the
-    // following signature:
-    // MODULE
-    //   VAR in1, in2, in3,...
-    //   VAR out1, out2, out3, ...
-    //   VAR Local
-    //   VAR Serial
-    //   VAR Exception
-    //   SCOPE original_varscopes
-    //   CFUNC compute
-    //   CFUNC send
-
-    ModuleBuilderImpl builder{netlistp, partitionsp};
-    builder.go();
-    return builder.modules();
+    {
+        ModuleBuilderImpl builder{netlistp, partitionsp};
+        builder.go();
+    }
+    V3Global::dumpCheckGlobalTree("bspmodules", 0, dumpTree() >= 1);
 }
 
 };  // namespace V3BspSched

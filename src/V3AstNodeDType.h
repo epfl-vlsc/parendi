@@ -988,10 +988,12 @@ public:
         }
     ASTGEN_MEMBERS_AstPoplarTensorDType;
     bool isCompound() const  override { return false; }
-    AstBasicDType* basicp() const override { return nullptr; }
-    AstNodeDType* skipRefp() const override { return nullptr; }
-    AstNodeDType* skipRefToConstp() const override { return nullptr; }
-    AstNodeDType* skipRefToEnump() const override { return nullptr; }
+    AstBasicDType* basicp() const override {
+        return VN_AS(AstNode::findBasicDType(VBasicDTypeKwd::UINT32), BasicDType);
+    }
+    AstNodeDType* skipRefp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
+    AstNodeDType* skipRefToConstp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
+    AstNodeDType* skipRefToEnump() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
     int widthAlignBytes() const override { return 0; }
     int widthTotalBytes() const override { return 0; }
     bool similarDType(const AstNodeDType* samep) const override {
@@ -1015,10 +1017,12 @@ public:
 
 
     bool isCompound() const  override { return false; }
-    AstBasicDType* basicp() const override { return nullptr; }
-    AstNodeDType* skipRefp() const override { return nullptr; }
-    AstNodeDType* skipRefToConstp() const override { return nullptr; }
-    AstNodeDType* skipRefToEnump() const override { return nullptr; }
+    AstBasicDType* basicp() const override {
+        return VN_AS(AstNode::findBasicDType(VBasicDTypeKwd::UINT32), BasicDType);
+    }
+    AstNodeDType* skipRefp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
+    AstNodeDType* skipRefToConstp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
+    AstNodeDType* skipRefToEnump() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
     int widthAlignBytes() const override { return 0; }
     int widthTotalBytes() const override { return 0; }
     bool similarDType(const AstNodeDType* samep) const override {

@@ -205,7 +205,8 @@ void schedule(AstNetlist* netlistp) {
 
     // Step 9. Create a module for each DepGraph. To do this we also need to determine
     // whether a varialbe is solely referenced locally or by multiple cores.
-    std::vector<AstModule*> modulesp = V3BspModules::makeModules(netlistp, splitGraphsp);
+    V3BspModules::makeModules(netlistp, splitGraphsp);
+    
     // AstClass
     std::exit(0);
     // cr

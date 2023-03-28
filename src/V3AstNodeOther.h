@@ -1263,13 +1263,13 @@ public:
 
 class AstPoplarCopyEndPoint final : public AstNode {
     // A poplar copy source or destination descriptor
-    // @astgen op1 := vtxp        : AstPoplarVertexClass
-    // @astgen op2 := varSlicep   : AstPoplarVarSlice
+    // @astgen op1 := instp        : AstPoplarVertexClassInstance
+    // @astgen op2 := varSlicep    : AstPoplarVarSlice
 public:
-    AstPoplarCopyEndPoint(FileLine* fl, AstPoplarVertexClass* vtxp, AstPoplarVarSlice* varSlicep)
+    AstPoplarCopyEndPoint(FileLine* fl, AstPoplarVertexClassInstance* vtxp, AstPoplarVarSlice* varSlicep)
         : ASTGEN_SUPER_PoplarCopyEndPoint(fl) {
             UASSERT(vtxp && varSlicep, "need both vertex and variable slice");
-            this->vtxp(vtxp);
+            this->instp(vtxp);
             this->varSlicep(varSlicep);
         }
     ASTGEN_MEMBERS_AstPoplarCopyEndPoint;
@@ -1289,7 +1289,7 @@ public:
 };
 class AstPoplarProgramConstructor final : public AstNode {
     // A poplar program constructor
-    // @astgen op1 := instsp    : List[AstPoplarVertexClass]
+    // @astgen op1 := instsp    : List[AstPoplarVertexClassInstance]
     // @astgen op2 := copiesp   : List[AstPoplarCopyOperation]
 public:
     AstPoplarProgramConstructor(FileLine* fl)
@@ -1321,7 +1321,6 @@ class AstPoplarVertexClass final : public AstNode {
     // @astgen op1 := varsp     : List[AstPoplarVertexMember]
     // @astgen op2 := computep  : AstPoplarVertexComputeMethod
 private:
-    int m_tileId = std::numeric_limits<int>::max();
     const string m_name;
 public:
 
@@ -1329,9 +1328,22 @@ public:
         : ASTGEN_SUPER_PoplarVertexClass(fl)
         , m_name(name) {}
     ASTGEN_MEMBERS_AstPoplarVertexClass;
+    string name() const { return m_name; }
+};
+class AstPoplarVertexClassInstance final : public AstNode {
+    // An instance ofa poplar class
+private:
+    AstPoplarVertexClass* m_classp;
+    int m_tileId;
+public:
+    AstPoplarVertexClassInstance(FileLine* fl, AstPoplarVertexClass* classp, int tileId = std::numeric_limits<int>::max())
+        : ASTGEN_SUPER_PoplarVertexClassInstance(fl)
+        , m_classp(classp)
+        , m_tileId(tileId) {}
+    ASTGEN_MEMBERS_AstPoplarVertexClassInstance;
     int tileId() const { return m_tileId; }
     void tildId(int id) { m_tileId = id; }
-    string name() const { return m_name; }
+    AstPoplarVertexClass* classp() const { return m_classp; }
 };
 class AstPoplarVertexComputeMethod final : public AstNode {
     // compute method
@@ -1343,7 +1355,7 @@ public:
 };
 class AstPoplarVertexMember final : public AstNode {
     // A poplar Vertex input and output def/decl
-    // @astgen op1 := varScopesp   : List[AstVarScope]
+    // @astgen op1 := varsp   : List[AstVarRef]
 public:
     enum VPoplarIO : uint8_t {
         VPOP_INPUT     = 0x1,
