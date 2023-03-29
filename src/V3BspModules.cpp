@@ -153,6 +153,7 @@ private:
         // add the instance to the scope of the top module
         AstVarScope* instVscp = new AstVarScope{classInstp->fileline(), m_topScopep, classInstp};
         m_topScopep->addVarsp(instVscp);
+        m_topModp->addStmtsp(classInstp);
         // this class will represent the code that runs on one core
         classp->level(4);  // lives under the BspPkg
         // create a scope for the class
@@ -190,7 +191,6 @@ private:
                     if (VN_IS(vscp->dtypep(), BasicDType)) {
                         // not memory type, so create variable that is local to
                         // the compute function
-                        cfuncp->addStmtsp(varp);
                         if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
                             // the variable is produced here and does not need
                             // to be sent out, however we should create a
@@ -251,7 +251,8 @@ private:
                 cfuncp->addStmtsp(nodeCopyp);
             }
         }
-        classp->addStmtsp(cfuncp);
+        scopep->addBlocksp(cfuncp);
+        classp->addStmtsp(scopep);
         return classp;
     }
 
