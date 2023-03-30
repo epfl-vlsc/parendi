@@ -152,15 +152,7 @@ void schedule(AstNetlist* netlistp) {
     // Step 1. classify logic classes, may error out on unsupported logic classes
     V3Sched::LogicClasses logicClasses = details::gatherLogicClasses(netlistp);
 
-    // Step 2. handle initial and static
-    if (!logicClasses.m_static.empty())
-        logicClasses.m_static.front().second->v3warn(E_UNSUPPORTED,
-                                                     "static initialization not implemented yet");
-    if (!logicClasses.m_initial.empty())
-        logicClasses.m_initial.front().second->v3warn(E_UNSUPPORTED,
-                                                      "initial block not implemented yet");
-
-    UASSERT(logicClasses.m_final.empty(), "static, initial, and final not implemented yet!");
+    UASSERT(logicClasses.m_final.empty(), "final not implemented yet!");
 
     // Step 3. check for comb cycles and error
     logicClasses.m_hybrid = V3Sched::breakCycles(netlistp, logicClasses.m_comb);
@@ -205,7 +197,9 @@ void schedule(AstNetlist* netlistp) {
 
     // Step 9. Create a module for each DepGraph. To do this we also need to determine
     // whether a varialbe is solely referenced locally or by multiple cores.
-    V3BspModules::makeModules(netlistp, splitGraphsp);
+    V3BspModules::makeModules(netlistp, splitGraphsp, logicClasses.m_initial,
+                              logicClasses.m_static);
+
     // std::exit(0);
 }
 

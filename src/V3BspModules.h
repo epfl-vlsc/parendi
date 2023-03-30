@@ -21,7 +21,7 @@
 
 #include "V3Ast.h"
 #include "V3BspGraph.h"
-
+#include "V3Sched.h"
 class DepGraph;
 class AstNetlist;
 class AstModule;
@@ -31,7 +31,9 @@ namespace V3BspSched {
 class V3BspModules final {
 public:
     static void makeModules(AstNetlist* origp,
-                            const std::vector<std::unique_ptr<DepGraph>>& partitionsp);
+                            const std::vector<std::unique_ptr<DepGraph>>& partitionsp,
+                            const V3Sched::LogicByScope& initials,
+                            const V3Sched::LogicByScope& statics);
 };
 };  // namespace V3BspSched
 #endif
