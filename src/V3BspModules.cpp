@@ -86,10 +86,8 @@ private:
     VNUser3InUse user3InUse;
     AstUser1Allocator<AstVarScope, VarScopeReferences> m_vscpRefs;
     V3UniqueNames m_modNames;
-    V3UniqueNames m_ctorNames;
     AstNetlist* m_netlistp;  // original netlist
     const std::vector<std::unique_ptr<DepGraph>>& m_partitionsp;  // partitions
-
 
     AstModule* m_topModp = nullptr;
     AstPackage* m_packagep = nullptr;
@@ -98,26 +96,21 @@ private:
     AstScope* m_topScopep = nullptr;
     std::string m_scopePrefix;
 
-    struct ModuleBuilder {
-        const std::unique_ptr<DepGraph>& m_graphp;
-        std::vector<AstVarScope*> m_inputsp, m_outputsp, m_localsp;
-        AstModule* m_modp;
-        ModuleBuilder(const std::unique_ptr<DepGraph>& graphp, AstModule* modp)
-            : m_graphp(graphp)
-            , m_modp(modp) {}
-    };
     // compute the references to each variable
     void computeReferences() {
         AstNode::user1ClearTree();
         for (const auto& graphp : m_partitionsp) {
+            UINFO(100, "Inspecting graph " << graphp.get() << endl);
             for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp;
                  vtxp = vtxp->verticesNextp()) {
                 if (ConstrDefVertex* const defp = dynamic_cast<ConstrDefVertex*>(vtxp)) {
+                    UINFO(100, "consumed: " << defp->vscp()->name() << endl);
                     m_vscpRefs(defp->vscp()).consumer(graphp);
                 } else if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
                     if (AstAssignPost* const postp = VN_CAST(compp->nodep(), AssignPost)) {
                         postp->foreach([this, &graphp](const AstVarRef* vrefp) {
                             if (vrefp->access().isWriteOrRW()) {
+                                UINFO(100, "produced: " << vrefp->varScopep()->name() << endl);
                                 m_vscpRefs(vrefp->varScopep()).producer(graphp);
                             }
                         });
@@ -127,8 +120,7 @@ private:
         }
     }
 
-    void makeClassPackage() {}
-
+    // make a single class representing the parallel computation in each graph
     AstClass* makeClass(const std::unique_ptr<DepGraph>& graphp) {
         UASSERT(m_packagep, "need bsp package!");
         FileLine* fl = nullptr;
@@ -176,7 +168,7 @@ private:
 
         for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
             if (ConstrVertex* constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
-                AstVarScope* const vscp = constrp->vscp();
+                AstVarScope* vscp = constrp->vscp();
                 if (!vscp->user2()) {
                     // add any variable reference in the partition to the local scope
                     // for any local variable that is produced by another graph we need
@@ -188,7 +180,7 @@ private:
                     AstVarScope* newVscp = new AstVarScope{vscp->fileline(), scopep, varp};
                     scopep->addVarsp(newVscp);
                     vscp->user3p(newVscp);
-                    if (VN_IS(vscp->dtypep(), BasicDType)) {
+                    if (VN_IS(vscp->dtypep(), BasicDType) || VN_IS(vscp->dtypep()->skipRefp(), BasicDType)) {
                         // not memory type, so create variable that is local to
                         // the compute function
                         if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
@@ -219,6 +211,8 @@ private:
                     } else if (VN_IS(vscp->dtypep(), UnpackArrayDType)) {
                         UASSERT_OBJ(refInfo.isLocal(), vscp, "memory should be local!");
                         classp->addStmtsp(varp);
+                    } else {
+                        vscp->v3fatalSrc("Unknown data type" << vscp->dtypep());
                     }
                     vscp->user2(true);  // mark visited
                 }
@@ -228,6 +222,7 @@ private:
         // add the computation
         UINFO(5, "Ordering computation" << endl);
         graphp->order();  // order the computation
+        std::vector<AstNode*> stmtps;
         for (V3GraphVertex* itp = graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
             if (CompVertex* vtxp = dynamic_cast<CompVertex*>(itp)) {
                 // vtxp->nodep
@@ -236,26 +231,34 @@ private:
                 UASSERT_OBJ(VN_IS(nodep, Always) || VN_IS(nodep, AlwaysPost)
                                 || VN_IS(nodep, AssignPost) || VN_IS(nodep, AssignPre),
                             nodep, "unexpected node type " << nodep->prettyName() << endl);
-                // UASSERT_OBJ(!nodep->nextp(), nodep, "Did not expect nextp");
-                UINFO(10, "Cloning " << nodep << endl);
-                AstNode* nodeCopyp = nodep->cloneTree(false);
-                nodeCopyp->foreach([](AstVarRef* vrefp) {
-                    // replace with the new variables
-                    UASSERT_OBJ(vrefp->varScopep()->user3p(), vrefp->varScopep(),
-                                "Expected user3p");
-                    AstVarScope* substp = VN_AS(vrefp->varScopep()->user3p(), VarScope);
-                    // replace the reference
-                    AstVarRef* newp = new AstVarRef{vrefp->fileline(), substp, vrefp->access()};
-                    vrefp->replaceWith(newp);
-                });
-                cfuncp->addStmtsp(nodeCopyp);
+                if (AstNodeProcedure* alwaysp = VN_CAST(nodep, NodeProcedure)) {
+                    for (AstNode* np = alwaysp->stmtsp(); np; np = np->nextp()) {
+                        UINFO(10, "Cloning " << np << endl);
+                        stmtps.push_back(np->cloneTree(false));
+                    }
+                } else {
+                    UINFO(10, "Cloning " << nodep << endl);
+                    stmtps.push_back(nodep->cloneTree(false));
+                }
             }
+        }
+        for (AstNode* nodep : stmtps) {
+            nodep->foreach([](AstVarRef* vrefp) {
+                // replace with the new variables
+                UASSERT_OBJ(vrefp->varScopep()->user3p(), vrefp->varScopep(), "Expected user3p");
+                AstVarScope* substp = VN_AS(vrefp->varScopep()->user3p(), VarScope);
+                // replace the reference
+                AstVarRef* newp = new AstVarRef{vrefp->fileline(), substp, vrefp->access()};
+                vrefp->replaceWith(newp);
+            });
+            cfuncp->addStmtsp(nodep);
         }
         scopep->addBlocksp(cfuncp);
         classp->addStmtsp(scopep);
         return classp;
     }
 
+    // make a class for each graph
     std::vector<AstClass*> makeClasses() {
 
         // first create a new top module that will replace the existing one later
@@ -296,6 +299,8 @@ private:
 
         return vtxClassesp;
     }
+
+    // make a top level module with a single "exchange" function that emulates "AssignPost"
     void makeCopyOperations() {
         // AstVarScope::user2 -> true if variable already processed
         AstNode::user2ClearTree();
@@ -354,12 +359,10 @@ private:
         m_netlistp->addModulesp(m_topModp);
     }
 
-
 public:
     explicit ModuleBuilderImpl(AstNetlist* netlistp,
                                const std::vector<std::unique_ptr<DepGraph>>& partitionsp)
         : m_modNames{"__VBspCls"}
-        , m_ctorNames{"__VBspCtor"}
         , m_netlistp{netlistp}
         , m_partitionsp{partitionsp} {}
     void go() {
@@ -376,9 +379,7 @@ public:
         makeCopyOperations();
         // 4. add the classes
         m_netlistp->addModulesp(m_packagep);
-        for (AstClass* clsp : submodp) {
-            m_netlistp->addModulesp(clsp);
-        }
+        for (AstClass* clsp : submodp) { m_netlistp->addModulesp(clsp); }
     }
 
 };  // namespace
