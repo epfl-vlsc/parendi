@@ -1534,25 +1534,6 @@ public:
     AstNodeDType* subDTypep() const { return dtypep() ? dtypep() : childDTypep(); }
 };
 
-class AstPoplarReadVector final : public AstNodeExpr {
-    // Read a poplar vector, see also AstPoplarWriteVector
-    // @astgen op1 := fromp    : AstVarRef
-    // @astgen op2 := offsetp  : AstConst
-    // @astgen op3 := nump     : AstConst
-public:
-    AstPoplarReadVector(FileLine* fl, AstVarRef* fromp, AstConst* offsetp, AstConst* nump)
-        : ASTGEN_SUPER_PoplarReadVector(fl) {
-            this->fromp(fromp);
-            this->offsetp(offsetp);
-            this->nump(nump);
-    }
-    ASTGEN_MEMBERS_AstPoplarReadVector;
-    string emitVerilog() override { V3ERROR_NA_RETURN(""); };
-    // For documentation on emitC format see EmitCFunc::emitOpName
-    string emitC() override { V3ERROR_NA_RETURN(""); };
-
-    bool cleanOut() const override  { return true; }
-};
 
 class AstRand final : public AstNodeExpr {
     // $random/$random(seed) or $urandom/$urandom(seed)

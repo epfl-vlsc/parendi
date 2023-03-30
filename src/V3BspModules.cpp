@@ -1,6 +1,6 @@
 // -*- mode: C++; c-file-style: "cc-mode" -*-
 //*************************************************************************
-// DESCRIPTION: Verilator: Bulk-synchronous parallel module creation
+// DESCRIPTION: Verilator: Bulk-synchronous parallel class creation
 //
 // Code available from: https://verilator.org
 //
@@ -334,6 +334,12 @@ private:
         AstCFunc* const initFuncp = new AstCFunc{m_netlistp->topModulep()->fileline(),
                                                  "initialize", m_topScopep, "void"};
 
+        initFuncp->slow(true);
+        // go through all of the old variables and find their new producer and consumers
+        // then create a assignments for updating them safely in an "exchange" function.
+        // initialization (AstInitial and AstInitialStatic) also get a similar treatment
+        // since there is an individual class that performs the initial computation
+        // and that needs to be copied as well.
         m_netlistp->topModulep()->foreach([this, &copyFuncp, &initFuncp](AstVarScope* vscp) {
             auto makeCopyOp = [](const std::pair<AstVarScope*, AstVar*>& sourcep,
                                  const std::pair<AstVarScope*, AstVar*>& targetp) {
@@ -379,6 +385,7 @@ private:
         });
         m_topScopep->addBlocksp(copyFuncp);
         m_topScopep->addBlocksp(initFuncp);
+
 
         // snatch the AstTopScope from the existing topModle
         AstTopScope* singletonTopScopep = m_netlistp->topScopep()->unlinkFrBack();

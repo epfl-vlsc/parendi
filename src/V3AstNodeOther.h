@@ -1260,120 +1260,6 @@ public:
     bool svImplicit() const { return m_svImplicit; }
     void svImplicit(bool flag) { m_svImplicit = flag; }
 };
-
-class AstPoplarCopyEndPoint final : public AstNode {
-    // A poplar copy source or destination descriptor
-    // @astgen op1 := instp        : AstPoplarVertexClassInstance
-    // @astgen op2 := varSlicep    : AstPoplarVarSlice
-public:
-    AstPoplarCopyEndPoint(FileLine* fl, AstPoplarVertexClassInstance* vtxp, AstPoplarVarSlice* varSlicep)
-        : ASTGEN_SUPER_PoplarCopyEndPoint(fl) {
-            UASSERT(vtxp && varSlicep, "need both vertex and variable slice");
-            this->instp(vtxp);
-            this->varSlicep(varSlicep);
-        }
-    ASTGEN_MEMBERS_AstPoplarCopyEndPoint;
-};
-class AstPoplarCopyOperation final : public AstNode {
-    // A poplar copy operation
-    // @astgen op1 := fromp    : AstPoplarCopyEndPoint
-    // @astgen op2 := top      : AstPoplarCopyEndPoint
-public:
-    AstPoplarCopyOperation(FileLine* fl, AstPoplarCopyEndPoint* fromp, AstPoplarCopyEndPoint* top)
-        : ASTGEN_SUPER_PoplarCopyOperation(fl) {
-            UASSERT(fromp && top, "need fromp and top");
-            this->fromp(fromp);
-            this->top(top);
-        }
-    ASTGEN_MEMBERS_AstPoplarCopyOperation;
-};
-class AstPoplarProgramConstructor final : public AstNode {
-    // A poplar program constructor
-    // @astgen op1 := instsp    : List[AstPoplarVertexClassInstance]
-    // @astgen op2 := copiesp   : List[AstPoplarCopyOperation]
-public:
-    AstPoplarProgramConstructor(FileLine* fl)
-        : ASTGEN_SUPER_PoplarProgramConstructor(fl) {}
-
-    ASTGEN_MEMBERS_AstPoplarProgramConstructor;
-
-};
-class AstPoplarVarSlice final : public AstNode {
-    // A poplar variable slice for use in copy operations
-    // @astgen  op1 := varp      : AstVarRef
-    // @astgen  op2 := fromp     : Optional[AstNodeExpr]
-private:
-    const int m_sliceWidth = 0;
-public:
-    AstPoplarVarSlice(FileLine* fl, AstVarRef* varp, AstNodeExpr* fromp = nullptr,
-         int width = 0)
-        : ASTGEN_SUPER_PoplarVarSlice(fl)
-        , m_sliceWidth(width) {
-            UASSERT(fromp && width || (!fromp && !width), "fromp and width are tied!");
-            this->varp(varp);
-            this->fromp(fromp);
-        }
-    ASTGEN_MEMBERS_AstPoplarVarSlice;
-    int sliceWidth() const { return m_sliceWidth; }
-};
-class AstPoplarVertexClass final : public AstNode {
-    // A poplar vertex definition
-    // @astgen op1 := varsp     : List[AstPoplarVertexMember]
-    // @astgen op2 := computep  : AstPoplarVertexComputeMethod
-private:
-    const string m_name;
-public:
-
-    AstPoplarVertexClass(FileLine* fl, const string& name)
-        : ASTGEN_SUPER_PoplarVertexClass(fl)
-        , m_name(name) {}
-    ASTGEN_MEMBERS_AstPoplarVertexClass;
-    string name() const { return m_name; }
-};
-class AstPoplarVertexClassInstance final : public AstNode {
-    // An instance ofa poplar class
-private:
-    AstPoplarVertexClass* m_classp;
-    int m_tileId;
-public:
-    AstPoplarVertexClassInstance(FileLine* fl, AstPoplarVertexClass* classp, int tileId = std::numeric_limits<int>::max())
-        : ASTGEN_SUPER_PoplarVertexClassInstance(fl)
-        , m_classp(classp)
-        , m_tileId(tileId) {}
-    ASTGEN_MEMBERS_AstPoplarVertexClassInstance;
-    int tileId() const { return m_tileId; }
-    void tildId(int id) { m_tileId = id; }
-    AstPoplarVertexClass* classp() const { return m_classp; }
-};
-class AstPoplarVertexComputeMethod final : public AstNode {
-    // compute method
-    // @astgen op1 := stmtsp   : List[AstNode]
-public:
-    AstPoplarVertexComputeMethod(FileLine* fl)
-        : ASTGEN_SUPER_PoplarVertexComputeMethod(fl) {}
-    ASTGEN_MEMBERS_AstPoplarVertexComputeMethod;
-};
-class AstPoplarVertexMember final : public AstNode {
-    // A poplar Vertex input and output def/decl
-    // @astgen op1 := varsp   : List[AstVarRef]
-public:
-    enum VPoplarIO : uint8_t {
-        VPOP_INPUT     = 0x1,
-        VPOP_OUTPUT    = 0x2,
-        VPOP_LOCAL     = 0x3,
-        VPOP_MEMORY    = 0x4,
-        VPOP_EXCEPTION = 0x5,
-        VPOP_HOST      = 0x6
-    };
-private:
-    const VPoplarIO m_type;
-public:
-    AstPoplarVertexMember(FileLine *fl, VPoplarIO tpe)
-        : ASTGEN_SUPER_PoplarVertexMember(fl)
-        , m_type(tpe) {}
-    ASTGEN_MEMBERS_AstPoplarVertexMember;
-
-};
 class AstPort final : public AstNode {
     // A port (in/out/inout) on a module
     // @astgen op1 := exprp : Optional[AstNodeExpr] // Expression connected to port
@@ -1607,9 +1493,6 @@ class AstTypeTable final : public AstNode {
     using DetailedMap = std::map<VBasicTypeKey, AstBasicDType*>;
     DetailedMap m_detailedMap;
 
-    std::map<int, AstPoplarTensorDType*> m_tensorTypesp;
-    std::map<std::pair<int, int>, AstPoplarVectorDType*> m_vectorTypesp;
-
 public:
     explicit AstTypeTable(FileLine* fl);
     ASTGEN_MEMBERS_AstTypeTable;
@@ -1630,8 +1513,6 @@ public:
     AstEmptyQueueDType* findEmptyQueueDType(FileLine* fl);
     AstQueueDType* findQueueIndexDType(FileLine* fl);
     AstVoidDType* findVoidDType(FileLine* fl);
-    AstPoplarTensorDType* findPoplarTensorDType(int numElems);
-    AstPoplarVectorDType* findPoplarVectorDType(int numElems, int alignment = 8);
     void clearCache();
     void repairCache();
     void dump(std::ostream& str = std::cout) const override;
@@ -3029,27 +2910,7 @@ public:
     }
     bool off() const { return m_off; }
 };
-class AstPoplarWriteVector final : public AstNodeStmt {
-    // Write to a poplar Vector
-    // @astgen op1 := lhsp      : AstVarRef
-    // @astgen op2 := rhsp      : AstVarRef
-    // @astgen op3 := offsetp   : AstConst
-    // @astgen op4 := widthp    : AstConst
-public:
-    AstPoplarWriteVector(FileLine* fl, AstVarRef* lhsp, AstVarRef* rhsp,
-        AstConst* offsetp, AstConst* widthp)
-        : ASTGEN_SUPER_PoplarWriteVector(fl) {
-            this->lhsp(lhsp);
-            this->rhsp(rhsp);
-            this->offsetp(offsetp);
-            this->widthp(widthp);
-        }
-    ASTGEN_MEMBERS_AstPoplarWriteVector;
 
-    bool isGateOptimizable() const override { return false; }
-    bool isGateDedupable() const override { return false; }
-    bool same(const AstNode* ) const override { return false; }
-};
 class AstPredicatedStmt final : public AstNodeStmt {
     // A predicated statement with potential side-effects
     // @astgen op1 := condp : AstNodeExpr

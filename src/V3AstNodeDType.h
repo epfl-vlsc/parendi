@@ -977,59 +977,6 @@ public:
         return false;
     }
 };
-class AstPoplarTensorDType final : public AstNodeDType {
-    // Poplar tensor data type
-private:
-    int m_numElems = 0;
-public:
-    AstPoplarTensorDType(FileLine* fl, int numElems)
-        : ASTGEN_SUPER_PoplarTensorDType(fl) {
-            m_numElems = numElems;
-        }
-    ASTGEN_MEMBERS_AstPoplarTensorDType;
-    bool isCompound() const  override { return false; }
-    AstBasicDType* basicp() const override {
-        return VN_AS(AstNode::findBasicDType(VBasicDTypeKwd::UINT32), BasicDType);
-    }
-    AstNodeDType* skipRefp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
-    AstNodeDType* skipRefToConstp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
-    AstNodeDType* skipRefToEnump() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
-    int widthAlignBytes() const override { return 0; }
-    int widthTotalBytes() const override { return 0; }
-    bool similarDType(const AstNodeDType* samep) const override {
-        return VN_IS(samep, PoplarTensorDType);
-    }
-};
-class AstPoplarVectorDType final : public AstNodeDType {
-    // Poplar Vector data type
-private:
-    // byte alighment
-    int m_alignment = 0;
-    // number of elements in the vector
-    int m_numElems = 0;
-public:
-    AstPoplarVectorDType(FileLine* fl, int numElems, int alignment = 8)
-        : ASTGEN_SUPER_PoplarVectorDType(fl) {
-            m_alignment = alignment;
-            m_numElems = numElems;
-        }
-    ASTGEN_MEMBERS_AstPoplarVectorDType;
-
-
-    bool isCompound() const  override { return false; }
-    AstBasicDType* basicp() const override {
-        return VN_AS(AstNode::findBasicDType(VBasicDTypeKwd::UINT32), BasicDType);
-    }
-    AstNodeDType* skipRefp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
-    AstNodeDType* skipRefToConstp() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
-    AstNodeDType* skipRefToEnump() const override { return AstNode::findBasicDType(VBasicDTypeKwd::UINT32); }
-    int widthAlignBytes() const override { return 0; }
-    int widthTotalBytes() const override { return 0; }
-    bool similarDType(const AstNodeDType* samep) const override {
-        return VN_IS(samep, PoplarVectorDType);
-    }
-
-};
 class AstQueueDType final : public AstNodeDType {
     // Queue array data type, ie "[ $ ]"
     // @astgen op1 := childDTypep : Optional[AstNodeDType] // moved to refDTypep() in V3Width

@@ -417,7 +417,9 @@ static void process() {
 
         // Schedule the logic
         if (v3Global.opt.poplar()) {
+
             V3BspSched::schedule(v3Global.rootp());
+
         } else {
             V3Sched::schedule(v3Global.rootp());
             // Convert sense lists into IF statements.
