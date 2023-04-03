@@ -104,7 +104,10 @@ private:
 
     AstModule* m_topModp = nullptr;
     AstPackage* m_packagep = nullptr;
-    AstClassPackage* m_classPacakgep = nullptr;
+
+    AstClass* m_classWithComputep = nullptr;
+    AstClassRefDType* m_classWithComputeDtypep = nullptr;
+
     AstScope* m_packageScopep = nullptr;
     AstCell* m_packageCellp = nullptr;
     AstScope* m_topScopep = nullptr;
@@ -134,6 +137,28 @@ private:
         }
     }
 
+    std::pair<AstClass*, AstClassRefDType*> newClass(FileLine* fl, const std::string& name,
+                                                     const std::string& pkgName) {
+        AstClass* newClsp = new AstClass{fl, name};
+        newClsp->classOrPackagep(new AstClassPackage{fl, pkgName});
+        newClsp->classOrPackagep()->classp(newClsp);
+        AstClassRefDType* dtypep = new AstClassRefDType{fl, newClsp, nullptr};
+        dtypep->classOrPackagep(m_packagep);
+        m_netlistp->typeTablep()->addTypesp(dtypep);
+        return {newClsp, dtypep};
+    }
+
+    void makeBaseClasses() {
+
+        auto clsAndTpe
+            = newClass(new FileLine(FileLine::builtInFilename()), V3BspModules::builtinBaseClass,
+                       V3BspModules::builtinBaseClassPkg);
+        m_classWithComputep = clsAndTpe.first;
+        m_classWithComputep->isVirtual(true);
+
+        m_classWithComputeDtypep = clsAndTpe.second;
+    }
+
     // make a single class representing the parallel computation in each graph
     AstClass* makeClass(const std::unique_ptr<DepGraph>& graphp) {
         UASSERT(m_packagep, "need bsp package!");
@@ -150,13 +175,15 @@ private:
         }
 
         // create a class for the the graph partition
-        AstClass* classp = new AstClass{fl, m_modNames.get("vtxCls")};
-        classp->classOrPackagep(new AstClassPackage{fl, m_modNames.get("vtxClsInitPkg")});
-        classp->classOrPackagep()->classp(classp);
+        auto classAndTypep = newClass(fl, m_modNames.get("vtxCls"), m_modNames.get("vtxClsPkg"));
+        AstClass* classp = classAndTypep.first;
+        AstClassRefDType* classTypep = classAndTypep.second;
+        AstClassExtends* extendsp = new AstClassExtends{fl, nullptr, false};
 
-        AstClassRefDType* classTypep = new AstClassRefDType{fl, classp, nullptr};
-        classTypep->classOrPackagep(m_packagep);
-        m_netlistp->typeTablep()->addTypesp(classTypep);
+        extendsp->dtypep(m_classWithComputeDtypep);
+        classp->addExtendsp(extendsp);
+        classp->isExtended(true);
+
         AstVar* classInstp = new AstVar{fl, VVarType::VAR, m_modNames.get("vtxInst"), classTypep};
         classInstp->lifetime(VLifetime::STATIC);
         // add the instance to the scope of the top module
@@ -278,9 +305,29 @@ private:
         return classp;
     }
 
+    void checkBuiltinNotUsed() const {
+        m_netlistp->foreach([this](AstPackage* pkgp) {
+            if (pkgp->name() == V3BspModules::builtinBspPkg) {
+                pkgp->v3fatalSrc("name clash with builtin package " << V3BspModules::builtinBspPkg
+                                                                    << endl);
+            }
+        });
+        m_netlistp->foreach([this](AstClass* classp) {
+            if (classp->name() == V3BspModules::builtinBaseClass) {
+                classp->v3fatalSrc("name clash with builtin base class "
+                                   << V3BspModules::builtinBaseClass << endl);
+            }
+        });
+        m_netlistp->foreach([this](AstClassPackage* classp) {
+            if (classp->name() == V3BspModules::builtinBaseClassPkg) {
+                classp->v3fatalSrc("name classh with builtin base classpacakge "
+                                   << V3BspModules::builtinBaseClassPkg << endl);
+            }
+        });
+    }
     // make a class for each graph
     std::vector<AstClass*> makeClasses() {
-
+        checkBuiltinNotUsed();
         // first create a new top module that will replace the existing one later
         FileLine* fl = m_netlistp->topModulep()->fileline();
         UASSERT(!m_topModp, "new top already exsists!");
@@ -294,12 +341,17 @@ private:
         // all the classes will be in a package, let's build this package and
         // add an instance of it to the new top module
         // create a package for all the bsp classes
-        m_packagep = new AstPackage{m_netlistp->fileline(), "__VBspPkg"};
+        m_packagep = new AstPackage{m_netlistp->fileline(), V3BspModules::builtinBspPkg};
         m_packagep->level(3);  // lives under a cell (2) under top (1)
         UASSERT(m_topScopep, "No top scope!");
         // a cell instance of the pakage that is added to the top module
-        m_packageCellp
-            = new AstCell{fl, fl, "__VBspPkgInst", m_packagep->name(), nullptr, nullptr, nullptr};
+        m_packageCellp = new AstCell{fl,
+                                     fl,
+                                     m_modNames.get(V3BspModules::builtinBspPkg + "Inst"),
+                                     m_packagep->name(),
+                                     nullptr,
+                                     nullptr,
+                                     nullptr};
         m_packageCellp->modp(m_packagep);
 
         m_topModp->addStmtsp(m_packageCellp);
@@ -310,6 +362,9 @@ private:
         m_packagep->addStmtsp(packageScopep);
         m_scopePrefix = packageScopep->name() + ".";
         m_packageScopep = packageScopep;
+        // make base classes for compute and top level program
+
+        makeBaseClasses();
         // now gor though all partitions and create a class and an instance of it
         std::vector<AstClass*> vtxClassesp;
         // AstTopScope* topScopep =
@@ -330,6 +385,7 @@ private:
         // function to run after computation
         AstCFunc* const copyFuncp
             = new AstCFunc{m_netlistp->topModulep()->fileline(), "exchange", m_topScopep, "void"};
+
         // function to run before everything
         AstCFunc* const initFuncp = new AstCFunc{m_netlistp->topModulep()->fileline(),
                                                  "initialize", m_topScopep, "void"};
@@ -386,7 +442,6 @@ private:
         m_topScopep->addBlocksp(copyFuncp);
         m_topScopep->addBlocksp(initFuncp);
 
-
         // snatch the AstTopScope from the existing topModle
         AstTopScope* singletonTopScopep = m_netlistp->topScopep()->unlinkFrBack();
         AstSenTree* senTreep = singletonTopScopep->senTreesp()->unlinkFrBackWithNext();
@@ -402,6 +457,30 @@ private:
         VL_DO_DANGLING(oldModsp->deleteTree(), oldModsp);
         // add the new topmodule (should be first, see AstNetlist::topModulesp())
         m_netlistp->addModulesp(m_topModp);
+
+        AstCFunc* computeSetp = new AstCFunc{m_netlistp->topModulep()->fileline(), "computeSet",
+                                             m_topScopep, "void"};
+        m_topModp->foreach([this, &computeSetp](AstVarScope* varp) {
+            AstClassRefDType* classRefp = VN_CAST(varp->dtypep(), ClassRefDType);
+            if (classRefp) {
+                UINFO(3, "Checking class " << classRefp->classp() << endl);
+            }
+            if (classRefp
+                && AstClass::isClassExtendedFrom(classRefp->classp(), m_classWithComputep)) {
+                FileLine* fl = varp->fileline();
+                AstCFunc* methodp = nullptr;
+                classRefp->classp()->foreach([&methodp](AstCFunc* np) {
+                    if (np->name() == "compute") { methodp = np; }
+                });
+                UASSERT_OBJ(methodp, classRefp->classp(), "Expected method named compute");
+                AstCMethodCall* callp = new AstCMethodCall{
+                    fl, new AstVarRef{fl, varp, VAccess::READ}, methodp, nullptr /*no args*/
+                };
+                callp->dtypeSetVoid();
+                computeSetp->addStmtsp(new AstStmtExpr{fl, callp});
+            }
+        });
+        m_topScopep->addBlocksp(computeSetp);
     }
 
     AstClass* makeInitial() {
@@ -414,13 +493,15 @@ private:
             fl = m_netlistp->topModulep()->fileline();
         }
         // create a class for the initialization
-        AstClass* classp = new AstClass{fl, m_modNames.get("vtxClsInit")};
-        // need a class package as well
-        classp->classOrPackagep(new AstClassPackage{fl, m_modNames.get("vtxClsInitPkg")});
-        classp->classOrPackagep()->classp(classp);
-        AstClassRefDType* classTypep = new AstClassRefDType{fl, classp, nullptr};
-        classTypep->classOrPackagep(m_packagep);
-        m_netlistp->typeTablep()->addTypesp(classTypep);
+        auto classAndTypep
+            = newClass(fl, m_modNames.get("vtxClsInit"), m_modNames.get("vtxClsInitPkg"));
+        AstClass* classp = classAndTypep.first;
+        AstClassRefDType* classTypep = classAndTypep.second;
+        AstClassExtends* extendsp = new AstClassExtends{fl, nullptr, false};
+        extendsp->dtypep(m_classWithComputeDtypep);
+        classp->addExtendsp(extendsp);
+        classp->isExtended(true);
+
         AstVar* classInstp
             = new AstVar{fl, VVarType::VAR, m_modNames.get("vtxInstInit"), classTypep};
         classInstp->lifetime(VLifetime::STATIC);
@@ -514,6 +595,9 @@ public:
         makeCopyOperations();
         // 4. add the classes
         m_netlistp->addModulesp(m_packagep);
+        m_netlistp->addModulesp(m_classWithComputep);
+        m_netlistp->addModulesp(m_classWithComputep->classOrPackagep());
+
         for (AstClass* clsp : submodp) {
             m_netlistp->addModulesp(clsp);
             m_netlistp->addModulesp(clsp->classOrPackagep());
@@ -525,6 +609,10 @@ public:
 
 };  // namespace
 }  // namespace
+
+std::string V3BspModules::builtinBspPkg = "__VbuiltinBspPkg";
+std::string V3BspModules::builtinBaseClass = "__VbuiltinBspCompute";
+std::string V3BspModules::builtinBaseClassPkg = "__VbuiltinBspComputePkg";
 
 void V3BspModules::makeModules(AstNetlist* netlistp,
                                const std::vector<std::unique_ptr<DepGraph>>& partitionsp,

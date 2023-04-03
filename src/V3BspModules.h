@@ -30,6 +30,9 @@ namespace V3BspSched {
 
 class V3BspModules final {
 public:
+    static std::string builtinBspPkg;
+    static std::string builtinBaseClass;
+    static std::string builtinBaseClassPkg;
     static void makeModules(AstNetlist* origp,
                             const std::vector<std::unique_ptr<DepGraph>>& partitionsp,
                             const V3Sched::LogicByScope& initials,
