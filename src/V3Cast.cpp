@@ -160,11 +160,27 @@ private:
         if (nodep->access().isReadOnly() && VN_IS(backp, NodeExpr) && !VN_IS(backp, CCast)
             && !VN_IS(backp, NodeCCall) && !VN_IS(backp, CMethodHard) && !VN_IS(backp, SFormatF)
             && !VN_IS(backp, ArraySel) && !VN_IS(backp, StructSel) && !VN_IS(backp, RedXor)
+            && !VN_IS(backp, VarRefView)
             && (nodep->varp()->basicp() && !nodep->varp()->basicp()->isTriggerVec()
                 && !nodep->varp()->basicp()->isForkSync())
             && backp->width() && castSize(nodep) != castSize(nodep->varp())) {
             // Cast vars to IData first, else below has upper bits wrongly set
             //  CData x=3; out = (QData)(x<<30);
+            insertCast(nodep, castSize(nodep));
+        }
+        nodep->user1(1);
+    }
+    void visit(AstVarRefView* nodep) override {
+        const AstNode* const backp = nodep->backp();
+        if (nodep->vrefp()->access().isReadOnly() && VN_IS(backp, NodeExpr) && !VN_IS(backp, CCast)
+            && !VN_IS(backp, NodeCCall) && !VN_IS(backp, CMethodHard) && !VN_IS(backp, SFormatF)
+            && !VN_IS(backp, ArraySel) && !VN_IS(backp, StructSel) && !VN_IS(backp, RedXor)
+            && (nodep->vrefp()->varp()->basicp()
+                && !nodep->vrefp()->varp()->basicp()->isTriggerVec()
+                && !nodep->vrefp()->varp()->basicp()->isForkSync())
+            && backp->width() && castSize(nodep) != castSize(nodep->vrefp()->varp())) {
+            // Cast vars to IData first, else below has upper bits wrongly set
+            //  CData x=3; out = (QData)(VL_VIEW<IDATA>(x)<<30);
             insertCast(nodep, castSize(nodep));
         }
         nodep->user1(1);

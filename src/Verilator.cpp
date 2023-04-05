@@ -23,6 +23,7 @@
 #include "V3Branch.h"
 #include "V3Broken.h"
 #include "V3BspDly.h"
+#include "V3BspPoplarProgram.h"
 #include "V3BspSched.h"
 #include "V3CCtors.h"
 #include "V3CUse.h"
@@ -74,6 +75,7 @@
 #include "V3Param.h"
 #include "V3ParseSym.h"
 #include "V3Partition.h"
+#include "V3EmitPoplar.h"
 #include "V3PreShell.h"
 #include "V3Premit.h"
 #include "V3ProtectLib.h"
@@ -418,7 +420,9 @@ static void process() {
         // Schedule the logic
         if (v3Global.opt.poplar()) {
 
+            // create classes represeting parallel computation
             V3BspSched::schedule(v3Global.rootp());
+
 
         } else {
             V3Sched::schedule(v3Global.rootp());
@@ -450,8 +454,12 @@ static void process() {
         if (v3Global.opt.stats()) V3Stats::statsStageAll(v3Global.rootp(), "Scoped");
     }
 
+    // create a poplar program
+    if (v3Global.opt.poplar()) {
+        // requires scopes
+        V3BspPoplarProgram::createProgram(v3Global.rootp());
+    }
     // --MODULE OPTIMIZATIONS--------------
-
     if (!v3Global.opt.xmlOnly()) {
         // Split deep blocks to appease MSVC++.  Must be before Localize.
         if (!v3Global.opt.lintOnly() && v3Global.opt.compLimitBlocks()) {
@@ -531,10 +539,11 @@ static void process() {
         // Add C casts when longs need to become long-long and vice-versa
         // Note depth may insert something needing a cast, so this must be last.
         V3Cast::castAll(v3Global.rootp());
+
     }
 
     V3Error::abortIfErrors();
-    if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly()) {  //
+    if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.poplar()) {  //
         V3CCtors::cctorsAll();
     }
 
@@ -546,9 +555,12 @@ static void process() {
         V3Partition::finalize(v3Global.rootp());
     }
 
+
     if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
         // Add common methods/etc to modules
-        V3Common::commonAll();
+        if (!v3Global.opt.poplar()){
+            V3Common::commonAll();
+        }
 
         // Order variables
         V3VariableOrder::orderAll();
@@ -558,7 +570,9 @@ static void process() {
     }
 
     // Output the text
-    if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
+    if (v3Global.opt.poplar()) {
+        V3EmitPoplar::emitVertex();
+    } else if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
         // emitcInlines is first, as it may set needHInlines which other emitters read
         V3EmitC::emitcInlines();
         V3EmitC::emitcSyms();

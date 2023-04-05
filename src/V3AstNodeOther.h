@@ -1602,6 +1602,7 @@ class AstVar final : public AstNode {
     VLifetime m_lifetime;  // Lifetime
     VVarAttrClocker m_attrClocker;
     MTaskIdSet m_mtaskIds;  // MTaskID's that read or write this var
+    VBspFlag m_bspFlags; // A set of flags for poplar code generation
     int m_pinNum = 0;  // For XML, if non-zero the connection pin number
     bool m_ansi : 1;  // ANSI port list variable (for dedup check)
     bool m_declTyped : 1;  // Declared as type (for dedup check)
@@ -1688,6 +1689,7 @@ class AstVar final : public AstNode {
         m_isWrittenByDpi = false;
         m_isWrittenBySuspendable = false;
         m_attrClocker = VVarAttrClocker::CLOCKER_UNKNOWN;
+        m_bspFlags = VBspFlag{};
     }
 
 public:
@@ -1954,6 +1956,7 @@ public:
     const MTaskIdSet& mtaskIds() const { return m_mtaskIds; }
     void pinNum(int id) { m_pinNum = id; }
     int pinNum() const { return m_pinNum; }
+    VBspFlag& bspFlag() { return m_bspFlags; }
 };
 class AstVarScope final : public AstNode {
     // A particular scoped usage of a variable

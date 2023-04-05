@@ -198,6 +198,7 @@ private:
         AstCFunc* cfuncp = new AstCFunc{fl, "compute", scopep, "void"};
         cfuncp->dontCombine(true);
         cfuncp->isMethod(true);
+        cfuncp->isInline(true);
 
         // create member variables for the class
         // STATE
@@ -378,7 +379,7 @@ private:
     }
 
     // make a top level module with a single "exchange" function that emulates "AssignPost"
-    void makeCopyOperations() {
+    void makeCopyOperations(const std::vector<AstClass*>& computeClassesp) {
         // AstVarScope::user2 -> true if variable already processed
         AstNode::user2ClearTree();
 
@@ -460,26 +461,25 @@ private:
 
         AstCFunc* computeSetp = new AstCFunc{m_netlistp->topModulep()->fileline(), "computeSet",
                                              m_topScopep, "void"};
-        m_topModp->foreach([this, &computeSetp](AstVarScope* varp) {
-            AstClassRefDType* classRefp = VN_CAST(varp->dtypep(), ClassRefDType);
-            if (classRefp) {
-                UINFO(3, "Checking class " << classRefp->classp() << endl);
+        for (AstClass* classp : computeClassesp) {
+            AstVarScope* vscp = nullptr;
+            for (vscp = m_topScopep->varsp(); vscp; vscp = VN_AS(vscp->nextp(), VarScope)) {
+                AstClassRefDType* classRefp = VN_CAST(vscp->dtypep(), ClassRefDType);
+                if (classRefp && classRefp->classp() == classp) break;
             }
-            if (classRefp
-                && AstClass::isClassExtendedFrom(classRefp->classp(), m_classWithComputep)) {
-                FileLine* fl = varp->fileline();
-                AstCFunc* methodp = nullptr;
-                classRefp->classp()->foreach([&methodp](AstCFunc* np) {
-                    if (np->name() == "compute") { methodp = np; }
-                });
-                UASSERT_OBJ(methodp, classRefp->classp(), "Expected method named compute");
-                AstCMethodCall* callp = new AstCMethodCall{
-                    fl, new AstVarRef{fl, varp, VAccess::READ}, methodp, nullptr /*no args*/
-                };
-                callp->dtypeSetVoid();
-                computeSetp->addStmtsp(new AstStmtExpr{fl, callp});
-            }
-        });
+            UASSERT(vscp, "did not find class instance!");
+            FileLine* fl = vscp->fileline();
+            AstCFunc* methodp = nullptr;
+            classp->foreach([&methodp](AstCFunc* np) {
+                if (np->name() == "compute") { methodp = np; }
+            });
+            UASSERT_OBJ(methodp, classp, "Expected method named compute");
+            AstCMethodCall* callp = new AstCMethodCall{
+                fl, new AstVarRef{fl, vscp, VAccess::READ}, methodp, nullptr /*no args*/
+            };
+            callp->dtypeSetVoid();
+            computeSetp->addStmtsp(new AstStmtExpr{fl, callp});
+        }
         m_topScopep->addBlocksp(computeSetp);
     }
 
@@ -592,7 +592,7 @@ public:
         AstClass* initClassp = makeInitial();
         // 3. Create copy operations
         UINFO(3, "Creating copy program" << endl);
-        makeCopyOperations();
+        makeCopyOperations(submodp);
         // 4. add the classes
         m_netlistp->addModulesp(m_packagep);
         m_netlistp->addModulesp(m_classWithComputep);

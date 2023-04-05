@@ -1211,6 +1211,60 @@ public:
     int widthTotalBytes() const override { return subDTypep()->widthTotalBytes(); }
     bool isCompound() const override { return true; }
 };
+
+class AstVectorDType final : public AstNodeDType {
+    // A poplar Vector type
+private:
+    // size of the vector
+    const uint32_t m_size;
+    AstBasicDType* m_refDTypep = nullptr;
+public:
+    AstVectorDType(FileLine* fl, uint32_t size, AstBasicDType* dtp)
+        :  ASTGEN_SUPER_VectorDType(fl)
+        , m_size(size) {
+        refDTypep(dtp);
+        dtypep(dtp);
+    }
+    ASTGEN_MEMBERS_AstVectorDType;
+
+    uint32_t size() const { return m_size; }
+    const char* broken() const override {
+        BROKEN_RTN(!(m_refDTypep && m_refDTypep->brokeExists()));
+        return nullptr;
+    }
+    void cloneRelink() override {
+        if (m_refDTypep && m_refDTypep->clonep()) m_refDTypep = m_refDTypep->clonep();
+    }
+    bool same(const AstNode* samep) const override {
+        const AstNodeArrayDType* const asamep = static_cast<const AstNodeArrayDType*>(samep);
+        if (!asamep->subDTypep()) return false;
+        return (subDTypep() == asamep->subDTypep());
+    }
+    bool similarDType(const AstNodeDType* samep) const override {
+        const AstSampleQueueDType* const asamep = static_cast<const AstSampleQueueDType*>(samep);
+        return type() == samep->type() && asamep->subDTypep()
+               && subDTypep()->skipRefp()->similarDType(asamep->subDTypep()->skipRefp());
+    }
+    void dumpSmall(std::ostream& str) const override;
+    AstNodeDType* getChildDTypep() const override { return m_refDTypep; }
+    // op1 = Range of variable
+    AstNodeDType* subDTypep() const override { return m_refDTypep; }
+    void refDTypep(AstNodeDType* nodep) {
+        UASSERT(VN_IS(nodep, BasicDType), "expected basic type in Vector");
+        m_refDTypep = VN_AS(nodep, BasicDType);
+    }
+    AstNodeDType* virtRefDTypep() const override { return m_refDTypep; }
+    void virtRefDTypep(AstNodeDType* nodep) override { refDTypep(nodep); }
+    // METHODS
+    AstBasicDType* basicp() const override { return subDTypep()->basicp(); }
+    AstNodeDType* skipRefp() const override { return (AstNodeDType*)this; }
+    AstNodeDType* skipRefToConstp() const override { return (AstNodeDType*)this; }
+    AstNodeDType* skipRefToEnump() const override { return (AstNodeDType*)this; }
+    int widthAlignBytes() const override { return m_refDTypep->widthAlignBytes() * m_size; }
+    int widthTotalBytes() const override { return m_refDTypep->widthTotalBytes() * m_size; }
+    bool isCompound() const override { return true; }
+
+};
 class AstVoidDType final : public AstNodeDType {
     // For e.g. a function returning void
 public:

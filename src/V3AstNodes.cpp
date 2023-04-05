@@ -2000,6 +2000,10 @@ void AstQueueDType::dumpSmall(std::ostream& str) const {
     this->AstNodeDType::dumpSmall(str);
     str << "[queue]";
 }
+void AstVectorDType::dumpSmall(std::ostream& str) const {
+    this->AstNodeDType::dumpSmall(str);
+    str << "[poplar::Vector]";
+}
 string AstQueueDType::prettyDTypeName() const {
     string str = subDTypep()->prettyDTypeName() + "[$";
     if (boundConst()) str += ":" + cvtToStr(boundConst());

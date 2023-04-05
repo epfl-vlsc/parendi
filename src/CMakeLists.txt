@@ -47,6 +47,7 @@ set(HEADERS
     V3BspDly.h
     V3BspGraph.h
     V3BspModules.h
+    V3BspPoplarProgram.h
     V3BspSched.h
     V3Case.h
     V3Cast.h
@@ -80,6 +81,7 @@ set(HEADERS
     V3EmitCMain.h
     V3EmitCMake.h
     V3EmitMk.h
+    V3EmitPoplar.h
     V3EmitV.h
     V3EmitXml.h
     V3Error.h
@@ -190,6 +192,7 @@ set(COMMON_SOURCES
     V3BspDly.cpp
     V3BspGraph.cpp
     V3BspModules.cpp
+    V3BspPoplarProgram.cpp
     V3BspSched.cpp
     V3CCtors.cpp
     V3CUse.cpp
@@ -229,6 +232,7 @@ set(COMMON_SOURCES
     V3EmitCMake.cpp
     V3EmitCModel.cpp
     V3EmitCSyms.cpp
+    V3EmitPoplarVertex.cpp
     V3EmitMk.cpp
     V3EmitV.cpp
     V3EmitXml.cpp

@@ -1192,6 +1192,15 @@ public:
         }
         puts(nodep->varp()->nameProtect());
     }
+    void visit(AstVarRefView* nodep) override {
+        // VN_IS won't work, need dynamic_cast to check.
+        UASSERT_OBJ(dynamic_cast<AstVarRef*>(nodep->vrefp()), nodep, "expected VarRef as op1!");
+        puts("VL_VIEW<");
+        puts(nodep->dtypep()->cType("", false, false));
+        puts(">(");
+        iterateChildren(nodep);
+        puts(")");
+    }
     void visit(AstAddrOfCFunc* nodep) override {
         // Note: Can be thought to handle more, but this is all that is needed right now
         const AstCFunc* const funcp = nodep->funcp();

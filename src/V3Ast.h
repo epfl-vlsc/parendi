@@ -461,6 +461,16 @@ public:
         TRIGGER_SCHEDULER,
         DYNAMIC_TRIGGER_SCHEDULER,
         FORK_SYNC,
+        // Poplar Types
+        POPLAR_TENSOR,
+        POPLAR_VECTOR_UINT32,
+        POPLAR_GRAPH,
+        POPLAR_COMPUTESET,
+        POPLAR_VERTEXREF,
+        POPLAR_ENGINE,
+        POPLAR_DEVICE,
+        POPLAR_TARGET,
+        POPLAR_CONTEXT,
         // Unsigned and two state; fundamental types
         UINT32,
         UINT64,
@@ -493,6 +503,15 @@ public:
                                             "VlTriggerScheduler",
                                             "VlDynamicTriggerScheduler",
                                             "VlFork",
+                                            "poplar::Tensor",
+                                            "poplar::Vector<IData>",
+                                            "poplar::Graph",
+                                            "poplar::ComputeSet",
+                                            "poplar::VertexRef",
+                                            "poplar::Engine",
+                                            "poplar::Device",
+                                            "poplar::Target",
+                                            "PoplarContext",
                                             "IData",
                                             "QData",
                                             "LOGIC_IMPLICIT",
@@ -505,8 +524,10 @@ public:
                "int",          "%E-integer",    "svLogic",       "long long",    "double",
                "short",        "%E-time",       "const char*",   "%E-untyped",   "dpiScope",
                "const char*",  "%E-mtaskstate", "%E-triggervec", "%E-dly-sched", "%E-trig-sched",
-               "%E-dyn-sched", "%E-fork",       "IData",         "QData",        "%E-logic-implct",
-               " MAX"};
+               "%E-dyn-sched", "%E-fork",       "%E-poplar::Tensor", "%E-poplar::Vector<uint32_t>",
+               "%E-poplar::Graph", "%E-poplar::ComputeSet", "%E-poplar::VertexRef", "%E-poplar::Engine",
+               "%E-poplar::Device", "%E-poplar::Target", "%E-PoplarContext", "IData",
+               "QData",        "%E-logic-implct", " MAX"};
         return names[m_e];
     }
     static void selfTest() {
@@ -1210,7 +1231,30 @@ public:
         , m_keyword{kwd} {}
     ~VBasicTypeKey() = default;
 };
+//######################################################################
 
+class VBspFlag final {
+public:
+    enum EFlags : int {
+        MEMBER_INPUT = 1,  // Input<..>
+        MEMBER_OUTPUT = 2,  // Output<..>
+        MEMBER_HOSTREAD = 4,  // host readable
+        MEMBER_HOSTWRITE = 8,  // host writeable
+        MEMBER_OPAQUE = 16  // an opaque storage for multiple variables
+    };
+private:
+    int m_flag = 0;
+public:
+    VBspFlag& append(EFlags v) {
+        m_flag |= v;
+        return *this;
+    }
+    bool hasInput() const { return (m_flag & MEMBER_INPUT); }
+    bool hasOutput() const { return (m_flag & MEMBER_OUTPUT); }
+    bool hasHostRead() const { return (m_flag & MEMBER_HOSTREAD); }
+    bool hasHostWrite() const { return (m_flag & MEMBER_HOSTWRITE); }
+    bool valid() const { return hasInput() | hasOutput() | hasHostRead() | hasHostWrite(); }
+};
 //######################################################################
 // AstNUser - Generic base class for AST User nodes.
 //          - Also used to allow parameter passing up/down iterate calls

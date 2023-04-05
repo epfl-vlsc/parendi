@@ -2037,6 +2037,18 @@ public:
     bool cleanOut() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
+class AstVarRefView final : public AstNodeExpr {
+    // view a variable references as another data type without runtime casting
+    // @astgen op1 := vrefp  : AstVarRef
+public:
+    inline AstVarRefView(FileLine* fl, AstVarRef* vrefp);
+    ASTGEN_MEMBERS_AstVarRefView;
+
+    string emitVerilog() override { V3ERROR_NA_RETURN(""); }
+    string emitC() override { V3ERROR_NA_RETURN(""); }
+    bool cleanOut() const override { return true; }
+
+};
 class AstWith final : public AstNodeExpr {
     // Used as argument to method, then to AstCMethodHard
     // dtypep() contains the with lambda's return dtype
