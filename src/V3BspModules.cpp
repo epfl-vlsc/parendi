@@ -107,6 +107,8 @@ private:
 
     AstClass* m_classWithComputep = nullptr;
     AstClassRefDType* m_classWithComputeDtypep = nullptr;
+    AstClass* m_classWithInitp = nullptr;
+    AstClassRefDType* m_classWithInitDTypep = nullptr;
 
     AstScope* m_packageScopep = nullptr;
     AstCell* m_packageCellp = nullptr;
@@ -157,6 +159,13 @@ private:
         m_classWithComputep->isVirtual(true);
 
         m_classWithComputeDtypep = clsAndTpe.second;
+
+        auto initClsAndTypep
+            = newClass(new FileLine(FileLine::builtInFilename()),
+                       V3BspModules::builtinBaseInitClass, V3BspModules::builtinBaseClassPkg);
+        m_classWithInitp = initClsAndTypep.first;
+        m_classWithInitDTypep = initClsAndTypep.second;
+        m_classWithInitp->isVirtual(true);
     }
 
     // make a single class representing the parallel computation in each graph
@@ -192,6 +201,7 @@ private:
         m_topModp->addStmtsp(classInstp);
         // this class will represent the code that runs on one core
         classp->level(4);  // lives under the BspPkg
+        classp->flag(VClassFlag{}.append(VClassFlag::BSP_BUILTIN));
         // create a scope for the class
         AstScope* scopep = new AstScope{fl, classp, m_scopePrefix + classp->name(),
                                         m_packageScopep, m_packageCellp};
@@ -223,6 +233,7 @@ private:
                                               vscp->varp()->name(), vscp->varp()->dtypep()};
                     varp->lifetime(VLifetime::AUTOMATIC);
                     AstVarScope* newVscp = new AstVarScope{vscp->fileline(), scopep, varp};
+                    newVscp->trace(vscp->isTrace());
                     scopep->addVarsp(newVscp);
                     vscp->user3p(newVscp);
                     if (VN_IS(vscp->dtypep(), BasicDType)
@@ -318,6 +329,10 @@ private:
                 classp->v3fatalSrc("name clash with builtin base class "
                                    << V3BspModules::builtinBaseClass << endl);
             }
+            if (classp->name() == V3BspModules::builtinBaseInitClass) {
+                classp->v3fatalSrc("name clash with builtin base class "
+                                   << V3BspModules::builtinBaseInitClass << endl);
+            }
         });
         m_netlistp->foreach([this](AstClassPackage* classp) {
             if (classp->name() == V3BspModules::builtinBaseClassPkg) {
@@ -335,8 +350,8 @@ private:
         // create a new top module
         m_topModp = new AstModule{fl, m_netlistp->topModulep()->name(), true};
         m_topModp->level(1);  // top module
-        m_topScopep
-            = new AstScope{fl, m_topModp, m_netlistp->topScopep()->name(), nullptr, nullptr};
+        m_topScopep = new AstScope{fl, m_topModp, m_netlistp->topScopep()->scopep()->name(),
+                                   nullptr, nullptr};
         // m_topModp->addStmtsp(new AstTopScope{fl, topScopep});
 
         // all the classes will be in a package, let's build this package and
@@ -498,7 +513,7 @@ private:
         AstClass* classp = classAndTypep.first;
         AstClassRefDType* classTypep = classAndTypep.second;
         AstClassExtends* extendsp = new AstClassExtends{fl, nullptr, false};
-        extendsp->dtypep(m_classWithComputeDtypep);
+        extendsp->dtypep(m_classWithInitDTypep);
         classp->addExtendsp(extendsp);
         classp->isExtended(true);
 
@@ -511,24 +526,28 @@ private:
         m_topModp->addStmtsp(classInstp);
         // this class will represent the code that runs on one core
         classp->level(4);  // lives under the BspPkg
+        classp->flag(
+            VClassFlag{}.append(VClassFlag::BSP_BUILTIN).append(VClassFlag::BSP_INIT_BUILTIN));
         // create a scope for the class
         AstScope* scopep = new AstScope{fl, classp, m_scopePrefix + classp->name(),
                                         m_packageScopep, m_packageCellp};
         AstCFunc* cfuncp = new AstCFunc{fl, "compute", scopep, "void"};
         cfuncp->dontCombine(true);
         cfuncp->isMethod(true);
+        cfuncp->isInline(true);
 
         // STATE
         //      AstVarScope::user3p  -> new var scope local to the class
 
         AstNode::user3ClearTree();
-        auto replaceOldVarRef = [this, &scopep, &classp, &cfuncp, &classInstp](AstVarRef* vrefp) {
+        auto replaceOldVarRef = [this, &scopep, &classp, &cfuncp, &instVscp](AstVarRef* vrefp) {
             AstVarScope* oldVscp = vrefp->varScopep();
             AstVarScope* substp = VN_CAST(oldVscp->user3p(), VarScope);
             if (!substp) {
                 AstVar* varp = new AstVar{vrefp->varScopep()->varp()->fileline(), VVarType::MEMBER,
                                           oldVscp->varp()->name(), oldVscp->varp()->dtypep()};
                 substp = new AstVarScope{oldVscp->fileline(), scopep, varp};
+                substp->trace(oldVscp->isTrace());
                 scopep->addVarsp(substp);
                 oldVscp->user3p(substp);
                 // if the variable is consumed by any of the graph nodes, then
@@ -536,7 +555,7 @@ private:
                 // be kept local to the function
                 if (m_vscpRefs(oldVscp).hasConsumer()) {
                     classp->addStmtsp(varp);
-                    m_vscpRefs(oldVscp).initp({substp, classInstp});
+                    m_vscpRefs(oldVscp).initp({instVscp, varp});
                 } else {
                     cfuncp->addStmtsp(varp);
                     varp->funcLocal(true);
@@ -595,8 +614,12 @@ public:
         makeCopyOperations(submodp);
         // 4. add the classes
         m_netlistp->addModulesp(m_packagep);
+
         m_netlistp->addModulesp(m_classWithComputep);
         m_netlistp->addModulesp(m_classWithComputep->classOrPackagep());
+
+        m_netlistp->addModulesp(m_classWithInitp);
+        m_netlistp->addModulesp(m_classWithInitp->classOrPackagep());
 
         for (AstClass* clsp : submodp) {
             m_netlistp->addModulesp(clsp);
@@ -612,6 +635,7 @@ public:
 
 std::string V3BspModules::builtinBspPkg = "__VbuiltinBspPkg";
 std::string V3BspModules::builtinBaseClass = "__VbuiltinBspCompute";
+std::string V3BspModules::builtinBaseInitClass = "__VbuiltinBspInit";
 std::string V3BspModules::builtinBaseClassPkg = "__VbuiltinBspComputePkg";
 
 void V3BspModules::makeModules(AstNetlist* netlistp,
@@ -625,4 +649,23 @@ void V3BspModules::makeModules(AstNetlist* netlistp,
     }
     V3Global::dumpCheckGlobalTree("bspmodules", 0, dumpTree() >= 1);
 }
+
+namespace {
+AstClass* doFind(AstNetlist* nodep, const std::string& which) {
+    AstClass* foundp = nullptr;
+    nodep->foreach([&foundp, &which](AstClass* classp) {
+        if (classp->name() == which) foundp = classp;
+    });
+    UASSERT(foundp, "did not find " << which << endl);
+    return foundp;
+}
+}  // namespace
+AstClass* V3BspModules::findBspBaseClass(AstNetlist* nodep) {
+    return doFind(nodep, builtinBaseClass);
+}
+
+AstClass* V3BspModules::findBspBaseInitClass(AstNetlist* nodep) {
+    return doFind(nodep, builtinBaseInitClass);
+}
+
 };  // namespace V3BspSched

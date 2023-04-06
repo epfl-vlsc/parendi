@@ -32,11 +32,14 @@ class V3BspModules final {
 public:
     static std::string builtinBspPkg;
     static std::string builtinBaseClass;
+    static std::string builtinBaseInitClass;
     static std::string builtinBaseClassPkg;
     static void makeModules(AstNetlist* origp,
                             const std::vector<std::unique_ptr<DepGraph>>& partitionsp,
                             const V3Sched::LogicByScope& initials,
                             const V3Sched::LogicByScope& statics);
+    static AstClass* findBspBaseClass(AstNetlist* nodep);
+    static AstClass* findBspBaseInitClass(AstNetlist* nodep);
 };
 };  // namespace V3BspSched
 #endif

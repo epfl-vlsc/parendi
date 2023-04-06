@@ -20,17 +20,24 @@
 #include "V3BspPoplarProgram.h"
 
 #include "V3Ast.h"
+#include "V3AstUserAllocator.h"
 #include "V3BspModules.h"
 #include "V3EmitCBase.h"
 #include "V3Global.h"
 #include "V3UniqueNames.h"
 
+#include <unordered_map>
+
 VL_DEFINE_DEBUG_FUNCTIONS;
 
+/// @brief create class member interfaces for host interactions.
+/// This visitor looks for Display, Finish, and Stop nodes in the bsp classes
+/// and replaces them with writes to class members. Then a hostHandle function
+/// is created in the top module that handles the the system call in the host
+/// Note that general DPI calls with return values is not supported.
 class PoplarHostInteractionVisitor final : public VNVisitor {
 private:
     AstNetlist* m_netlistp = nullptr;
-    AstClass* m_baseClassp = nullptr;
 
     V3UniqueNames m_funcNames;
     V3UniqueNames m_memberName;
@@ -193,12 +200,7 @@ public:
         , m_memberName{"__VbspHostInterface"} {
         UASSERT(v3Global.assertScoped(), "expected scopes, run before descoping");
         m_netlistp = nodep;
-        nodep->foreach([this](AstClass* classp) {
-            if (classp->name() == V3BspSched::V3BspModules::builtinBaseClass)
-                m_baseClassp = classp;
-        });
-        UASSERT_OBJ(m_baseClassp, nodep,
-                    "Expected builtin class, make sure V3BspModules is creating it!");
+
         // m_netlistp->topScopep()->scopep(), "void"
 
         AstCFunc* hostHandlep = new AstCFunc{m_netlistp->fileline(), "hostHandle",
@@ -208,7 +210,7 @@ public:
         // of base class type, jump to class definition
         nodep->topModulep()->foreach([this, &hostHandlep](AstVarScope* vscp) {
             AstClassRefDType* clsRefp = VN_CAST(vscp->varp()->dtypep(), ClassRefDType);
-            if (AstClass::isClassExtendedFrom(clsRefp->classp(), m_baseClassp)) {
+            if (clsRefp->classp()->flag().isBsp()) {
                 // jump to the class
                 m_ctx.clear();
                 m_memberName.reset();
@@ -278,7 +280,7 @@ class PoplarViewsVisitor final : public VNVisitor {
 private:
     AstNetlist* m_netlistp = nullptr;
     AstClass* m_classp = nullptr;  // the class we are under
-    AstClass* m_baseClassp = nullptr;
+
     // STATE
     //     AstVar::user1() -> true if top level class member
     //     AstVarRef::user1() -> true if processes
@@ -327,7 +329,7 @@ private:
 
     void visit(AstClass* nodep) override {
         VL_RESTORER(m_classp);
-        if (AstClass::isClassExtendedFrom(nodep, m_baseClassp)) {
+        if (nodep->flag().isBsp()) {
             m_classp = nodep;
             AstNode::user1ClearTree();
             std::vector<AstVar*> members;
@@ -348,12 +350,6 @@ private:
 public:
     explicit PoplarViewsVisitor(AstNetlist* nodep) {
         m_netlistp = nodep;
-        nodep->foreach([this](AstClass* classp) {
-            if (classp->name() == V3BspSched::V3BspModules::builtinBaseClass)
-                m_baseClassp = classp;
-        });
-        UASSERT_OBJ(m_baseClassp, nodep,
-                    "Expected builtin class, make sure V3BspModules is creating it!");
         iterate(nodep);
     }
 };
@@ -365,20 +361,35 @@ private:
     AstBasicDType* m_ctxTypep = nullptr;
     AstBasicDType* m_tensorTypep = nullptr;
     AstBasicDType* m_vtxRefTypep = nullptr;
-    uint32_t m_callerId = 0;
+    AstVar* m_ctxVarp = nullptr;
+    AstVarScope* m_ctxVscp = nullptr;
 
-    AstBasicDType* addBuiltinType(VBasicDTypeKwd kwd) {
-        UASSERT(kwd == VBasicDTypeKwd::POPLAR_COMPUTESET || kwd == VBasicDTypeKwd::POPLAR_TENSOR
-                    || kwd == VBasicDTypeKwd::POPLAR_GRAPH || kwd == VBasicDTypeKwd::POPLAR_ENGINE
-                    || kwd == VBasicDTypeKwd::POPLAR_VERTEXREF
-                    || kwd == VBasicDTypeKwd::POPLAR_DEVICE || kwd == VBasicDTypeKwd::POPLAR_TARGET
-                    || kwd == VBasicDTypeKwd::POPLAR_CONTEXT,
-                "bad builtin type");
-        AstBasicDType* const typep
-            = new AstBasicDType{m_netlistp->fileline(), kwd, VSigning::UNSIGNED};
-        m_netlistp->typeTablep()->addTypesp(typep);
-        return typep;
+    uint32_t m_callerId = 0;
+    struct TensorHandle {
+        std::string tensor;
+        std::string hostRead;
+        std::string hostWrite;
+        TensorHandle() {
+            tensor.erase();
+            hostRead.erase();
+            hostWrite.erase();
+        }
+    };
+    VNUser1InUse m_user1InUse;
+    AstUser1Allocator<AstVar, TensorHandle> m_handles;
+
+    void initBuiltinTypes() {
+        auto newType = [this](VBasicDTypeKwd kwd) {
+            AstBasicDType* const typep
+                = new AstBasicDType{m_netlistp->fileline(), kwd, VSigning::UNSIGNED};
+            m_netlistp->typeTablep()->addTypesp(typep);
+            return typep;
+        };
+        m_ctxTypep = newType(VBasicDTypeKwd::POPLAR_CONTEXT);
+        m_tensorTypep = newType(VBasicDTypeKwd::POPLAR_TENSOR);
+        m_vtxRefTypep = newType(VBasicDTypeKwd::POPLAR_VERTEXREF);
     }
+
     AstVarScope* createFuncVar(FileLine* fl, AstCFunc* funcp, const std::string& name,
                                AstBasicDType* dtp) {
 
@@ -399,97 +410,160 @@ private:
         return foundp;
     }
 
-    AstCFunc* creatVertexCons(AstClass* classp, uint32_t tileId) {
+    AstCMethodHard* mkCall(FileLine* fl, const std::string& name,
+                           const std::vector<AstNodeExpr*>& argsp, AstBasicDType* dtp = nullptr) {
+        AstCMethodHard* callp
+            = new AstCMethodHard{fl, new AstVarRef{fl, m_ctxVscp, VAccess::READWRITE}, name};
+        for (const auto ap : argsp) { callp->addPinsp(ap); }
+        if (dtp) {
+            callp->dtypep(dtp);
+        } else {
+            callp->dtypeSetVoid();
+        }
+        return callp;
+    };
+
+    AstCFunc* createVertexCons(AstClass* classp, uint32_t tileId) {
         FileLine* fl = classp->fileline();
         AstCFunc* ctorp = new AstCFunc{classp->fileline(), "ctor_" + classp->name(),
                                        m_netlistp->topScopep()->scopep(), "void"};
-        auto ctxTypep = addBuiltinType(VBasicDTypeKwd::POPLAR_CONTEXT);
-        AstVar* ctxVarp = new AstVar{m_netlistp->fileline(), VVarType::VAR, "ctx", m_ctxTypep};
-        AstVarScope* ctxVscp = new AstVarScope{m_netlistp->fileline(), ctorp->scopep(), ctxVarp};
-        ctxVarp->funcLocal(true);
-        ctxVarp->direction(VDirection::REF);
-        ctorp->addArgsp(ctxVarp);
-        ctorp->scopep()->addVarsp(ctxVscp);
-        auto mkCall = [&](const std::string& name, const std::vector<AstNodeExpr*>& argsp,
-                          AstBasicDType* dtp = nullptr) -> AstCMethodHard* {
-            AstCMethodHard* callp
-                = new AstCMethodHard{fl, new AstVarRef{fl, ctxVscp, VAccess::READWRITE}, name};
-            for (const auto ap : argsp) { callp->addPinsp(ap); }
-            if (dtp) {
-                callp->dtypep(dtp);
-            } else {
-                callp->dtypeSetVoid();
-            }
-            return callp;
-        };
+
         AstVarScope* vtxVscp = createFuncVar(fl, ctorp, m_newNames.get("instance"), m_vtxRefTypep);
         auto className = EmitCBaseVisitor::prefixNameProtect(classp);
-        AstAssign* mkVtx = new AstAssign{fl, new AstVarRef{fl, vtxVscp, VAccess::WRITE},
-                                         mkCall("getOrAddVertex",
-                                                {new AstConst{fl, AstConst::String{}, className}},
-                                                m_vtxRefTypep)};
+        AstAssign* mkVtx = new AstAssign{
+            fl, new AstVarRef{fl, vtxVscp, VAccess::WRITE},
+            mkCall(fl, "getOrAddVertex",
+                   {new AstConst{fl, AstConst::String{}, className},
+                    new AstConst{fl, AstConst::BitTrue{}, classp->flag().isBspInit()}},
+                   m_vtxRefTypep)};
         ctorp->addStmtsp(mkVtx);
-        auto setTileMapping = [&fl, &mkCall, &ctorp](AstVarScope* vscp, uint32_t tid) {
-            AstStmtExpr* tileMapp = new AstStmtExpr{
-                fl, mkCall("setTileMapping", {new AstVarRef{fl, vscp, VAccess::READWRITE},
+        auto setTileMapping = [this, &fl, &ctorp](AstVarScope* vscp, uint32_t tid) {
+            AstStmtExpr* tileMapp
+                = new AstStmtExpr{fl, mkCall(fl, "setTileMapping",
+                                             {new AstVarRef{fl, vscp, VAccess::READWRITE},
                                               new AstConst{fl, AstConst::Unsized32{}, tid}})};
             ctorp->addStmtsp(tileMapp);
         };
 
         setTileMapping(vtxVscp, tileId);
 
-        AstStmtExpr* perfEstp = new AstStmtExpr{
-            fl, mkCall("setPerfEstimate", {new AstVarRef{fl, vtxVscp, VAccess::READWRITE},
-                                           new AstConst{fl, AstConst::Unsized32{}, 0}})};
+        AstStmtExpr* perfEstp
+            = new AstStmtExpr{fl, mkCall(fl, "setPerfEstimate",
+                                         {new AstVarRef{fl, vtxVscp, VAccess::READWRITE},
+                                          new AstConst{fl, AstConst::Unsized32{}, 0}})};
         ctorp->addStmtsp(perfEstp);
         // iterate through the class members and create tensors
         for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
             AstVar* varp = VN_CAST(nodep, Var);
             if (!varp) continue;
             AstVectorDType* dtp = VN_CAST(varp->dtypep(), VectorDType);
-            UASSERT_OBJ(dtp, varp, "expected VectorDType");
+            UASSERT_OBJ(dtp, varp, "expected VectorDType, need to create AstVarRefViews first!");
             UASSERT_OBJ(dtp->basicp()->keyword() == VBasicDTypeKwd::UINT32, dtp, "expeced UINT32");
             UASSERT_OBJ(varp->isClassMember(), varp, "Expected class member");
             // create a tensor for this variable
             AstVarScope* tensorVscp
                 = createFuncVar(fl, ctorp, m_newNames.get("tensor"), m_tensorTypep);
+            std::string tensorDeviceHandle = className + "." + varp->nameProtect();
+            m_handles(varp).tensor
+                = tensorDeviceHandle;  // need this to be able to later look up the tensor
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
-                mkCall("addTensor", {new AstConst{fl, AstConst::Unsized32{}, dtp->size()},
-                                     new AstConst{fl, AstConst::String{},
-                                                  className + "." + varp->nameProtect()}})};
+                mkCall(fl, "addTensor",
+                       {new AstConst{fl, AstConst::Unsized32{}, dtp->size()},
+                        new AstConst{fl, AstConst::String{}, tensorDeviceHandle}})};
             ctorp->addStmtsp(mkTensorp);
             setTileMapping(tensorVscp, tileId);
             // connect the tensor to the vertex
             ctorp->addStmtsp(new AstStmtExpr{
-                fl, mkCall("connect", {new AstVarRef{fl, vtxVscp, VAccess::READWRITE},
-                                       new AstConst{fl, AstConst::String{}, varp->nameProtect()},
-                                       new AstVarRef{fl, tensorVscp, VAccess::READWRITE}})});
+                fl, mkCall(fl, "connect",
+                           {new AstVarRef{fl, vtxVscp, VAccess::READWRITE},
+                            new AstConst{fl, AstConst::String{}, varp->nameProtect()},
+                            new AstVarRef{fl, tensorVscp, VAccess::READWRITE}})});
+            // check whether we need to create host read/write handles
+            if (varp->bspFlag().hasHostRead()) {
+                const std::string hrHandle = "hr." + tensorDeviceHandle;
+                m_handles(varp).hostRead = hrHandle;
+                ctorp->addStmtsp(
+                    new AstStmtExpr{fl, mkCall(fl, "createHostRead",
+                                               {new AstConst{fl, AstConst::String{}, hrHandle},
+                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE}},
+                                               nullptr)});
+            }
+            if (varp->bspFlag().hasHostWrite()) {
+                const std::string hwHandle = "hw." + tensorDeviceHandle;
+                m_handles(varp).hostWrite = hwHandle;
+                ctorp->addStmtsp(
+                    new AstStmtExpr{fl, mkCall(fl, "createHostWrite",
+                                               {new AstConst{fl, AstConst::String{}, hwHandle},
+                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE}},
+                                               nullptr)});
+            }
         }
 
         return ctorp;
     }
 
-    void delegateToHost(AstClass* classp, AstCFunc* ctorp) {
+    void addCopies(AstCFunc* cfuncp, const bool isInit) {
 
-        // check for any AstDisplay or AstFinish, AstStop and etc., if they
-        // exist, create functions for handling on the host side and the class
-        // interfaces to stop the IPU
-
-        classp->foreach([](AstNodeStmt* nodep) {
-            if (AstDisplay* disp = VN_CAST(nodep, Display)) {
-
-            } else if (AstFinish* finishp = VN_CAST(nodep, Finish)) {
-            }
-        });
+        for (AstNode* nodep = cfuncp->stmtsp(); nodep;) {
+            UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
+            AstAssign* const assignp = VN_AS(nodep, Assign);
+            AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
+            AstVar* const fromp = VN_AS(assignp->rhsp(), MemberSel)->varp();
+            // get the handles from the user1
+            auto toHandle = m_handles(top).tensor;
+            UASSERT(!toHandle.empty(), "handle not set!");
+            auto fromHandle = m_handles(fromp).tensor;
+            UASSERT(!fromHandle.empty(), "handle not set!");
+            AstNode* newp = new AstStmtExpr{
+                nodep->fileline(),
+                mkCall(assignp->fileline(), "addCopy",
+                       {new AstConst{nodep->fileline(), AstConst::String{}, fromHandle},
+                        new AstConst{nodep->fileline(), AstConst::String{}, toHandle},
+                        new AstConst{nodep->fileline(), AstConst::BitTrue{}, isInit}})};
+            nodep->replaceWith(newp);
+            VL_DO_DANGLING(nodep->deleteTree(), nodep);
+            nodep = newp->nextp();
+        }
     }
-    void addGraphAndComputeSet(AstNodeModule* topModp) {}
 
 public:
     explicit PoplarComputeGraphBuilder(AstNetlist* nodep)
         : m_newNames{"__VPoplar"} {
         m_netlistp = nodep;
-        addGraphAndComputeSet(m_netlistp->topModulep());
+        // AstClass*
+        initBuiltinTypes();
+
+        m_ctxVarp = new AstVar{m_netlistp->fileline(), VVarType::VAR, "ctx", m_ctxTypep};
+        m_ctxVscp = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(),
+                                    m_ctxVarp};
+        m_netlistp->topScopep()->scopep()->addVarsp(m_ctxVscp);
+
+        uint32_t tileId = 0;
+        const uint32_t maxTileId = 1472;  // should be a cli arg
+        // Step 1.
+        // go through each class and create constructors. All that happens here
+        // depends on a hard coded PoplarContext that provides a few methods
+        // for constructing graphs from codelets and connecting tensors to vertices
+        AstNode::user1ClearTree();
+        m_netlistp->foreach([this, &tileId](AstClass* classp) {
+            // go through each deriviation of the base bsp class and create
+            // host constructors
+            if (!classp->flag().isBsp()) { return; /*some other class*/ }
+            AstCFunc* ctorp = createVertexCons(classp, tileId);
+            tileId++;
+            tileId %= maxTileId;
+            m_netlistp->topScopep()->scopep()->addBlocksp(ctorp);
+        });
+        // Step 2.
+        // create a poplar program with the following structure:
+        // Add the copy operations
+        m_netlistp->foreach([this](AstCFunc* cfuncp) {
+            if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize") {
+                // create copy operations
+                addCopies(cfuncp, cfuncp->name() == "initialize");
+            }
+        });
     }
 };
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
@@ -499,4 +573,6 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     V3Global::dumpCheckGlobalTree("bspPoplarHost", 0, dumpTree() >= 1);
     { PoplarViewsVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarView", 0, dumpTree() >= 1);
+    { PoplarComputeGraphBuilder{nodep}; }  // destroy before checking
+    V3Global::dumpCheckGlobalTree("bscPoplalProgram", 0, dumpTree() >= 1);
 }

@@ -2112,6 +2112,7 @@ class AstClass final : public AstNodeModule {
     bool m_interfaceClass = false;  // Interface class
     bool m_virtual = false;  // Virtual class
     void insertCache(AstNode* nodep);
+    VClassFlag m_flag;
 
 public:
     AstClass(FileLine* fl, const string& name)
@@ -2142,9 +2143,12 @@ public:
     void isInterfaceClass(bool flag) { m_interfaceClass = flag; }
     bool isVirtual() const { return m_virtual; }
     void isVirtual(bool flag) { m_virtual = flag; }
+    VClassFlag flag() const { return m_flag; }
+    void flag(VClassFlag flag) { m_flag = flag; }
     // Return true if this class is an extension of base class (SLOW)
     // Accepts nullptrs
     static bool isClassExtendedFrom(const AstClass* refClassp, const AstClass* baseClassp);
+
 };
 class AstClassPackage final : public AstNodeModule {
     // The static information portion of a class (treated similarly to a package)

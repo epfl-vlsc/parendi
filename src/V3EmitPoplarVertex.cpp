@@ -114,9 +114,7 @@ private:
         // emit method defs
 
         for (AstNode* stmtp = m_fileClassp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
-            if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) {
-                EmitCFunc::visit(funcp);
-            }
+            if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) { EmitCFunc::visit(funcp); }
         }
         VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
     }
@@ -138,20 +136,16 @@ void V3EmitPoplar::emitVertex() {
 
     AstNetlist* netlistp = v3Global.rootp();
     // find the classes that are derived from the V3BspModules::builtinBspCompute class
-    AstClass* builtinBasep = nullptr;
-    std::list<std::deque<AstCFile*>> cfilesp;
 
-    netlistp->foreach([&builtinBasep](AstClass* nodep) {
-        if (nodep->name() == V3BspSched::V3BspModules::builtinBaseClass) { builtinBasep = nodep; }
-    });
-    UASSERT(builtinBasep, "expected builtin bsp class");
+    std::list<std::deque<AstCFile*>> cfilesp;
 
     for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
         if (const AstClass* classp = VN_CAST(nodep, Class)) {
-            // if (AstClass::isClassExtendedFrom(classp, builtinBasep)) {}
-            cfilesp.emplace_back();
-            UINFO(3, "Emitting " << classp->nameProtect() << endl);
-            { EmitPoplarVertex{classp, false /*slow*/, cfilesp.back()}; }
+            if (classp->flag().isBsp()) {
+                cfilesp.emplace_back();
+                UINFO(3, "Emitting " << classp->nameProtect() << endl);
+                { EmitPoplarVertex{classp, false /*slow*/, cfilesp.back()}; }
+            }
         }
     }
 }

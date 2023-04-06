@@ -1255,6 +1255,23 @@ public:
     bool hasHostWrite() const { return (m_flag & MEMBER_HOSTWRITE); }
     bool valid() const { return hasInput() | hasOutput() | hasHostRead() | hasHostWrite(); }
 };
+class VClassFlag final {
+public:
+    enum en : uint8_t {
+        NONE = 0x0000,
+        BSP_BUILTIN = 0x0001,
+        BSP_INIT_BUILTIN = 0x0002
+    };
+private:
+    uint8_t m_flag = NONE;
+public:
+    VClassFlag& append(en v) {
+        m_flag |= v;
+        return *this;
+    }
+    bool isBsp() const { return (m_flag & BSP_BUILTIN); }
+    bool isBspInit() const { return (m_flag & BSP_INIT_BUILTIN); }
+};
 //######################################################################
 // AstNUser - Generic base class for AST User nodes.
 //          - Also used to allow parameter passing up/down iterate calls
@@ -2560,7 +2577,7 @@ AstNode* VNVisitor::iterateSubtreeReturnEdits(AstNode* nodep) {
 #include "V3AstNodeDType.h"
 #include "V3AstNodeExpr.h"
 #include "V3AstNodeOther.h"
-
+#include "V3AstNodePoplar.h"
 // Inline function definitions need to go last
 #include "V3AstInlines.h"
 

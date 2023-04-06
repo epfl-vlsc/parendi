@@ -40,6 +40,7 @@ set(HEADERS
     V3AstNodeDType.h
     V3AstNodeExpr.h
     V3AstNodeOther.h
+    V3AstNodePoplar.h
     V3AstUserAllocator.h
     V3Begin.h
     V3Branch.h
@@ -342,9 +343,9 @@ configure_file(config_build.h.in config_build.h @ONLY)
 
 add_custom_command(
     OUTPUT V3Ast__gen_forward_class_decls.h V3Dfg__gen_forward_class_decls.h
-    DEPENDS ./V3Ast.h ./V3AstNodeOther.h ./V3AstNodeExpr.h ${ASTGEN}
+    DEPENDS ./V3Ast.h ./V3AstNodeOther.h ./V3AstNodeExpr.h ./V3AstNodePoplar.h ${ASTGEN}
     COMMAND ${PYTHON3} ARGS
-    ${ASTGEN} -I "${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --dfgdef V3DfgVertices.h --classes
+    ${ASTGEN} -I "${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --astdef V3AstNodePoplar.h --dfgdef V3DfgVertices.h --classes
 )
 list(APPEND GENERATED_FILES V3Ast__gen_forward_class_decls.h V3Dfg__gen_forward_class_decls.h)
 # Output used directly by the `verilator` target
@@ -430,7 +431,7 @@ foreach(astgen_name ${ASTGENERATED_NAMES})
         MAIN_DEPENDENCY ${astgen_name}.cpp
         DEPENDS ${ASTGEN} V3Ast.h
         COMMAND ${PYTHON3} ARGS
-            ${ASTGEN} -I"${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --dfgdef V3DfgVertices.h ${astgen_name}.cpp
+            ${ASTGEN} -I"${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --astdef V3AstNodePoplar.h --dfgdef V3DfgVertices.h ${astgen_name}.cpp
     )
     list(APPEND GENERATED_FILES ${astgen_name}__gen.cpp)
 endforeach()
