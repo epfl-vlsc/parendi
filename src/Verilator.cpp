@@ -48,6 +48,7 @@
 #include "V3EmitCMain.h"
 #include "V3EmitCMake.h"
 #include "V3EmitMk.h"
+#include "V3EmitPoplar.h"
 #include "V3EmitV.h"
 #include "V3EmitXml.h"
 #include "V3Expand.h"
@@ -75,7 +76,6 @@
 #include "V3Param.h"
 #include "V3ParseSym.h"
 #include "V3Partition.h"
-#include "V3EmitPoplar.h"
 #include "V3PreShell.h"
 #include "V3Premit.h"
 #include "V3ProtectLib.h"
@@ -354,7 +354,6 @@ static void process() {
         // (May convert some ALWAYS to combo blocks, so should be before V3Gate step.)
         V3Active::activeAll(v3Global.rootp());
 
-
         // Split single ALWAYS blocks into multiple blocks for better ordering chances
         if (v3Global.opt.fSplit()) V3Split::splitAlwaysAll(v3Global.rootp());
         V3SplitAs::splitAsAll(v3Global.rootp());
@@ -423,13 +422,11 @@ static void process() {
             // create classes represeting parallel computation
             V3BspSched::schedule(v3Global.rootp());
 
-
         } else {
             V3Sched::schedule(v3Global.rootp());
             // Convert sense lists into IF statements.
             V3Clock::clockAll(v3Global.rootp());
         }
-
 
         // Cleanup any dly vars or other temps that are simple assignments
         // Life must be done before Subst, as it assumes each CFunc under
@@ -539,7 +536,6 @@ static void process() {
         // Add C casts when longs need to become long-long and vice-versa
         // Note depth may insert something needing a cast, so this must be last.
         V3Cast::castAll(v3Global.rootp());
-
     }
 
     V3Error::abortIfErrors();
@@ -555,12 +551,9 @@ static void process() {
         V3Partition::finalize(v3Global.rootp());
     }
 
-
     if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
         // Add common methods/etc to modules
-        if (!v3Global.opt.poplar()){
-            V3Common::commonAll();
-        }
+        if (!v3Global.opt.poplar()) { V3Common::commonAll(); }
 
         // Order variables
         V3VariableOrder::orderAll();
@@ -572,48 +565,52 @@ static void process() {
     // Output the text
     if (v3Global.opt.poplar()) {
         V3EmitPoplar::emitVertex();
-    } else if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
-        // emitcInlines is first, as it may set needHInlines which other emitters read
-        V3EmitC::emitcInlines();
-        V3EmitC::emitcSyms();
-        V3EmitC::emitcConstPool();
-        V3EmitC::emitcModel();
-        V3EmitC::emitcHeaders();
-    } else if (v3Global.opt.dpiHdrOnly()) {
-        V3EmitC::emitcSyms(true);
-    }
-    if (!v3Global.opt.xmlOnly()
-        && !v3Global.opt.dpiHdrOnly()) {  // Unfortunately we have some lint checks in emitcImp.
-        V3EmitC::emitcImp();
-    }
-    if (v3Global.opt.xmlOnly()
-        // Check XML when debugging to make sure no missing node types
-        || (v3Global.opt.debugCheck() && !v3Global.opt.lintOnly() && !v3Global.opt.dpiHdrOnly())) {
-        V3EmitXml::emitxml();
-    }
-
-    // Output DPI protected library files
-    if (!v3Global.opt.libCreate().empty()) {
-        if (v3Global.rootp()->delaySchedulerp()) {
-            v3warn(E_UNSUPPORTED, "Unsupported: --lib-create with --timing and delays");
+        V3EmitPoplar::emitProgram();
+    } else {
+        if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
+            // emitcInlines is first, as it may set needHInlines which other emitters read
+            V3EmitC::emitcInlines();
+            V3EmitC::emitcSyms();
+            V3EmitC::emitcConstPool();
+            V3EmitC::emitcModel();
+            V3EmitC::emitcHeaders();
+        } else if (v3Global.opt.dpiHdrOnly()) {
+            V3EmitC::emitcSyms(true);
         }
-        V3ProtectLib::protect();
-        V3EmitV::emitvFiles();
-        V3EmitC::emitcFiles();
+        if (!v3Global.opt.xmlOnly()
+            && !v3Global.opt
+                    .dpiHdrOnly()) {  // Unfortunately we have some lint checks in emitcImp.
+            V3EmitC::emitcImp();
+        }
+        if (v3Global.opt.xmlOnly()
+            // Check XML when debugging to make sure no missing node types
+            || (v3Global.opt.debugCheck() && !v3Global.opt.lintOnly()
+                && !v3Global.opt.dpiHdrOnly())) {
+            V3EmitXml::emitxml();
+        }
+
+        // Output DPI protected library files
+        if (!v3Global.opt.libCreate().empty()) {
+            if (v3Global.rootp()->delaySchedulerp()) {
+                v3warn(E_UNSUPPORTED, "Unsupported: --lib-create with --timing and delays");
+            }
+            V3ProtectLib::protect();
+            V3EmitV::emitvFiles();
+            V3EmitC::emitcFiles();
+        }
+
+        if (v3Global.opt.stats()) V3Stats::statsStage("emit");
+
+        // Statistics
+        reportStatsIfEnabled();
+
+        if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
+            // Makefile must be after all other emitters
+            if (v3Global.opt.main()) V3EmitCMain::emit();
+            if (v3Global.opt.cmake()) V3EmitCMake::emit();
+            if (v3Global.opt.gmake()) V3EmitMk::emitmk();
+        }
     }
-
-    if (v3Global.opt.stats()) V3Stats::statsStage("emit");
-
-    // Statistics
-    reportStatsIfEnabled();
-
-    if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
-        // Makefile must be after all other emitters
-        if (v3Global.opt.main()) V3EmitCMain::emit();
-        if (v3Global.opt.cmake()) V3EmitCMake::emit();
-        if (v3Global.opt.gmake()) V3EmitMk::emitmk();
-    }
-
     // Note early return above when opt.cdc()
 }
 
