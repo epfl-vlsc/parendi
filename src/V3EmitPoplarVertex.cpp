@@ -93,8 +93,8 @@ private:
         for (AstNode* stmtp = m_fileClassp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
                 UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
-                puts("poplar::InOut<");
-                puts(vrefp->dtypep()->name());
+                puts("::poplar::InOut<");
+                puts(vrefp->dtypep()->cType("", false, false));
                 puts("> ");
                 puts(vrefp->nameProtect());
                 puts(";\n");

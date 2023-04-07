@@ -47,7 +47,7 @@
 class V3EmitPoplar final {
 public:
     static void emitVertex();
-
+    static void emitProgram();
 };
 
 #endif

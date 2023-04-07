@@ -88,7 +88,7 @@ public:
     ~VarScopeReferences() = default;
 };
 
-class ModuleBuilderImpl final {
+class ModuleBuilderImpl final : public VNDeleter {
 private:
     // NODE STATE
     //      VarScope::user1     -> consumers and producer of the variable
@@ -301,14 +301,14 @@ private:
             }
         }
         for (AstNode* nodep : stmtps) {
-            nodep->foreach([](AstVarRef* vrefp) {
+            nodep->foreach([this](AstVarRef* vrefp) {
                 // replace with the new variables
                 UASSERT_OBJ(vrefp->varScopep()->user3p(), vrefp->varScopep(), "Expected user3p");
                 AstVarScope* substp = VN_AS(vrefp->varScopep()->user3p(), VarScope);
                 // replace the reference
                 AstVarRef* newp = new AstVarRef{vrefp->fileline(), substp, vrefp->access()};
                 vrefp->replaceWith(newp);
-                VL_DO_DANGLING(vrefp->deleteTree(), vrefp);
+                VL_DO_DANGLING(pushDeletep(vrefp), vrefp);
             });
             cfuncp->addStmtsp(nodep);
         }

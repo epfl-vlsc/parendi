@@ -354,7 +354,7 @@ public:
     }
 };
 
-class PoplarComputeGraphBuilder final {
+class PoplarComputeGraphBuilder final : public VNDeleter {
 private:
     AstNetlist* m_netlistp = nullptr;
     V3UniqueNames m_newNames;
@@ -411,7 +411,7 @@ private:
     }
 
     AstCMethodHard* mkCall(FileLine* fl, const std::string& name,
-                           const std::vector<AstNodeExpr*>& argsp, AstBasicDType* dtp = nullptr) {
+                           const std::vector<AstNodeExpr*>& argsp, AstNodeDType* dtp = nullptr) {
         AstCMethodHard* callp
             = new AstCMethodHard{fl, new AstVarRef{fl, m_ctxVscp, VAccess::READWRITE}, name};
         for (const auto ap : argsp) { callp->addPinsp(ap); }
@@ -427,7 +427,7 @@ private:
         FileLine* fl = classp->fileline();
         AstCFunc* ctorp = new AstCFunc{classp->fileline(), "ctor_" + classp->name(),
                                        m_netlistp->topScopep()->scopep(), "void"};
-
+        ctorp->isInline(false);
         AstVarScope* vtxVscp = createFuncVar(fl, ctorp, m_newNames.get("instance"), m_vtxRefTypep);
         auto className = EmitCBaseVisitor::prefixNameProtect(classp);
         AstAssign* mkVtx = new AstAssign{
@@ -518,12 +518,60 @@ private:
             AstNode* newp = new AstStmtExpr{
                 nodep->fileline(),
                 mkCall(assignp->fileline(), "addCopy",
-                       {new AstConst{nodep->fileline(), AstConst::String{}, fromHandle},
-                        new AstConst{nodep->fileline(), AstConst::String{}, toHandle},
-                        new AstConst{nodep->fileline(), AstConst::BitTrue{}, isInit}})};
+                       {new AstConst{nodep->fileline(), AstConst::String{}, fromHandle} /*source*/,
+                        new AstConst{nodep->fileline(), AstConst::String{}, toHandle} /*target*/,
+                        new AstConst{nodep->fileline(), AstConst::Unsized32{},
+                                     static_cast<uint32_t>(top->widthWords())} /*number of words*/,
+                        new AstConst{nodep->fileline(), AstConst::BitTrue{},
+                                     isInit} /*is it part of init*/})};
             nodep->replaceWith(newp);
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
             nodep = newp->nextp();
+        }
+    }
+
+    void patchHostHandle() {
+        // find the host handle top function
+        AstCFunc* hostp = getFunc(m_netlistp->topModulep(), "hostHandle");
+        // find any other reachable function from hostp;
+        std::set<AstCFunc*> reachablep;
+        std::queue<AstCFunc*> toVisitp;
+        toVisitp.push(hostp);
+        int depth = 0;
+        while (!toVisitp.empty()) {
+            UASSERT(depth++ < 100000, "something is up");
+            AstCFunc* toCheckp = toVisitp.front();
+            toVisitp.pop();
+            if (reachablep.find(toCheckp) != reachablep.end()) continue;
+            toCheckp->foreach([&toVisitp, &reachablep](AstCCall* callp) {
+                auto foundIt = reachablep.find(callp->funcp());
+                if (foundIt == reachablep.end()) { toVisitp.push(callp->funcp()); }
+            });
+            reachablep.insert(toCheckp);
+        }
+
+        for (AstCFunc* nodep : reachablep) {
+            // replace all the AstMemberSel with calls to appropriate members
+            // to PoplarContext
+            nodep->foreach([this](AstMemberSel* memselp) {
+                // MEMBERSEL cls.var becomes ctx.getHostData<dtype>(var, dtype{})
+                // memselp->dtypep() still has the "old" host side datatype
+                // not the vector type that PoplarViewsVisitor creates in BSP
+                // classes. Consider it a bug (since type information is broken) or a feature
+                // (since things become easier here!)
+                auto handle = m_handles(memselp->varp()).hostRead;
+                UASSERT(!handle.empty(), "empty handle!");
+                AstCMethodHard* callp
+                    = mkCall(memselp->fileline(),
+                             "getHostData", /*getHostData is a templated function, we use a empty
+                                               constant to help the C++ compiler infer the type*/
+                             {new AstConst{memselp->fileline(), AstConst::String{}, handle},
+                              new AstConst{memselp->fileline(), AstConst::DTyped{},
+                                           memselp->dtypep()} /*used to resolve template types*/},
+                             memselp->dtypep());
+                memselp->replaceWith(callp);
+                VL_DO_DANGLING(pushDeletep(memselp), memselp);
+            });
         }
     }
 
@@ -535,6 +583,7 @@ public:
         initBuiltinTypes();
 
         m_ctxVarp = new AstVar{m_netlistp->fileline(), VVarType::VAR, "ctx", m_ctxTypep};
+        m_netlistp->topModulep()->stmtsp()->addHereThisAsNext(m_ctxVarp);
         m_ctxVscp = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(),
                                     m_ctxVarp};
         m_netlistp->topScopep()->scopep()->addVarsp(m_ctxVscp);
@@ -546,7 +595,20 @@ public:
         // depends on a hard coded PoplarContext that provides a few methods
         // for constructing graphs from codelets and connecting tensors to vertices
         AstNode::user1ClearTree();
-        m_netlistp->foreach([this, &tileId](AstClass* classp) {
+        // AstCFunc* computeSetp = nullptr;
+        // m_netlistp->topModulep()->foreach([&computeSetp](AstCFunc* funcp) {
+        //     if (funcp->name() == "computeSet") computeSetp = funcp;
+        // });
+        // UASSERT(computeSetp, "expected computeSet method!");
+        // computeSetp->name("constructAll"); // rename
+        // computeSetp->stmtsp()->unlinkFrBackWithNext()->deleteTree(); // remove old function
+        // calls
+        AstCFunc* constructAllp = new AstCFunc{m_netlistp->fileline(), "constructAll",
+                                               m_netlistp->topScopep()->scopep(), "void"};
+        constructAllp->isMethod(true);
+        constructAllp->dontCombine(true);
+        m_netlistp->topScopep()->scopep()->addBlocksp(constructAllp);
+        m_netlistp->foreach([this, &constructAllp, &tileId](AstClass* classp) {
             // go through each deriviation of the base bsp class and create
             // host constructors
             if (!classp->flag().isBsp()) { return; /*some other class*/ }
@@ -554,6 +616,10 @@ public:
             tileId++;
             tileId %= maxTileId;
             m_netlistp->topScopep()->scopep()->addBlocksp(ctorp);
+
+            AstCCall* callp = new AstCCall{ctorp->fileline(), ctorp};
+            callp->dtypeSetVoid();
+            constructAllp->addStmtsp(new AstStmtExpr{ctorp->fileline(), callp});
         });
         // Step 2.
         // create a poplar program with the following structure:
@@ -564,6 +630,12 @@ public:
                 addCopies(cfuncp, cfuncp->name() == "initialize");
             }
         });
+        patchHostHandle();
+        // remove the computeSet funciton, not used
+        getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
+
+        
+
     }
 };
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
