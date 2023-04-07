@@ -181,7 +181,12 @@ private:
             m_hash += nodep->uniqueNum();
         });
     }
-
+    void visit(AstVectorDType* nodep) override {
+        m_hash += hashNodeAndIterate(nodep, false, false, [=] {
+            m_hash += nodep->size();
+            iterateNull(nodep->subDTypep());
+        });
+    }
     //------------------------------------------------------------
     // AstNodeExpr
     void visit(AstNodeExpr* nodep) override {
