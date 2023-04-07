@@ -89,7 +89,7 @@ private:
             UASSERT(m_ctx.m_numCalls > 0, "should not create host interface!");
             AstVar* varp = new AstVar{
                 m_ctx.m_classp->fileline(), VVarType::MEMBER, m_memberName.get("callId"),
-                m_netlistp->findBitDType(m_ctx.m_numCalls, m_ctx.m_numCalls, VSigning::UNSIGNED)};
+                m_netlistp->findBitDType(m_ctx.m_numCalls, std::max(m_ctx.m_numCalls, VL_EDATASIZE), VSigning::UNSIGNED)};
             varp->bspFlag().append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT);
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_ctx.m_scopep, varp};
             UASSERT(m_ctx.m_classp->stmtsp(), "Class with no vars!");
@@ -634,7 +634,7 @@ public:
         // remove the computeSet funciton, not used
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
 
-        
+
 
     }
 };

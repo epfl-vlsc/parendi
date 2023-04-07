@@ -29,7 +29,7 @@
 #include <poplar/Graph.hpp>
 #include <poplar/IPUModel.hpp>
 #include <poplar/Tensor.hpp>
-
+struct RuntimeConfig {};
 class VlPoplarContext final {
 private:
     struct HostBuffer {
@@ -113,12 +113,6 @@ void VlPoplarContext::createHostWrite(const std::string& handle, poplar::Tensor&
     graph->createHostWrite(handle, tensor);
 }
 
-
-int main() {
-    VProgram prog;
-
-
-
-}
+int main() { VProgram prog; }
 
 // #endif

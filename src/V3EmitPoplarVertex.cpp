@@ -71,7 +71,7 @@ private:
         ofp()->putsHeader();
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// Poplar vertex implementation\n");
-        puts("#include \"verilated_poplar.h\"\n");
+        puts("#include <vlpoplar/verilated.h>\n");
         puts("#include <poplar/Vertex.hpp>\n");
         // puts("using namespace poplar;");
 
@@ -93,7 +93,7 @@ private:
         for (AstNode* stmtp = m_fileClassp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
                 UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
-                puts("::poplar::InOut<");
+                puts("poplar::InOut<");
                 puts(vrefp->dtypep()->cType("", false, false));
                 puts("> ");
                 puts(vrefp->nameProtect());
