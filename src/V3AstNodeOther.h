@@ -2075,12 +2075,14 @@ private:
     bool m_slow : 1;  ///< Compile w/o optimization
     bool m_source : 1;  ///< Source file (vs header file)
     bool m_support : 1;  ///< Support file (non systemc)
+    bool m_codelet: 1; ///< codelet file
 public:
     AstCFile(FileLine* fl, const string& name)
         : ASTGEN_SUPER_CFile(fl, name)
         , m_slow{false}
         , m_source{false}
-        , m_support{false} {}
+        , m_support{false}
+        , m_codelet(false) {}
     ASTGEN_MEMBERS_AstCFile;
     void dump(std::ostream& str = std::cout) const override;
     bool slow() const { return m_slow; }
@@ -2089,6 +2091,8 @@ public:
     void source(bool flag) { m_source = flag; }
     bool support() const { return m_support; }
     void support(bool flag) VL_MT_SAFE { m_support = flag; }
+    bool codelet() const { return m_codelet; }
+    void codelet(bool flag) VL_MT_SAFE { m_codelet = flag; }
 };
 class AstVFile final : public AstNodeFile {
     // Verilog output file

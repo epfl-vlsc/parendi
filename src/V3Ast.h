@@ -1240,7 +1240,8 @@ public:
         MEMBER_OUTPUT = 2,  // Output<..>
         MEMBER_HOSTREAD = 4,  // host readable
         MEMBER_HOSTWRITE = 8,  // host writeable
-        MEMBER_OPAQUE = 16  // an opaque storage for multiple variables
+        MEMBER_HOSTREQ   = 16, // is a host request
+        MEMBER_OPAQUE = 32,  // an opaque storage for multiple variables
     };
 private:
     int m_flag = 0;
@@ -1253,7 +1254,9 @@ public:
     bool hasOutput() const { return (m_flag & MEMBER_OUTPUT); }
     bool hasHostRead() const { return (m_flag & MEMBER_HOSTREAD); }
     bool hasHostWrite() const { return (m_flag & MEMBER_HOSTWRITE); }
-    bool valid() const { return hasInput() | hasOutput() | hasHostRead() | hasHostWrite(); }
+    bool hasHostReq() const { return (m_flag & MEMBER_HOSTREQ); }
+    bool valid() const { return hasInput() || hasOutput() || hasHostRead() ||
+        hasHostWrite() || (hasHostRead() && hasHostReq()); }
 };
 class VClassFlag final {
 public:

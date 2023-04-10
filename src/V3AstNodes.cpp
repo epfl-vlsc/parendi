@@ -752,7 +752,7 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const {
         if (bdtypep->keyword() == VBasicDTypeKwd::POPLAR_TENSOR) {
             info.m_type = "::poplar::Tensor";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::POPLAR_CONTEXT) {
-            info.m_type = "VPoplarContext";
+            info.m_type = "VlPoplarContext&";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::POPLAR_VERTEXREF) {
             info.m_type = "::poplar::VertexRef";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::CHARPTR) {
@@ -777,9 +777,9 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const {
             info.m_type = "VlForkSync";
         } else if (bdtypep->isEvent()) {
             info.m_type = "VlEvent";
-        } else if (dtypep->widthMin() <= 8) {  // Handle unpacked arrays; not bdtypep->width
+        } else if (dtypep->widthMin() <= 8 && !v3Global.opt.poplar()) {  // Handle unpacked arrays; not bdtypep->width
             info.m_type = "CData" + bitvec;
-        } else if (dtypep->widthMin() <= 16) {
+        } else if (dtypep->widthMin() <= 16 && !v3Global.opt.poplar()) {
             info.m_type = "SData" + bitvec;
         } else if (dtypep->widthMin() <= VL_IDATASIZE) {
             info.m_type = "IData" + bitvec;

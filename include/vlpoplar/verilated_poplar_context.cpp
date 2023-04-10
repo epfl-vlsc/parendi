@@ -1,89 +1,79 @@
-// -*- mode: C++; c-file-style: "cc-mode" -*-
-//=============================================================================
-//
-// Code available from: https://verilator.org
-//
-// Copyright 2001-2023 by Wilson Snyder. This program is free software; you
-// can redistribute it and/or modify it under the terms of either the GNU
-// Lesser General Public License Version 3 or the Perl Artistic License
-// Version 2.0.
-// SPDX-License-Identifier: LGPL-3.0-only OR Artistic-2.0
-//
-//=============================================================================
-///
-/// \file  verilated_poplar_context.h
-/// \brief Verilated poplar context implementation
-///
-//=============================================================================
 
-// #ifndef VERILATOR_POPLARCONTEXT_H_
-// #define VERILATOR_POPLARCONTEXT_H_
+#include VPROGRAM_HEADER /*defined by the Makefile*/
 
-#include <iostream>
-#include <memory>
-#include <unordered_map>
+#include "verilated_poplar_context.h"
 
-#include <poplar/CycleCount.hpp>
-#include <poplar/DeviceManager.hpp>
-#include <poplar/Engine.hpp>
-#include <poplar/Graph.hpp>
-#include <poplar/IPUModel.hpp>
-#include <poplar/Tensor.hpp>
-struct RuntimeConfig {};
-class VlPoplarContext final {
-private:
-    struct HostBuffer {
-        std::vector<uint32_t> buff;
-    };
-    RuntimeConfig cfg;
-    std::unique_ptr<poplar::Device> device;
-    std::unique_ptr<poplar::Graph> graph;
-    std::unique_ptr<poplar::Engine> engine;
-    std::unique_ptr<poplar::ComputeSet> workload;
-    std::unique_ptr<poplar::ComputeSet> initializer;
-    std::unordered_map<std::string, poplar::Tensor> tensors;
-    std::unordered_map<std::string, std::unique_ptr<HostBuffer>> hbuffers;
-    std::unordered_map<std::string, poplar::VertexRef> vertices;
-    poplar::program::Sequence initCopies;
-    poplar::program::Sequence exchangeCopies;
+#include "verilated.h"
 
-    poplar::Tensor getTensor(const std::string& name) {
-        auto it = tensors.find(name);
-        if (it == tensors.end()) {
-            std::cerr << "Can not find tensor " << name << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-        return it->second;
+#include <fstream>
+// #include <boost/filesystem.hpp>
+// #include <boost/program_options.hpp>
+
+void VlPoplarContext::init(int argc, char* argv[]) {
+
+    // cfg = parseArgs(argc, argv);
+
+    auto manager = poplar::DeviceManager::createDeviceManager();
+    auto devices = manager.getDevices();
+    // get the first available device
+    auto devIt = std::find_if(devices.begin(), devices.end(),
+                              [](poplar::Device& dev) { return dev.attach(); });
+    if (devIt == devices.end()) {
+        std::cerr << "Failed to attache to an IPU" << std::endl;
+        std::exit(EXIT_FAILURE);
     }
 
-public:
-    void init(int argc, char* argv[]);
-    void addCopy(const std::string& from, const std::string& to, uint32_t size, bool isInit);
-    void setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId);
-    void setTileMapping(poplar::Tensor& tensor, uint32_t tileId);
-    void connect(poplar::VertexRef& vtxRef, const std::string& vtxField, poplar::Tensor& tensor);
-    void createHostRead(const std::string& handleName, poplar::Tensor& tensor);
-    void createHostWrite(const std::string& handleName, poplar::Tensor& tensor);
+    device = std::make_unique<poplar::Device>(std::move(*devIt));
 
-    poplar::VertexRef getOrAddVertex(const std::string& name, bool isInit);
+    graph = std::make_unique<poplar::Graph>(device->getTarget());
+    workload = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("workload"));
+    initializer = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("initializer"));
+    vprog = std::make_unique<VPROGRAM>(*this);
+    std::ifstream fs{CODELET_LIST /*defined by the Makefile*/, std::ios::in};
 
-    poplar::Tensor addTensor(uint32_t size, const std::string& name);
+    for (std::string ln; std::getline(fs, ln);) { graph->addCodelets(ln); }
+    // std::cout << "initializing simulation context " << std::endl;
+    vprog->constructAll();
+    vprog->initialize();
+    vprog->exchange();
+}
 
-    template <typename T>
-    inline T getHostData(const std::string& handle, const T& /*unused*/) {
-        static_assert(std::is_trivially_copy_assignable<T>());
-        static_assert(std::is_trivially_copy_constructible<T>());
-        // find the host buffer
-        auto it = hbuffers.find(handle);
-        if (it == hbuffers.end()) {
-            std::cerr << "Can not find host handle " << handle << std::endl;
-            std::exit(EXIT_FAILURE);
-        }
-        engine->readTensor(handle, it->second->buff.data(),
-                           it->second->buff.data() + it->second->buff.size());
-        return (*reinterpret_cast<T*>(it->second->buff.data()));
+void VlPoplarContext::build() {
+    // build the poplar graph
+    using namespace poplar;
+    using namespace poplar::program;
+    Sequence prog;
+    // handle any host calls invoked by the initial blocks
+    if (hostRequest.size() != 1) {
+        std::cerr << "Can only handle exactly one host request for now, you have "
+                  << hostRequest.size() << std::endl;
+        std::exit(EXIT_FAILURE);
     }
-};
+    auto zeroValue = graph->addConstant(UNSIGNED_INT, {1}, false, "false value");
+    graph->setTileMapping(zeroValue, 0);
+    for (auto hr : hostRequest) {
+        prog.add(Copy(zeroValue, hr[0]));  // need to clear the loop conditions
+    }
+    Tensor breakCond = hostRequest.front()[0];
+    Sequence loopBody{Execute{*workload}, Sync{SyncType::INTERNAL}, exchangeCopies,
+                      Sync{SyncType::INTERNAL}};
+    prog.add(RepeatWhileFalse{Sequence{}, breakCond, loopBody, "eval loop"});
+    OptionFlags flags{};
+    auto exec = compileGraph(*graph, {Sequence{Execute(*initializer), initCopies}, prog}, flags);
+
+    engine = std::make_unique<Engine>(exec, flags);
+    engine->load(*device);
+}
+
+void VlPoplarContext::run() {
+    auto contextp = std::make_unique<VerilatedContext>();
+    engine->run(INIT_PROGRAM);
+    vprog->hostHandle();
+    while (!contextp->gotFinish()) {
+        engine->run(EVAL_PROGRAM);
+        vprog->hostHandle();
+    }
+}
 
 void VlPoplarContext::addCopy(const std::string& from, const std::string& to, uint32_t size,
                               bool isInit) {
@@ -95,6 +85,19 @@ void VlPoplarContext::addCopy(const std::string& from, const std::string& to, ui
     } else {
         exchangeCopies.add(cp);
     }
+}
+poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name) {
+    poplar::Tensor t = graph->addVariable(poplar::UNSIGNED_INT, {size}, name);
+    tensors.emplace(name, t);
+    return t;
+}
+
+poplar::VertexRef VlPoplarContext::getOrAddVertex(const std::string& name, bool isInit) {
+    auto it = vertices.find(name);
+    if (it == vertices.end()) {
+        vertices.emplace(name, graph->addVertex(isInit ? *initializer : *workload, name));
+    }
+    return vertices[name];
 }
 void VlPoplarContext::setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId) {
     graph->setTileMapping(vtxRef, tileId);
@@ -108,11 +111,19 @@ void VlPoplarContext::connect(poplar::VertexRef& vtx, const std::string& field,
 }
 void VlPoplarContext::createHostRead(const std::string& handle, poplar::Tensor& tensor) {
     graph->createHostRead(handle, tensor);
+    hbuffers.emplace(handle, std::make_unique<HostBuffer>(tensor.numElements()));
 }
 void VlPoplarContext::createHostWrite(const std::string& handle, poplar::Tensor& tensor) {
     graph->createHostWrite(handle, tensor);
+    hbuffers.emplace(handle, std::make_unique<HostBuffer>(tensor.numElements()));
 }
 
-int main() { VProgram prog; }
+void VlPoplarContext::isHostRequest(poplar::Tensor& tensor) { hostRequest.push_back(tensor); }
 
-// #endif
+int main(int argc, char* argv[]) {
+    VlPoplarContext ctx;
+    ctx.init(argc, argv);
+    ctx.build();
+    ctx.run();
+    return EXIT_SUCCESS;
+}

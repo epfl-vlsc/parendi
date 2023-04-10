@@ -401,7 +401,7 @@ private:
         // function to run after computation
         AstCFunc* const copyFuncp
             = new AstCFunc{m_netlistp->topModulep()->fileline(), "exchange", m_topScopep, "void"};
-
+        copyFuncp->dontCombine(true);
         // function to run before everything
         AstCFunc* const initFuncp = new AstCFunc{m_netlistp->topModulep()->fileline(),
                                                  "initialize", m_topScopep, "void"};

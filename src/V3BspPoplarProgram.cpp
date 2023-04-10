@@ -73,7 +73,10 @@ private:
             AstVar* varp
                 = new AstVar{m_ctx.m_classp->fileline(), VVarType::MEMBER,
                              m_memberName.get("needInteraction"), m_netlistp->findUInt32DType()};
-            varp->bspFlag().append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT);
+            varp->bspFlag()
+                .append(VBspFlag::MEMBER_HOSTREAD)
+                .append(VBspFlag::MEMBER_HOSTREQ)
+                .append(VBspFlag::MEMBER_OUTPUT);
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_ctx.m_scopep, varp};
             UASSERT(m_ctx.m_classp->stmtsp(), "class with no vars!");
             m_ctx.m_classp->stmtsp()->addHereThisAsNext(varp);
@@ -89,7 +92,9 @@ private:
             UASSERT(m_ctx.m_numCalls > 0, "should not create host interface!");
             AstVar* varp = new AstVar{
                 m_ctx.m_classp->fileline(), VVarType::MEMBER, m_memberName.get("callId"),
-                m_netlistp->findBitDType(m_ctx.m_numCalls, std::max(m_ctx.m_numCalls, VL_EDATASIZE), VSigning::UNSIGNED)};
+                m_netlistp->findBitDType(m_ctx.m_numCalls,
+                                         std::max(m_ctx.m_numCalls, VL_EDATASIZE),
+                                         VSigning::UNSIGNED)};
             varp->bspFlag().append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT);
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_ctx.m_scopep, varp};
             UASSERT(m_ctx.m_classp->stmtsp(), "Class with no vars!");
@@ -115,8 +120,9 @@ private:
         nodep->replaceWith(setTriggerp);
         // create a function directly under the top module for handling this
         if (!m_ctx.m_hostHandlep) {
-            m_ctx.m_hostHandlep = new AstCFunc{nodep->fileline(), m_funcNames.get("display"),
-                                               m_netlistp->topScopep()->scopep(), "void"};
+            m_ctx.m_hostHandlep
+                = new AstCFunc{nodep->fileline(), m_funcNames.get(nodep->prettyName()),
+                               m_netlistp->topScopep()->scopep(), "void"};
         }
         // create IF(classInst.memberCallId == (1 << callid)) DISPLAY under the host handle
         AstMemberSel* callSelp = new AstMemberSel{
@@ -164,6 +170,10 @@ private:
                 exprp->fileline(), new AstVarRef{exprp->fileline(), memVscp, VAccess::WRITE},
                 unlinkp};
             assignsp.push_back(assignp);
+        }
+        // add assigns right before the current node
+        for (AstAssign* const assignp : vlstd::reverse_view(assignsp)) {
+            nodep->addHereThisAsNext(assignp);
         }
 
         // replace the fmtp with a new one that directly references the members
@@ -261,13 +271,31 @@ public:
                         m_ctx.m_classp->fileline(),
                         new AstEq{m_ctx.m_classp->fileline(), selTrigp,
                                   new AstConst{selTrigp->fileline(), AstConst::Unsized32{}, 1}},
-                        callHandlep};
+                        new AstStmtExpr{callHandlep->fileline(), callHandlep}};
                     hostHandlep->addStmtsp(thisHandlep);
                 }
             }
         });
         // create a function that handles are host interactions
         m_netlistp->topScopep()->scopep()->addBlocksp(hostHandlep);
+    }
+};
+/// @brief ensure no field name has leading underscores. This is required by the
+/// poplar graph compiler and sadly all internally generated verilator names
+/// have leading underscores. This makes every name quite long though
+class PoplarLegalizeFieldNamesVisitor final {
+public:
+    explicit PoplarLegalizeFieldNamesVisitor(AstNetlist* netlistp) {
+        netlistp->foreach([](AstClass* classp) {
+            if (classp->flag().isBsp()) {
+                classp->foreach([](AstVarScope* vscp) {
+                    // AstNode::dedotName()
+                    const std::string newName
+                        = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
+                    vscp->varp()->name(newName);
+                });
+            }
+        });
     }
 };
 /// @brief  replaces AstVarRefs of members of the classes derived from the base
@@ -488,6 +516,11 @@ private:
                                                {new AstConst{fl, AstConst::String{}, hrHandle},
                                                 new AstVarRef{fl, tensorVscp, VAccess::READWRITE}},
                                                nullptr)});
+                if (varp->bspFlag().hasHostReq()) {
+                    ctorp->addStmtsp(new AstStmtExpr{
+                        fl, mkCall(fl, "isHostRequest",
+                                   {new AstVarRef{fl, tensorVscp, VAccess::READ}}, nullptr)});
+                }
             }
             if (varp->bspFlag().hasHostWrite()) {
                 const std::string hwHandle = "hw." + tensorDeviceHandle;
@@ -574,6 +607,13 @@ private:
             });
         }
     }
+    // void addThisCons() {
+    //     AstCFunc* consp = new AstCFunc{m_netlistp->fileline(), "constructThis",
+    //                                    m_netlistp->topScopep()->scopep()};
+    //     consp->isConstructor(true);
+
+    //     consp->initsp()
+    // }
 
 public:
     explicit PoplarComputeGraphBuilder(AstNetlist* nodep)
@@ -587,7 +627,6 @@ public:
         m_ctxVscp = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(),
                                     m_ctxVarp};
         m_netlistp->topScopep()->scopep()->addVarsp(m_ctxVscp);
-
         uint32_t tileId = 0;
         const uint32_t maxTileId = 1472;  // should be a cli arg
         // Step 1.
@@ -633,9 +672,6 @@ public:
         patchHostHandle();
         // remove the computeSet funciton, not used
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
-
-
-
     }
 };
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
@@ -643,6 +679,8 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     UINFO(3, "Creating poplar program" << endl);
     { PoplarHostInteractionVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarHost", 0, dumpTree() >= 1);
+    { PoplarLegalizeFieldNamesVisitor{nodep}; }
+    V3Global::dumpCheckGlobalTree("bspLegal", 0, dumpTree() >= 1);
     { PoplarViewsVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarView", 0, dumpTree() >= 1);
     { PoplarComputeGraphBuilder{nodep}; }  // destroy before checking

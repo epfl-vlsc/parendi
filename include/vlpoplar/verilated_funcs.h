@@ -1831,7 +1831,7 @@ static inline WDataOutP VL_SEL_WWII(int obits, int lbits, WDataOutP owp, WDataIn
 static inline QData VL_RTOIROUND_Q_D(double lhs) VL_PURE {
     // IEEE format: [63]=sign [62:52]=exp+1023 [51:0]=mantissa
     // This does not need to support subnormals as they are sub-integral
-    lhs = VL_ROUND(lhs);
+    lhs = static_cast<double>(VL_ROUND(lhs));
     if (lhs == 0.0) return 0;
     const QData q = VL_CVT_Q_D(lhs);
     const int lsb = static_cast<int>((q >> 52ULL) & VL_MASK_Q(11)) - 1023 - 52;
@@ -1851,7 +1851,7 @@ static inline IData VL_RTOIROUND_I_D(double lhs) VL_PURE {
 static inline WDataOutP VL_RTOIROUND_W_D(int obits, WDataOutP owp, double lhs) VL_MT_SAFE {
     // IEEE format: [63]=sign [62:52]=exp+1023 [51:0]=mantissa
     // This does not need to support subnormals as they are sub-integral
-    lhs = VL_ROUND(lhs);
+    lhs = static_cast<double>(VL_ROUND(lhs));
     VL_ZERO_W(obits, owp);
     if (lhs == 0.0) return owp;
     const QData q = VL_CVT_Q_D(lhs);
@@ -2062,7 +2062,7 @@ extern IData VL_DIST_UNIFORM(IData& seedr, IData ustart, IData uend) VL_MT_SAFE;
 
 // VL_VIEW
 template<typename T, typename V>
-VL_INLINE_OPT constexpr T& VL_VIEW(V& vec) {
+VL_INLINE_OPT T& VL_VIEW(V& vec) {
     T& r = (*reinterpret_cast<T*>(vec.data()));
     return r;
 }
