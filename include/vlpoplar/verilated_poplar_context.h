@@ -24,7 +24,7 @@
 #include <iostream>
 #include <memory>
 #include <unordered_map>
-
+#include <chrono>
 #include <boost/filesystem.hpp>
 #include <poplar/CycleCount.hpp>
 #include <poplar/DeviceManager.hpp>
@@ -50,7 +50,7 @@ struct RuntimeConfig {
     bool errorOnTimeout;
 };
 
-// RuntimeConfig parseArgs(int argc, char* argv[]);
+RuntimeConfig parseArgs(int argc, char* argv[]);
 #ifdef VPROGRAM
 class VPROGRAM;
 #else
@@ -82,6 +82,10 @@ private:
     poplar::program::Sequence initCopies;
     poplar::program::Sequence exchangeCopies;
 
+
+
+    // std::chrono::time_point<std::chrono::high_resolution_clock> m_startTime;
+    // double m_simRateLast;
     poplar::Tensor getTensor(const std::string& name) {
         auto it = tensors.find(name);
         if (it == tensors.end()) {

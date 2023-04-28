@@ -5,14 +5,17 @@
 
 #include "verilated.h"
 
+#include <chrono>
 #include <fstream>
+
+#include <boost/filesystem.hpp>
+#include <boost/program_options.hpp>
 // #include <boost/filesystem.hpp>
 // #include <boost/program_options.hpp>
 
 void VlPoplarContext::init(int argc, char* argv[]) {
 
-    // cfg = parseArgs(argc, argv);
-
+    cfg = parseArgs(argc, argv);
     auto manager = poplar::DeviceManager::createDeviceManager();
     auto devices = manager.getDevices();
     // get the first available device
@@ -54,12 +57,28 @@ void VlPoplarContext::build() {
     for (auto hr : hostRequest) {
         prog.add(Copy(zeroValue, hr[0]));  // need to clear the loop conditions
     }
+    auto withCycleCounter = [this](Program&& code, const std::string& n, bool en) {
+        Sequence wrapper;
+        wrapper.add(code);
+        if (en) {
+            auto t = cycleCount(*graph, wrapper, 0, SyncType::INTERNAL);
+            graph->createHostRead(n, t);
+        }
+        return wrapper;
+    };
+
     Tensor breakCond = hostRequest.front()[0];
-    Sequence loopBody{Execute{*workload}, Sync{SyncType::INTERNAL}, exchangeCopies,
-                      Sync{SyncType::INTERNAL}};
+    Sequence loopBody{withCycleCounter(Execute{*workload}, "prof.exec", cfg.counters.exec),
+                      withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync1", cfg.counters.sync1),
+                      withCycleCounter(std::move(exchangeCopies), "prof.copy", cfg.counters.copy),
+                      withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync2", cfg.counters.copy)};
+
     prog.add(RepeatWhileFalse{Sequence{}, breakCond, loopBody, "eval loop"});
     OptionFlags flags{};
-    auto exec = compileGraph(*graph, {Sequence{Execute(*initializer), initCopies}, prog}, flags);
+    auto exec = compileGraph(*graph,
+                             {Sequence{Execute(*initializer), initCopies},
+                              withCycleCounter(std::move(prog), "prof.loop", cfg.counters.loop)},
+                             flags);
 
     engine = std::make_unique<Engine>(exec, flags);
     engine->load(*device);
@@ -69,9 +88,21 @@ void VlPoplarContext::run() {
     auto contextp = std::make_unique<VerilatedContext>();
     engine->run(INIT_PROGRAM);
     vprog->hostHandle();
+    uint64_t cycleCounter = 0;
+    auto printCounter = [this](const std::string& name, bool en) {
+        if (en) {
+            uint64_t value = 0;
+            engine->readTensor(name, &value, &value + 1);
+            std::cout << "\t" << name << ": " << value << std::endl;
+        }
+    };
     while (!contextp->gotFinish()) {
         engine->run(EVAL_PROGRAM);
         vprog->hostHandle();
+        printCounter("prof.exec", cfg.counters.exec);
+        printCounter("prof.sync1", cfg.counters.sync1);
+        printCounter("prof.copy", cfg.counters.copy);
+        printCounter("prof.sync2", cfg.counters.sync2);
     }
 }
 
@@ -119,6 +150,53 @@ void VlPoplarContext::createHostWrite(const std::string& handle, poplar::Tensor&
 }
 
 void VlPoplarContext::isHostRequest(poplar::Tensor& tensor) { hostRequest.push_back(tensor); }
+
+RuntimeConfig parseArgs(int argc, char* argv[]) {
+    namespace opts = boost::program_options;
+
+    opts::options_description opt_desc("Allowed options");
+
+    RuntimeConfig cfg;
+    // clang-format off
+    opt_desc.add_options()
+    ("help,h", "show the help message and exit")
+    ("log,l",
+        opts::value<boost::filesystem::path>()->value_name("<file>"),
+        "redirect runtime logs to a file")
+    ("instrument-execute,e",
+        opts::bool_switch(&cfg.counters.exec)->default_value(false),
+        "instrument the execution phase")
+    ("instrument-sync1,s",
+        opts::bool_switch(&cfg.counters.sync1)->default_value(false),
+        "instrument the sync1 phase")
+    ("instrument-copy,c",
+        opts::bool_switch(&cfg.counters.copy)->default_value(false),
+        "instrument the copy phase")
+    ("instrument-sync2,S",
+        opts::bool_switch(&cfg.counters.sync2)->default_value(false),
+        "instrument the sync2 phase")
+    ("instrument-loop,L",
+        opts::bool_switch(&cfg.counters.loop)->default_value(false),
+        "instrument the simulation loop");
+    // clang-format on
+    opts::variables_map vm;
+    try {
+        opts::store(opts::parse_command_line(argc, argv, opt_desc), vm);
+
+    } catch (opts::error& e) {
+        std::cerr << "Failed parsing arguments: " << e.what() << std::endl;
+        std::exit(-2);
+    }
+
+    if (vm.count("help")) {
+        std::cerr << "Usage: " << argv[0] << " [options]" << std::endl;
+        std::cerr << opt_desc << std::endl;
+        std::exit(-1);
+    }
+    opts::notify(vm);
+
+    return cfg;
+}
 
 int main(int argc, char* argv[]) {
     VlPoplarContext ctx;
