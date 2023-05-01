@@ -30,6 +30,145 @@
 
 VL_DEFINE_DEBUG_FUNCTIONS;
 
+class PoplarPlusArgsVisitor final : public VNVisitor {
+private:
+    V3UniqueNames m_hostFuncs;
+    V3UniqueNames m_varNames;
+
+    AstVarScope* m_instp = nullptr;
+    AstClass* m_classp = nullptr;
+    AstScope* m_scopep = nullptr;
+    AstNetlist* m_netlistp = nullptr;
+
+    struct PlusArgSubst {
+        AstNodeExpr* origp = nullptr;
+        AstVar* firep = nullptr;
+        AstVarScope* classInstp = nullptr;
+        AstVar* valp = nullptr;
+        PlusArgSubst(AstNodeExpr* origp, AstVar* firep, AstVarScope* classInstp, AstVar* valp)
+            : origp(origp)
+            , firep(firep)
+            , classInstp(classInstp)
+            , valp(valp) {}
+    };
+    std::vector<PlusArgSubst> m_substs;
+
+    void visit(AstClass* nodep) {
+        UASSERT(nodep->flag().isBsp(), "expected BSP class");
+        UINFO(10, "visiting " << nodep->name() << endl);
+        UASSERT_OBJ(m_instp, nodep, "class is not instantiated");
+        m_classp = nodep;
+        iterateChildren(nodep);
+    }
+    void visit(AstScope* nodep) {
+        m_scopep = nodep;
+        iterateChildren(nodep);
+    }
+
+    void visit(AstTestPlusArgs* nodep) {
+        UINFO(3, "replacing " << nodep << endl);
+        // replace $test$plusargs("something") a simple class member
+        // on the class and and then push it to the m_substs to later deal with
+        AstVar* varp = new AstVar{nodep->fileline(), VVarType::MEMBER, m_varNames.get("test"),
+                                  nodep->dtypep()};
+        varp->bspFlag().append(VBspFlag::MEMBER_INPUT);
+        AstVarScope* vscp = new AstVarScope{varp->fileline(), m_scopep, varp};
+        m_classp->stmtsp()->addHereThisAsNext(varp);
+        m_scopep->addVarsp(vscp);
+        m_substs.emplace_back(nodep, varp, m_instp, nullptr /*no value*/);
+        AstVarRef* vrefp = new AstVarRef{nodep->fileline(), vscp, VAccess::READ};
+        nodep->replaceWith(vrefp);
+    }
+
+    void visit(AstValuePlusArgs* nodep) {
+        UINFO(3, "replacing " << nodep << endl);
+        auto addVarToClass = [this, nodep](const std::string& name, AstNodeDType* dtypep) {
+            AstVar* varp = new AstVar{nodep->fileline(), VVarType::MEMBER, name, dtypep};
+            varp->bspFlag().append(VBspFlag::MEMBER_INPUT);
+            AstVarScope* vscp = new AstVarScope{varp->fileline(), m_scopep, varp};
+            m_classp->stmtsp()->addHereThisAsNext(varp);
+            m_scopep->addVarsp(vscp);
+            return std::make_pair(varp, vscp);
+        };
+
+        auto firep = addVarToClass(m_varNames.get("valuetest"), nodep->dtypep());
+        m_substs.emplace_back(nodep, firep.first, m_instp, nullptr);
+        UASSERT_OBJ(nodep->outp(), nodep, "expected argument");
+        auto valuep
+            = addVarToClass(m_varNames.get("valuevalue"), VN_AS(nodep->outp(), VarRef)->dtypep());
+        m_substs.back().valp = valuep.first;
+
+        AstValuePlusArgsProxy* proxyp = new AstValuePlusArgsProxy{
+            nodep->fileline(), new AstVarRef{nodep->fileline(), firep.second, VAccess::READ},
+            new AstVarRef{nodep->fileline(), valuep.second, VAccess::READ},
+            VN_AS(nodep->outp(), VarRef)->cloneTree(false)};
+        proxyp->dtypep(nodep->dtypep());
+
+        nodep->replaceWith(proxyp);
+    }
+
+    void visit(AstNode* nodep) { iterateChildren(nodep); }
+
+public:
+    explicit PoplarPlusArgsVisitor(AstNetlist* netlistp)
+        : m_hostFuncs("__VHostBspPlusArgFunc")
+        , m_varNames("__VBspPlusArgVar") {
+        m_netlistp = netlistp;
+        m_substs.clear();
+
+        m_netlistp->topModulep()->foreach([this](AstVarScope* vscp) {
+            AstClassRefDType* clsRefp = VN_CAST(vscp->varp()->dtypep(), ClassRefDType);
+            if (clsRefp && clsRefp->classp()->flag().isBsp()) {
+                clsRefp->classp()->user1p(vscp);
+                m_instp = vscp;
+                visit(clsRefp->classp());
+            }
+        });
+
+        // create function on the host that calls all the $plusarg functions
+        // and caches their results
+        AstCFunc* hostFuncSetp = new AstCFunc{netlistp->fileline(), "plusArgs",
+                                              m_netlistp->topScopep()->scopep(), "void"};
+        AstCFunc* hostFuncCopyp = new AstCFunc{netlistp->fileline(), "plusArgsCopy",
+                                               m_netlistp->topScopep()->scopep(), "void"};
+        hostFuncSetp->dontCombine(true);
+        hostFuncCopyp->dontCombine(true);
+        netlistp->topScopep()->scopep()->addBlocksp(hostFuncSetp);
+        netlistp->topScopep()->scopep()->addBlocksp(hostFuncCopyp);
+        for (const PlusArgSubst& subst : m_substs) {
+            UASSERT(subst.firep, "need a firing condition!");
+            FileLine* flp = subst.origp->fileline();
+            auto appendCopy = [&subst, flp, &hostFuncCopyp](AstVar* lhsp, AstVarScope* rhsp) {
+                AstMemberSel* memselp
+                    = new AstMemberSel{flp, new AstVarRef{flp, subst.classInstp, VAccess::WRITE},
+                                       VFlagChildDType{}, lhsp->name()};
+                memselp->varp(lhsp);
+                memselp->dtypep(lhsp->dtypep());
+                AstAssign* assignp
+                    = new AstAssign{flp, memselp, new AstVarRef{flp, rhsp, VAccess::READ}};
+                hostFuncCopyp->addStmtsp(assignp);
+            };
+
+            // create a variable in the top module for the firing condition
+            AstVarScope* fireHostp = m_netlistp->topScopep()->scopep()->createTemp(
+                m_hostFuncs.get("testhost"), subst.firep->dtypep());
+            appendCopy(subst.firep, fireHostp);
+
+            if (subst.valp) {
+                AstVarScope* hostValuep = m_netlistp->topScopep()->scopep()->createTemp(
+                    m_hostFuncs.get("valuehost"), subst.valp->dtypep());
+                appendCopy(subst.valp, hostValuep);
+
+                AstNode* oldOutp = VN_AS(subst.origp, ValuePlusArgs)->outp();
+                oldOutp->replaceWith(new AstVarRef{flp, hostValuep, VAccess::WRITE});
+                oldOutp->deleteTree();
+            }
+            AstAssign* setCondp
+                = new AstAssign{flp, new AstVarRef{flp, fireHostp, VAccess::WRITE}, subst.origp};
+            hostFuncSetp->addStmtsp(setCondp);
+        }
+    }
+};
 /// @brief create class member interfaces for host interactions.
 /// This visitor looks for Display, Finish, and Stop nodes in the bsp classes
 /// and replaces them with writes to class members. Then a hostHandle function
@@ -220,7 +359,7 @@ public:
         // of base class type, jump to class definition
         nodep->topModulep()->foreach([this, &hostHandlep](AstVarScope* vscp) {
             AstClassRefDType* clsRefp = VN_CAST(vscp->varp()->dtypep(), ClassRefDType);
-            if (clsRefp->classp()->flag().isBsp()) {
+            if (clsRefp && clsRefp->classp()->flag().isBsp()) {
                 // jump to the class
                 m_ctx.clear();
                 m_memberName.reset();
@@ -299,11 +438,10 @@ public:
     }
 };
 /// @brief  replaces AstVarRefs of members of the classes derived from the base
-/// V3BspSched::V3BspModules::builtinBaseClass with AstVarRefView so that the code generation can
-/// simply emit either a reinterpret_cast or a placement new.
-/// We do this because the poplar classes could only have poplar::Vector<> as their
-/// members and these Vector are basically opaque pointers for use. So we need to
-/// cast them to appropriate types.
+/// V3BspSched::V3BspModules::builtinBaseClass with AstVarRefView so that the code generation
+/// can simply emit either a reinterpret_cast or a placement new. We do this because the poplar
+/// classes could only have poplar::Vector<> as their members and these Vector are basically
+/// opaque pointers for use. So we need to cast them to appropriate types.
 class PoplarViewsVisitor final : public VNVisitor {
 private:
     AstNetlist* m_netlistp = nullptr;
@@ -563,6 +701,23 @@ private:
         }
     }
 
+    void addInitConstCopies(AstCFunc* cfuncp) {
+        for (AstNode* nodep = cfuncp->stmtsp(); nodep;) {
+            UASSERT(VN_IS(nodep, Assign), "expected assign");
+            AstAssign* const assignp = VN_AS(nodep, Assign);
+            AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
+            AstVarRef* const fromp = VN_AS(assignp->rhsp(), VarRef);
+            auto toHandle = m_handles(top).tensor;
+            AstStmtExpr* newp = new AstStmtExpr{
+                nodep->fileline(),
+                mkCall(assignp->fileline(), "addInitConstCopy",
+                       {fromp->cloneTree(false),
+                        new AstConst{nodep->fileline(), AstConst::String{}, toHandle}})};
+            nodep->replaceWith(newp);
+            VL_DO_DANGLING(nodep->deleteTree(), nodep);
+            nodep = newp->nextp();
+        }
+    }
     void patchHostHandle() {
         // find the host handle top function
         AstCFunc* hostp = getFunc(m_netlistp->topModulep(), "hostHandle");
@@ -607,13 +762,6 @@ private:
             });
         }
     }
-    // void addThisCons() {
-    //     AstCFunc* consp = new AstCFunc{m_netlistp->fileline(), "constructThis",
-    //                                    m_netlistp->topScopep()->scopep()};
-    //     consp->isConstructor(true);
-
-    //     consp->initsp()
-    // }
 
 public:
     explicit PoplarComputeGraphBuilder(AstNetlist* nodep)
@@ -634,14 +782,6 @@ public:
         // depends on a hard coded PoplarContext that provides a few methods
         // for constructing graphs from codelets and connecting tensors to vertices
         AstNode::user1ClearTree();
-        // AstCFunc* computeSetp = nullptr;
-        // m_netlistp->topModulep()->foreach([&computeSetp](AstCFunc* funcp) {
-        //     if (funcp->name() == "computeSet") computeSetp = funcp;
-        // });
-        // UASSERT(computeSetp, "expected computeSet method!");
-        // computeSetp->name("constructAll"); // rename
-        // computeSetp->stmtsp()->unlinkFrBackWithNext()->deleteTree(); // remove old function
-        // calls
         AstCFunc* constructAllp = new AstCFunc{m_netlistp->fileline(), "constructAll",
                                                m_netlistp->topScopep()->scopep(), "void"};
         constructAllp->isMethod(true);
@@ -660,6 +800,18 @@ public:
             callp->dtypeSetVoid();
             constructAllp->addStmtsp(new AstStmtExpr{ctorp->fileline(), callp});
         });
+        // add the plusArgs function right after construction, this will set a bunch
+        // of host variables later needed to be copied to the user vertcies
+        AstCFunc* plusArgsFuncp = getFunc(m_netlistp->topModulep(), "plusArgs");
+        AstCCall* plusArgsFuncCallp = new AstCCall{plusArgsFuncp->fileline(), plusArgsFuncp};
+        plusArgsFuncCallp->dtypeSetVoid();
+        constructAllp->addStmtsp(new AstStmtExpr{plusArgsFuncCallp->fileline(), plusArgsFuncCallp});
+        // copy the cache values of args to the tensors on startup
+        AstCFunc* plusArgsCopyp = getFunc(m_netlistp->topModulep(), "plusArgsCopy");
+        addInitConstCopies(plusArgsCopyp);
+        AstCCall* plusArgsCopyCallp = new AstCCall{plusArgsCopyp->fileline(), plusArgsCopyp};
+        plusArgsCopyCallp->dtypeSetVoid();
+        constructAllp->addStmtsp(new AstStmtExpr{plusArgsCopyCallp->fileline(), plusArgsCopyCallp});
         // Step 2.
         // create a poplar program with the following structure:
         // Add the copy operations
@@ -677,6 +829,8 @@ public:
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
 
     UINFO(3, "Creating poplar program" << endl);
+    { PoplarPlusArgsVisitor{nodep}; }  // destroy before checking
+    V3Global::dumpCheckGlobalTree("bspPlusArg", 0, dumpTree() >= 1);
     { PoplarHostInteractionVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarHost", 0, dumpTree() >= 1);
     { PoplarLegalizeFieldNamesVisitor{nodep}; }

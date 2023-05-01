@@ -2037,6 +2037,29 @@ public:
     bool cleanOut() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return true; }
 };
+class AstValuePlusArgsProxy final : public AstNodeExpr {
+    // A proxy for an already evaluated AstValuePlusArgs. Used on an accelerartor like the IPU
+    // @astgen op1 := condp  : AstNodeExpr // cached condition
+    // @astgen op2 := valuep : AstNodeExpr // cached value
+    // @astgen op3 := outp   : AstNodeExpr // VarRef for result
+public:
+    AstValuePlusArgsProxy(FileLine* fl, AstNodeExpr* condp, AstNodeExpr* valuep, AstNodeExpr* outp)
+        : ASTGEN_SUPER_ValuePlusArgsProxy(fl) {
+            this->condp(condp);
+            this->valuep(valuep);
+            this->outp(outp);
+        }
+    ASTGEN_MEMBERS_AstValuePlusArgsProxy;
+
+    string verilogKwd() const override { return "$value$plusargsproxy"; }
+    string emitVerilog() override { return "%f$value$plusargsproxy(%l, %k%r)"; }
+    string emitC() override { V3ERROR_NA_RETURN(""); }
+    bool isGateOptimizable() const override { return false; }
+    bool isPredictOptimizable() const override { return false; }
+    bool isPure() const override { return !outp(); }
+    bool cleanOut() const override { return true; }
+    bool same(const AstNode* /*samep*/) const override { return true; }
+};
 class AstVarRefView final : public AstNodeExpr {
     // view a variable references as another data type without runtime casting
     // @astgen op1 := vrefp  : AstVarRef

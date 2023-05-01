@@ -162,7 +162,8 @@ public:
 
         ofp->puts("CXX ?= g++\n");
         ofp->puts("POPC ?= popc\n");
-        ofp->puts("VERIPOPLAR_ROOT = " + v3Global.opt.getenvVERILATOR_ROOT() + "\n");
+        // ofp->puts("VERIPOPLAR_ROOT ?= " + v3Global.opt.getenvVERILATOR_ROOT() + "\n");
+        ofp->puts("VERIPOPLAR_ROOT = /home/mayy/workspace/veripoplar\n");
         ofp->puts("INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I.\n");
         ofp->puts("LIBS = -lpoplar -lpopops -lpoputil -lpthread -lboost_filesystem "
                   "-lboost_program_options\n");
@@ -186,6 +187,7 @@ public:
                       [&](AstCFile* cfilep) {
                           ofp->puts("\t" + V3Os::filenameNonDir(cfilep->name()) + " \\\n");
                       });
+
         ofp->puts("\n");
         ofp->puts("HOST_SOURCES =  \\\n");
         iterateCFiles([](AstCFile* cfilep) { return !cfilep->codelet(); },

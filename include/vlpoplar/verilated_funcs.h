@@ -2060,10 +2060,68 @@ extern IData VL_DIST_UNIFORM(IData& seedr, IData ustart, IData uend) VL_MT_SAFE;
 ///// removed
 //======================================================================
 
+
+//======================================================================
+// $test$plusargs and $value$plusargs on the IPU
+//======================================================================
+
+inline IData VL_VALUEPLUSARGSPROXY_IW(int obits, IData en, WDataInP valp, WDataOutP outp) VL_MT_SAFE {
+
+    if (en) {
+        for (int i = VL_WORDS_I(obits) - 1; i >= 0; i--) {
+            outp[i] = valp[i];
+        }
+    }
+    return en;
+
+}
+
+inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, CData val, CData& out) VL_MT_SAFE {
+
+    VlWide<2> outp;
+    VlWide<2> inp;
+    VL_SET_WI(inp, val);
+    const IData got = VL_VALUEPLUSARGSPROXY_IW(obits, en, inp, outp);
+    if (got) out = outp[0];
+    return got;
+}
+
+inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, SData val, SData& out) VL_MT_SAFE {
+
+    VlWide<2> outp;
+    VlWide<2> inp;
+    VL_SET_WI(inp, val);
+    const IData got = VL_VALUEPLUSARGSPROXY_IW(obits, en, inp, outp);
+    if (got) out = outp[0];
+    return got;
+}
+
+inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, IData val, IData& out) VL_MT_SAFE {
+
+    VlWide<2> outp;
+    VlWide<2> inp;
+    VL_SET_WI(inp, val);
+    const IData got = VL_VALUEPLUSARGSPROXY_IW(obits, en, inp, outp);
+    if (got) out = outp[0];
+    return got;
+}
+
+inline IData VL_VALUEPLUSARGSPROXY_IQ(int obits, IData en, QData val, QData& out) VL_MT_SAFE {
+    VlWide<2> outp;
+    VlWide<2> inp;
+    VL_SET_WQ(inp, val);
+    const IData got = VL_VALUEPLUSARGSPROXY_IW(obits, en, inp, outp);
+    if (got) out = VL_SET_QW(outp);
+    return got;
+}
+
+
+
 // VL_VIEW
 template<typename T, typename V>
 VL_INLINE_OPT T& VL_VIEW(V& vec) {
     T& r = (*reinterpret_cast<T*>(vec.data()));
     return r;
 }
+
 #endif  // Guard

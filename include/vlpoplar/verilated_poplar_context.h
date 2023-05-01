@@ -20,7 +20,7 @@
 #define VERILATOR_POPLARCONTEXT_H_
 
 // #include "VProgram.h"
-
+#include "verilated.h"
 #include <iostream>
 #include <memory>
 #include <unordered_map>
@@ -45,6 +45,7 @@ struct RuntimeConfig {
     // boost::filesystem::path simOutPath;
     // uint64_t maxRtlCycles = std::numeric_limits<uint64_t>::max();
     CounterConfig counters;
+    uint64_t maxRtlCyles;
     bool emulate;
     bool showSteps;
     bool errorOnTimeout;
@@ -80,6 +81,7 @@ private:
     std::unordered_map<std::string, poplar::VertexRef> vertices;
     std::vector<poplar::Tensor> hostRequest;
     poplar::program::Sequence initCopies;
+    poplar::program::Sequence constInitCopies;
     poplar::program::Sequence exchangeCopies;
 
 
@@ -100,6 +102,18 @@ public:
     void build();
     void run();
     void addCopy(const std::string& from, const std::string& to, uint32_t size, bool isInit);
+    template<std::size_t T_Words>
+    void addInitConstCopy(const VlWide<T_Words>& value, const std::string& to) {
+        auto constTensor = graph->addConstant(poplar::UNSIGNED_INT, {T_Words}, value.m_storage);
+        graph->setTileMapping(constTensor, 0);
+        constInitCopies.add(poplar::program::Copy(constTensor, getTensor(to)));
+    }
+    void addInitConstCopy(const IData value, const std::string& to) {
+        VlWide<1> valuew;
+        valuew[0] = value;
+        addInitConstCopy(valuew, to);
+    }
+
     void setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId);
     void setTileMapping(poplar::Tensor& tensor, uint32_t tileId);
     void connect(poplar::VertexRef& vtxRef, const std::string& vtxField, poplar::Tensor& tensor);
@@ -127,5 +141,6 @@ public:
         return (*reinterpret_cast<T*>(it->second->buff.data()));
     }
 };
+
 
 #endif

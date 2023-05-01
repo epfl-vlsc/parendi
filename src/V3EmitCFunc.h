@@ -623,6 +623,20 @@ public:
         emitCvtPackStr(nodep->searchp());
         puts(")");
     }
+    void visit(AstValuePlusArgsProxy* nodep) override {
+        puts("VL_VALUEPLUSARGSPROXY_I");
+        UASSERT(nodep->condp()->widthMin() <= VL_IDATASIZE, "bad condition");
+        emitIQW(nodep->valuep());
+        puts("(");
+        puts(cvtToStr(nodep->outp()->widthMin()));
+        puts(", ");
+        iterateAndNextNull(nodep->condp());
+        puts(", ");
+        iterateAndNextNull(nodep->valuep());
+        puts(", ");
+        iterateAndNextNull(nodep->outp());
+        puts(")");
+    }
     void visit(AstFError* nodep) override {
         puts("VL_FERROR_I");
         puts(nodep->strp()->isString() ? "N(" : "W(");

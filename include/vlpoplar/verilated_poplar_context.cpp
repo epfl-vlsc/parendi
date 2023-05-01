@@ -76,7 +76,7 @@ void VlPoplarContext::build() {
     prog.add(RepeatWhileFalse{Sequence{}, breakCond, loopBody, "eval loop"});
     OptionFlags flags{};
     auto exec = compileGraph(*graph,
-                             {Sequence{Execute(*initializer), initCopies},
+                             {Sequence{constInitCopies, Execute(*initializer), initCopies},
                               withCycleCounter(std::move(prog), "prof.loop", cfg.counters.loop)},
                              flags);
 
@@ -194,7 +194,8 @@ RuntimeConfig parseArgs(int argc, char* argv[]) {
         std::exit(-1);
     }
     opts::notify(vm);
-
+    // for +args
+    Verilated::commandArgs(argc, argv);
     return cfg;
 }
 
