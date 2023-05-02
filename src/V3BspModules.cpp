@@ -118,6 +118,7 @@ private:
     // compute the references to each variable
     void computeReferences() {
         AstNode::user1ClearTree();
+        //  first go through the active (clocked) partitions
         for (const auto& graphp : m_partitionsp) {
             UINFO(100, "Inspecting graph " << graphp.get() << endl);
             for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp;
@@ -137,6 +138,7 @@ private:
                 }
             }
         }
+
     }
 
     std::pair<AstClass*, AstClassRefDType*> newClass(FileLine* fl, const std::string& name,
@@ -254,7 +256,7 @@ private:
                             // need to send it
                             UASSERT(!refInfo.sourcep().first, "multiple producers!");
                             refInfo.sourcep(std::make_pair(instVscp, varp));
-                        } else if (refInfo.isClocked()) {
+                        } else if (refInfo.isClocked() || refInfo.initp().first) {
                             UASSERT_OBJ(refInfo.isConsumed(graphp), vscp, "Unexpected reference!");
                             // not produced here but consumed
                             classp->addStmtsp(varp);
@@ -341,8 +343,7 @@ private:
             }
         });
     }
-    // make a class for each graph
-    std::vector<AstClass*> makeClasses() {
+    void prepareClassGeneration() {
         checkBuiltinNotUsed();
         // first create a new top module that will replace the existing one later
         FileLine* fl = m_netlistp->topModulep()->fileline();
@@ -378,10 +379,13 @@ private:
         m_packagep->addStmtsp(packageScopep);
         m_scopePrefix = packageScopep->name() + ".";
         m_packageScopep = packageScopep;
-        // make base classes for compute and top level program
-
         makeBaseClasses();
-        // now gor though all partitions and create a class and an instance of it
+
+    }
+    // make a class for each graph
+    std::vector<AstClass*> makeClasses() {
+        // make base classes for compute and top level program
+        // now go though all partitions and create a class and an instance of it
         std::vector<AstClass*> vtxClassesp;
         // AstTopScope* topScopep =
         for (const auto& graphp : m_partitionsp) {
@@ -553,7 +557,7 @@ private:
                 // if the variable is consumed by any of the graph nodes, then
                 // we need to add it as a class level member, otherwise, it should
                 // be kept local to the function
-                if (m_vscpRefs(oldVscp).hasConsumer()) {
+                if (vrefp->access().isWriteOrRW() && m_vscpRefs(oldVscp).hasConsumer()) {
                     classp->addStmtsp(varp);
                     m_vscpRefs(oldVscp).initp({instVscp, varp});
                 } else {
@@ -607,8 +611,11 @@ public:
         // 2. Create modules that contain a class implementing the parallel computation
         // with a "compute" method
         UINFO(3, "Creating submodules" << endl);
+        prepareClassGeneration();
+
+        AstClass* initClassp = makeInitial(); // should be before making classes
+        // since it sets the initp used in makeClasses
         std::vector<AstClass*> submodp = makeClasses();
-        AstClass* initClassp = makeInitial();
         // 3. Create copy operations
         UINFO(3, "Creating copy program" << endl);
         makeCopyOperations(submodp);
