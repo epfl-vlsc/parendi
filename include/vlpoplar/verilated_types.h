@@ -31,18 +31,6 @@
 #include <ipu_intrinsics>
 
 
-//===================================================================
-// Shuffle RNG
-
-VL_ATTR_ALWINLINE uint64_t vl_rand64() { return static_cast<uint64_t>(__builtin_ipu_urand64()); }
-
-class VlURNG final {
-public:
-    using result_type = size_t;
-    static constexpr size_t min() { return 0; }
-    static constexpr size_t max() { return 1ULL << 31; }
-    size_t operator()() { return VL_MASK_I(31) & vl_rand64(); }
-};
 
 //===================================================================
 /// Verilog wide packed bit container.

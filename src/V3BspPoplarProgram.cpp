@@ -653,9 +653,10 @@ private:
             UASSERT_STATIC(VL_IDATASIZE == 32, "not sure if we can do none uint32_t data types");
             return dtp->widthWords();
         } else if (AstNodeArrayDType* arrayp = VN_CAST(dtp, NodeArrayDType)) {
-            auto dims = arrayp->dimensions(false /*do not include the basic types*/);
-            UASSERT(dims.first == 0, "Not sure if I can do unpack arrays yet! " << dtp << endl);
-            return dims.second * calcSize(arrayp->basicp());
+            // auto dims = arrayp->dimensions(false /*do not include the basic types*/);
+            // UINFO(10, "dimensions " << dtp << " " << dims.first << ", " << dims.second << " " << arrayp->elementsConst() << endl);
+            // UASSERT(dims.first == 0, "Not sure if I can do unpack arrays yet! " << dtp << endl);
+            return arrayp->elementsConst() * calcSize(arrayp->subDTypep());
         } else {
             UASSERT_OBJ(false, dtp, "Can not handle data type " << dtp << endl);
             return 0;
@@ -665,6 +666,7 @@ private:
     AstVectorDType* vectorTypep(AstNodeDType* fromp) {
 
         uint32_t size = calcSize(fromp);
+        UINFO(8, "compute size of " << fromp << " is " << size << endl);
         AstVectorDType* dtp
             = new AstVectorDType(fromp->fileline(), size,
                                  VN_AS(m_netlistp->typeTablep()->findUInt32DType(), BasicDType));

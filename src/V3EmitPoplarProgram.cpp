@@ -221,7 +221,7 @@ public:
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -o $@\n");
 
         ofp->puts("clean:\n");
-        ofp->puts("\trm -rf main *.o *.gp *.S report\n");
+        ofp->puts("\trm -rf main *.o *.gp *.s report\n");
 
         delete ofp;
     }

@@ -48,8 +48,10 @@ private:
     // NODE STATE
     //  clear on scope
     //  AstVarScope::user1()     -> number of always blocks that write to this variable
-    //
+    //  AstVarScope::user2p()    -> last always block pointer
     VNUser1InUse user1InUse;
+    VNUser2InUse user2InUse;
+
     V3UniqueNames m_lvNames;
     AstScope* m_scope = nullptr;
     bool m_inClocked = false;
@@ -70,11 +72,14 @@ private:
         nodep->foreach([&](AstAssign* assignp) {
             assignp->foreach([&](const AstVarRef* vrefp) {
                 if (vrefp->access().isWriteOrRW() /*is lhs*/
-                    && VN_IS(vrefp->varScopep()->dtypep(), BasicDType) /*is not memory*/) {
+                    && VN_IS(vrefp->varScopep()->dtypep(), BasicDType) /*is not memory*/
+                    && vrefp->varp()->lifetime() == VLifetime::STATIC
+                    && vrefp->varp()->varType() == VVarType::VAR /*is not temp*/) {
                     // create a temp variable
                     if (vrefp->varScopep()->user1()
                         > 1) {  // don't promote to delayed assignment if it has multiple drivers
-                        vrefp->v3warn(MULTIDRIVEN, "Variable may have multiple drivers");
+                        vrefp->v3warn(MULTIDRIVEN, "Variable may have multiple drivers: "
+                                                       << vrefp->varScopep()->user1() << endl);
                     } else if (blockingVscp.find(vrefp->varScopep()) == blockingVscp.end()) {
                         // create a temp variable
                         AstVarScope* const subst = m_scope->createTempLike(
@@ -93,7 +98,7 @@ private:
                 AstVarScope* const subst = it->second;
                 AstVarRef* newp = new AstVarRef{vrefp->fileline(), subst, vrefp->access()};
                 vrefp->replaceWith(newp);
-                UINFO(4, "replacing " << vrefp << endl);
+                UINFO(4, "replacing " << vrefp->name() << endl);
                 pushDeletep(vrefp);
             }
         });
@@ -140,12 +145,13 @@ private:
         m_scope = nodep;
         m_lvNames.reset();
         AstNode::user1ClearTree();
-
+        AstNode::user2ClearTree();
         // mark the variables with the number of always blocks that modify them
         nodep->foreach([](AstAlways* alwaysp) {
-            alwaysp->foreach([](AstVarRef* vrefp) {
-                if (vrefp->access().isWriteOrRW()) {
+            alwaysp->foreach([alwaysp](AstVarRef* vrefp) {
+                if (vrefp->access().isWriteOrRW() && vrefp->varScopep()->user2p() != alwaysp) {
                     vrefp->varScopep()->user1(vrefp->varScopep()->user1() + 1);
+                    vrefp->varScopep()->user2p(alwaysp);
                 }
             });
         });

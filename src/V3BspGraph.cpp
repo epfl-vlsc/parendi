@@ -214,7 +214,7 @@ private:
                 // should come after commits
                 ConstrVertex* commitp = getVtx(ConstrBuilder::Type::COMMIT);
                 m_graphp->addEdge(commitp, m_logicVtx);
-                // do we need DEF->logic constraints as well? Probably not sice
+                // do we need DEF->logic constraints as well? Probably not since
                 // the LHS of AssignPost or AlwaysPost should come from clocked
                 // logic
                 ConstrVertex* defp = getVtx(ConstrBuilder::Type::DEF);
@@ -426,8 +426,7 @@ std::vector<std::vector<CompVertex*>> groupVertices(const std::unique_ptr<DepGra
                                                     const std::vector<CompVertex*>& sinks) {
 
     // find all ConstrDefVertex that hold an unpacked array whose corresponding
-    // ConstrCommit has an CompVertex holding an AlwaysPost. These are the
-    // "non-blocking" memories. Any
+    // ConstrCommit has a CompVertex holding an AlwaysPost.
     DisjointSets<CompVertex*> sets{};
     for (CompVertex* vtxp : sinks) { sets.makeSet(vtxp); }
 
@@ -450,19 +449,22 @@ std::vector<std::vector<CompVertex*>> groupVertices(const std::unique_ptr<DepGra
             // follow defs to commits through the user pointer
             if (ConstrDefVertex* defp = dynamic_cast<ConstrDefVertex*>(headp)) {
                 ConstrCommitVertex* commitp = defp->vscp()->user1u().to<ConstrCommitVertex*>();
-                if (commitp && !commitp->outEmpty()) {
-                    UASSERT_OBJ(commitp->outSize1(), commitp, "At most one ancestor");
-                    // check if the commit actually goes to an AssignPost or AlwaysPost
-                    auto succp = dynamic_cast<CompVertex*>(commitp->outBeginp()->top());
-                    UASSERT_OBJ(succp, commitp, "invalid type!");
+                if (!commitp) continue;
+                if (commitp->outEmpty()) continue;
+                // are we dealing with non-trivial types?
+                if (VN_IS(commitp->vscp()->dtypep()->skipRefp(), BasicDType)) continue;
+                UASSERT_OBJ(commitp->outSize1(), commitp, "commit with more than one successor " << commitp->vscp()->name() << endl);
+                // check if the commit actually goes to an AssignPost or AlwaysPost
+                auto succp = dynamic_cast<CompVertex*>(commitp->outBeginp()->top());
+                UASSERT_OBJ(succp, commitp, "invalid type!");
 
-                    UASSERT_OBJ(sets.contains(succp), succp, "not in disjoint sets!");
-                    if (!succp->user() && VN_IS(succp->nodep(), AlwaysPost)) {
-                        UINFO(3, "Union " << vtxp << " and  " << succp << endl);
-                        sets.makeUnion(vtxp, succp);
-                        succp->user(1);
-                    }
+                UASSERT_OBJ(sets.contains(succp), succp, "not in disjoint sets!");
+                if (!succp->user() && VN_IS(succp->nodep(), AlwaysPost)) {
+                    UINFO(3, "Union " << vtxp << " and  " << succp << endl);
+                    sets.makeUnion(vtxp, succp);
+                    succp->user(1);
                 }
+
             }
         }
     }
@@ -578,7 +580,7 @@ DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
     // that are simply Always blocks (e.g., always_ff $display(...)). These
     // vertices may also have to be grouped accordingly should a multidriven
     // signal or non-blocking unpacked array appears on the RHS.
-    
+
 
     for (const auto& vtxp : groupVertices(graphp, sinks)) {
         partitions.emplace_back(backwardTraverseAndCollect(graphp, vtxp));

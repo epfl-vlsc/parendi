@@ -138,7 +138,6 @@ private:
                 }
             }
         }
-
     }
 
     std::pair<AstClass*, AstClassRefDType*> newClass(FileLine* fl, const std::string& name,
@@ -289,8 +288,9 @@ private:
                 AstNode* nodep = vtxp->nodep();
                 UASSERT(nodep, "nullptr vertex");
                 UASSERT_OBJ(VN_IS(nodep, Always) || VN_IS(nodep, AlwaysPost)
-                                || VN_IS(nodep, AssignPost) || VN_IS(nodep, AssignPre),
-                            nodep, "unexpected node type " << nodep->prettyName() << endl);
+                                || VN_IS(nodep, AssignPost) || VN_IS(nodep, AssignPre)
+                                || VN_IS(nodep, AssignW) || VN_IS(nodep, AssignAlias),
+                            nodep, "unexpected node type " << nodep->prettyTypeName() << endl);
                 if (AstNodeProcedure* alwaysp = VN_CAST(nodep, NodeProcedure)) {
                     for (AstNode* np = alwaysp->stmtsp(); np; np = np->nextp()) {
                         UINFO(10, "Cloning " << np << endl);
@@ -380,7 +380,6 @@ private:
         m_scopePrefix = packageScopep->name() + ".";
         m_packageScopep = packageScopep;
         makeBaseClasses();
-
     }
     // make a class for each graph
     std::vector<AstClass*> makeClasses() {
@@ -613,7 +612,7 @@ public:
         UINFO(3, "Creating submodules" << endl);
         prepareClassGeneration();
 
-        AstClass* initClassp = makeInitial(); // should be before making classes
+        AstClass* initClassp = makeInitial();  // should be before making classes
         // since it sets the initp used in makeClasses
         std::vector<AstClass*> submodp = makeClasses();
         // 3. Create copy operations
