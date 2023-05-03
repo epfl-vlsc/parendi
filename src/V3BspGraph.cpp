@@ -301,6 +301,66 @@ public:
     }
 };
 
+std::unique_ptr<DepGraph> collectBackwardsBfs(const std::unique_ptr<DepGraph>& graphp,
+                                              AnyVertex* const processSink) {
+    UASSERT(processSink, "require none-nullptr sink");
+    // STATE
+    // AnyVertex::userp() -> pointer to the clone
+    // AnyVertex::user()  -> vertex is visited
+    // DepEdge::user()    -> true means cloned
+    graphp->userClearEdges();
+    graphp->userClearVertices();
+    std::unique_ptr<DepGraph> builderp{new DepGraph};
+    std::queue<AnyVertex*> toVisit;
+
+    processSink->user(1);
+    toVisit.push(processSink);
+
+    // bfs
+    while (!toVisit.empty()) {
+        // pop the head of the queue
+        AnyVertex* const headp = toVisit.front();
+        toVisit.pop();
+        // add its clone to the new graph
+        AnyVertex* const clonep = headp->clone(builderp.get());
+        // keep references orig <-> clone
+        headp->userp(clonep);
+        clonep->userp(headp);
+        // follow incoming edges
+        for (auto itp = headp->inBeginp(); itp; itp = itp->inNextp()) {
+            AnyVertex* const fromp = reinterpret_cast<AnyVertex* const>(itp->fromp());
+            // fromp is a predecessor
+            if (!fromp->user() /*not visited*/) {
+                fromp->user(1);
+                toVisit.push(fromp);
+            }
+        }
+    }
+    // clone edges
+    for (V3GraphVertex* itp = builderp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
+        AnyVertex* origp = reinterpret_cast<AnyVertex*>(itp->userp());
+        UASSERT_OBJ(origp, itp, "expected original vertex pointer");
+        for (V3GraphEdge* eitp = origp->inBeginp(); eitp; eitp = eitp->inNextp()) {
+            if (eitp->user()) { continue; /*already processed*/ }
+            if (!eitp->fromp()->userp()) { continue; /*not part of the partition*/ }
+            auto newFromp = reinterpret_cast<AnyVertex*>(eitp->fromp()->userp());
+            auto fromCompp = dynamic_cast<CompVertex*>(newFromp);
+            auto fromConstrp = dynamic_cast<ConstrVertex*>(newFromp);
+            auto toCompp = dynamic_cast<CompVertex*>(itp);
+            auto toConstrp = dynamic_cast<ConstrVertex*>(itp);
+            if (fromCompp && toConstrp) {
+                builderp->addEdge(fromCompp, toConstrp);
+            } else if (fromConstrp && toCompp) {
+                builderp->addEdge(fromConstrp, toCompp);
+            } else {
+                // should not happen
+                UASSERT(false, "invalid pointer types!");
+            }
+            eitp->user(1);
+        }
+    }
+    return builderp;
+}
 std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGraph>& graphp,
                                                      const std::vector<CompVertex*>& postp) {
     // STATE
@@ -453,7 +513,9 @@ std::vector<std::vector<CompVertex*>> groupVertices(const std::unique_ptr<DepGra
                 if (commitp->outEmpty()) continue;
                 // are we dealing with non-trivial types?
                 if (VN_IS(commitp->vscp()->dtypep()->skipRefp(), BasicDType)) continue;
-                UASSERT_OBJ(commitp->outSize1(), commitp, "commit with more than one successor " << commitp->vscp()->name() << endl);
+                UASSERT_OBJ(commitp->outSize1(), commitp,
+                            "commit with more than one successor " << commitp->vscp()->name()
+                                                                   << endl);
                 // check if the commit actually goes to an AssignPost or AlwaysPost
                 auto succp = dynamic_cast<CompVertex*>(commitp->outBeginp()->top());
                 UASSERT_OBJ(succp, commitp, "invalid type!");
@@ -464,7 +526,6 @@ std::vector<std::vector<CompVertex*>> groupVertices(const std::unique_ptr<DepGra
                     sets.makeUnion(vtxp, succp);
                     succp->user(1);
                 }
-
             }
         }
     }
@@ -495,103 +556,94 @@ std::unique_ptr<DepGraph> DepGraphBuilder::build(const V3Sched::LogicByScope& lo
 std::vector<std::unique_ptr<DepGraph>>
 DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
 
-    /**
-     * Split the "serial" dep graph into a maximal set independent "parallel"
-     * graphs that would eventually represent BSP tasks.
-     * We consider the CompVertex containing AstAssignPot or AstAlwaysPost as
-     * "persitence" operations that commit or persist local work by each parallel
-     * BSP task. AstAssignPost could potentially turn into remote copies or send
-     * whereas AstAlwaysPost ends up being performed locally.
-     *
-     * Other sink nodes should not exists, e.g., a commit can also be a sink node
-     * but that does not matter since its just a constraint.
-     *
-     *
-     */
-    std::vector<std::unique_ptr<DepGraph>> partitions;
+    // We partition the graph into a maximal set of indepdent processes. These are
+    // are BSP processes that can run independently between synchronization points
+    // and share no data during computation.
+    // All the race conditions that may exist in the original Verilog code
+    // are localized within a processor. e.g.:
+    // always @(posedge clock) x = something1;
+    // always @(posedge clock) if (c) x = something2;
+    // are ensured to the be fully local to one processor. This way we could simply
+    // take an arbitrary ordering of execution and respect the execution semantics.
+    // Note that since we do not have a shared-shared across processes, running
+    // the two always blocks above in two different processes would essentially
+    // be wrong from Verilog's execution semantics.
+    //
+    // To create such processes, we need to look for three patterns in the graph:
+    //
+    // 1) commit node with at least one predecessor and no successor
+    // +----------------+
+    // |                |
+    // |    always      |
+    // |                |
+    // +-------+--------+
+    //         |
+    //         |
+    //         |
+    //  +------v-------+
+    //  |              |
+    //  |   commit lhs |
+    //  |          rhs |
+    //  +--------------+
+    // These commit nodes exist due to sequential "blocking" logic, i.e.,
+    // normal assignment in always blocks.
+    // 2) An always block with no successor
+    // +----------------+
+    // |                |
+    // |    always      |
+    // |                |
+    // +-------+--------+
+    // This patterns correspond to always blocks with system/dpi side effects
+    // e.g.,
+    // always_ff @(posedge clock) $display("my counter is %d", counter);
+    // 3) A commit node with Assign/AlwaysPost as it successor. The successor
+    // will then have most likely (if not assign from constant) that is driven
+    // by other always blocks.
+    // +--------------+         +--------------+
+    // |              |         |              | this one will probably have
+    // |  commit lhs  |         |  commit rhs  | a predecessor that is an always
+    // |              |         |              | block
+    // +------+-------+         +----------+---+
+    //        |                            |
+    //        |                            |
+    //        |   +--------------------+   |
+    //        |   |  Assign/AlwaysPost |   |
+    //        +--->  lhs = rhs         <---+
+    //            |                    |
+    //            +--------------------+
+    // These configurations exist due to "nonblocking" (i.e., x <= expr) logic
+    //
+    // stranded commit nodes do not exist, i.e., they either have no successor
+    // (i.e., commit rhs in #1) or have exactly one (i.e., commit lhs in #3)
+    // so we can find all these patterns quit easily with scanning the vertices
+    // just once.
 
-    // collect all the vertices that have no successors, these edges going to
-    // of type CompVertex where the internal logic is either AssignPost or
-    // AlwaysPost.
-    std::vector<CompVertex*> sinks;
-    // for every def node, there should also exist a commit node sharing the same
-    // varscope. We need to create a mapping between the two so that we can
-    // look up the corresponding commit vertex of every definition when we reach it
-    // see below for reason why.
-    // STATE
-    //  AstVarScope::user1p     -> ConstrCommitVertex*
-    VNUser1InUse user1InUse;
-    AstNode::user1ClearTree();
+    std::vector<AnyVertex*> processSinks;
     for (AnyVertex* itp = static_cast<AnyVertex*>(graphp->verticesBeginp()); itp;
          itp = static_cast<AnyVertex*>(itp->verticesNextp())) {
-        auto asLogicVtxp = dynamic_cast<CompVertex*>(itp);
-        if (asLogicVtxp && asLogicVtxp->outEmpty()) {
-            sinks.push_back(asLogicVtxp);
-
-        }
-        if (auto asCommitVtxp = dynamic_cast<ConstrCommitVertex*>(itp)) {
-            asCommitVtxp->vscp()->user1u(VNUser{asCommitVtxp});
-        }
-    }
-    UASSERT(!sinks.empty(),
-            "Empty sink set, perhaps there are no non-blocking assignments in the graph?");
-    // OUTLINE OF THE PARTITIONING ALGORITHM
-    // Using the graph we have just created above, we can create N parallel processes
-    // to execute on N cores. We star the partitioning by finding a maximal set of
-    // "compatible" processes and then iteratively merge them to have fewer
-    // processes. By maximal, we mean that there are an infinite number of cores
-    // that we can run the code on.
-    // In BSP, we assume all computation is local and only values updated by
-    // AstAssignPost can be communicated between cores. This readily means that
-    // even AstAlwaysPost needs to be completely local. Hence if in the path
-    // to compute some AstAssignPost, we reference (read) some DEF vertex that
-    // also reaches an AlwaysPost, we need to group the AstAssignPost and AstAlwaysPost
-    // together. We do this because we do not want to duplicate "memories"
-    // (unpacked arrays) and frankly, that won't work for something like:
-    // b1: always @(posedge) a <= mem[raddr];
-    // b2: always @(posedge) if (wen) mem[waddr] <= something
-    // There is no way (at least I do not think there is) to compute b1 and b2
-    // on two separate cores and not copy the whole memory from b2 to b1 on every
-    // cycle.
-    // groupVertices takes care of this and essentially ensure that b1 and b2 end
-    // up on the same core.
-    // Once we have the groupings, we can start from the AstAssignPost and AstAlwaysPost
-    // vertices in each group and collect (backwards traversal) everything needed
-    // for their computation. This works fine as long as there are no blocking assignments
-    // to unpacked arrays, or as long as all sequential writes to a variable are contained
-    // withing one block for instance:
-    // logic [31:0] upacked_multidriven;
-    // always @(posedge) unpacked_multidriven[i] = something1;
-    // always @(posedge) begin
-    //      packed_multidriven[j] = something2;
-    //      y <= packed_multidriven;
-    // end
-    // Will create a commit vertex with 2 predecessors for upacked_multidriven.
-    // Notices that since the assignment is blocking, there will not be an AlwaysPost
-    // vertex for upacked_multidriven so grouping is not enough to ensure both
-    // always blocks endup on the same core. Here we follow DEF x to COMMIT x
-    // and then collect all that drives the COMMIT for the block that references
-    // DEF x. This ensures that both writes are contained within the same process.
-    // Notice how this also extends to multidriven packed arrays.
-    // From the explanation above, you can probably see that read-only packed or
-    // unpacked arrays will never limit parallelism since they never commit nor
-    // drive an AstAlwaysPost, hence they get duplicated on demand.
-    // Lastly, keep in mind that the same situation applies for sink nodes
-    // that are simply Always blocks (e.g., always_ff $display(...)). These
-    // vertices may also have to be grouped accordingly should a multidriven
-    // signal or non-blocking unpacked array appears on the RHS.
-
-
-    for (const auto& vtxp : groupVertices(graphp, sinks)) {
-        partitions.emplace_back(backwardTraverseAndCollect(graphp, vtxp));
-    }
-    UINFO(3, "Found " << partitions.size() << " independent processes" << endl);
-    if (dump() > 3) {
-        for (int i = 0; i < partitions.size(); i++) {
-            partitions[i]->dumpDotFilePrefixed("partition_" + std::to_string(i));
+        // is it pattern 3?
+        auto compVtx = dynamic_cast<CompVertex*>(itp);
+        auto commitVtx = dynamic_cast<ConstrCommitVertex*>(itp);
+        if (compVtx
+            && (VN_IS(compVtx->nodep(), AlwaysPost) || VN_IS(compVtx->nodep(), AssignPost))) {
+            UASSERT_OBJ(compVtx->outSize1() == 0, compVtx,
+                        "Assign/AlwaysPost can not have a successor");
+            processSinks.push_back(itp);
+        } /* pattern 2 */ else if (compVtx && VN_IS(compVtx->nodep(), Always)
+                                   && compVtx->outSize1() == 0) {
+            processSinks.push_back(itp);
+        } /* pattern 1 */ else if (commitVtx && commitVtx->outSize1() == 0) {
+            UASSERT_OBJ(commitVtx->inSize1() > 0, commitVtx, "stranded commit?");
+            processSinks.push_back(itp);
         }
     }
-    return partitions;
+
+    std::vector<std::unique_ptr<DepGraph>> partitionsp;
+    for (AnyVertex* const vtx : processSinks) {
+        partitionsp.emplace_back(collectBackwardsBfs(graphp, vtx));
+    }
+
+    return partitionsp;
 }
 
 };  // namespace V3BspSched

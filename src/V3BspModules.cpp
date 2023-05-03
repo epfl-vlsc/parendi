@@ -126,15 +126,9 @@ private:
                 if (ConstrDefVertex* const defp = dynamic_cast<ConstrDefVertex*>(vtxp)) {
                     UINFO(100, "consumed: " << defp->vscp()->name() << endl);
                     m_vscpRefs(defp->vscp()).consumer(graphp);
-                } else if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
-                    if (AstAssignPost* const postp = VN_CAST(compp->nodep(), AssignPost)) {
-                        postp->foreach([this, &graphp](const AstVarRef* vrefp) {
-                            if (vrefp->access().isWriteOrRW()) {
-                                UINFO(100, "produced: " << vrefp->varScopep()->name() << endl);
-                                m_vscpRefs(vrefp->varScopep()).producer(graphp);
-                            }
-                        });
-                    }
+                } else if (ConstrCommitVertex* const commitp = dynamic_cast<ConstrCommitVertex*>(vtxp)) {
+                    UINFO(100, "produced: " << commitp->vscp()->name() << endl);
+                    m_vscpRefs(commitp->vscp()).producer(graphp);
                 }
             }
         }
@@ -237,14 +231,13 @@ private:
                     newVscp->trace(vscp->isTrace());
                     scopep->addVarsp(newVscp);
                     vscp->user3p(newVscp);
-                    if (VN_IS(vscp->dtypep(), BasicDType)
-                        || VN_IS(vscp->dtypep()->skipRefp(), BasicDType)) {
-                        // not memory type, so create variable that is local to
-                        // the compute function
+                    if (VN_IS(vscp->dtypep()->skipRefp(), BasicDType)
+                        || VN_IS(vscp->dtypep()->skipRefp(), UnpackArrayDType)) {
+
                         if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
                             // the variable is produced here and does not need
                             // to be sent out, however we should create a
-                            // persitent class member for it to keep it alive
+                            // persistent class member for it to keep it alive
                             // after the function goes out of scope
                             classp->addStmtsp(varp);
                             refInfo.addTargetp(std::make_pair(instVscp, varp));
@@ -267,9 +260,6 @@ private:
                             cfuncp->addStmtsp(varp);
                             varp->funcLocal(true);
                         }
-                    } else if (VN_IS(vscp->dtypep(), UnpackArrayDType)) {
-                        UASSERT_OBJ(refInfo.isLocal(), vscp, "memory should be local!");
-                        classp->addStmtsp(varp);
                     } else {
                         vscp->v3fatalSrc("Unknown data type" << vscp->dtypep());
                     }
