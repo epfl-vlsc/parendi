@@ -1436,6 +1436,11 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
             m_threads = 1;
         }
     });
+    DECL_OPTION("-tiles", CbVal, [this, fl](const char* valp) {
+        m_tiles = std::atoi(valp);
+        if (m_tiles <= 0) fl->v3fatal("--tiles must be >= 0: " << valp);
+    });
+
     DECL_OPTION("-threads-dpi", CbVal, [this, fl](const char* valp) {
         if (!std::strcmp(valp, "all")) {
             m_threadsDpiPure = true;
@@ -1580,6 +1585,11 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-Wno-style", CbCall, []() { FileLine::globalWarnStyleOff(true); });
     DECL_OPTION("-Wno-UNUSED", CbCall, []() { FileLine::globalWarnUnusedOff(true); });
     DECL_OPTION("-Wno-WIDTH", CbCall, []() { FileLine::globalWarnOff(V3ErrorCode::WIDTH, true); });
+    DECL_OPTION("-workers", CbVal, [this, fl](const char* valp) {
+        m_workers = std::atoi(valp);
+        if (m_workers <= 0) fl->v3fatal("--workers should be >= 0: " << valp);
+        if (m_workers > 6) fl->v3warn(UNOPT, "suboptimal parallel performance with --worker > 6: " << valp);
+    });
     DECL_OPTION("-Wwarn-", CbPartialMatch, [this, fl, &parser](const char* optp) {
         const V3ErrorCode code{optp};
         if (code == V3ErrorCode::EC_ERROR) {

@@ -31,7 +31,7 @@
 
 
 /// Print a debug message from internals with standard prefix, with printf style format
-// extern void VL_DBG_MSGF(const char* formatp, ...) VL_ATTR_PRINTF(1) VL_MT_SAFE;
+#define VL_DBG_MSGF(fmt, args...) printf("[DBG]" fmt, ##args)
 
 // EMIT_RULE: VL_RANDOM:  oclean=dirty
 inline IData VL_RANDOM_I() VL_MT_SAFE { return vl_rand64(); }
@@ -207,7 +207,7 @@ extern void _vl_debug_print_w(int lbits, WDataInP const iwp) VL_MT_SAFE;
 /// Evaluate statement if VL_DEBUG defined and Verilated::debug() enabled
 #define VL_DEBUG_IF(stmt) \
     do { \
-        if (VL_UNLIKELY(Verilated::debug())) { stmt } \
+        stmt \
     } while (false)
 #else
 // We intentionally do not compile the stmt to improve compile speed
@@ -2065,7 +2065,7 @@ extern IData VL_DIST_UNIFORM(IData& seedr, IData ustart, IData uend) VL_MT_SAFE;
 // $test$plusargs and $value$plusargs on the IPU
 //======================================================================
 
-inline IData VL_VALUEPLUSARGSPROXY_IW(int obits, IData en, WDataInP valp, WDataOutP outp) VL_MT_SAFE {
+VL_ATTR_ALWINLINE IData VL_VALUEPLUSARGSPROXY_IW(int obits, IData en, WDataInP valp, WDataOutP outp) VL_MT_SAFE {
 
     if (en) {
         for (int i = VL_WORDS_I(obits) - 1; i >= 0; i--) {
@@ -2076,7 +2076,7 @@ inline IData VL_VALUEPLUSARGSPROXY_IW(int obits, IData en, WDataInP valp, WDataO
 
 }
 
-inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, CData val, CData& out) VL_MT_SAFE {
+VL_ATTR_ALWINLINE IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, CData val, CData& out) VL_MT_SAFE {
 
     VlWide<2> outp;
     VlWide<2> inp;
@@ -2086,7 +2086,7 @@ inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, CData val, CData& out
     return got;
 }
 
-inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, SData val, SData& out) VL_MT_SAFE {
+VL_ATTR_ALWINLINE IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, SData val, SData& out) VL_MT_SAFE {
 
     VlWide<2> outp;
     VlWide<2> inp;
@@ -2096,7 +2096,7 @@ inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, SData val, SData& out
     return got;
 }
 
-inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, IData val, IData& out) VL_MT_SAFE {
+VL_ATTR_ALWINLINE IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, IData val, IData& out) VL_MT_SAFE {
 
     VlWide<2> outp;
     VlWide<2> inp;
@@ -2106,7 +2106,7 @@ inline IData VL_VALUEPLUSARGSPROXY_II(int obits, IData en, IData val, IData& out
     return got;
 }
 
-inline IData VL_VALUEPLUSARGSPROXY_IQ(int obits, IData en, QData val, QData& out) VL_MT_SAFE {
+VL_ATTR_ALWINLINE IData VL_VALUEPLUSARGSPROXY_IQ(int obits, IData en, QData val, QData& out) VL_MT_SAFE {
     VlWide<2> outp;
     VlWide<2> inp;
     VL_SET_WQ(inp, val);

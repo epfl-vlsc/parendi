@@ -38,6 +38,7 @@ struct CounterConfig {
     bool sync1 = false;
     bool copy = false;
     bool sync2 = false;
+    bool cond = false;
     bool loop = false;
 };
 
@@ -75,11 +76,13 @@ private:
     std::unique_ptr<poplar::Graph> graph;
     std::unique_ptr<poplar::Engine> engine;
     std::unique_ptr<poplar::ComputeSet> workload;
+    std::unique_ptr<poplar::ComputeSet> condeval;
     std::unique_ptr<poplar::ComputeSet> initializer;
     std::unordered_map<std::string, poplar::Tensor> tensors;
     std::unordered_map<std::string, std::unique_ptr<HostBuffer>> hbuffers;
     std::unordered_map<std::string, poplar::VertexRef> vertices;
     std::vector<poplar::Tensor> hostRequest;
+    poplar::Tensor interruptCond;
     poplar::program::Sequence initCopies;
     poplar::program::Sequence constInitCopies;
     poplar::program::Sequence exchangeCopies;
@@ -117,11 +120,11 @@ public:
     void setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId);
     void setTileMapping(poplar::Tensor& tensor, uint32_t tileId);
     void connect(poplar::VertexRef& vtxRef, const std::string& vtxField, poplar::Tensor& tensor);
-    void isHostRequest(poplar::Tensor& tensor);
+    void isHostRequest(poplar::Tensor& tensor, bool isInterruptCond);
     void createHostRead(const std::string& handleName, poplar::Tensor& tensor);
     void createHostWrite(const std::string& handleName, poplar::Tensor& tensor);
     void setPerfEstimate(poplar::VertexRef&, int) {}
-    poplar::VertexRef getOrAddVertex(const std::string& name, bool isInit);
+    poplar::VertexRef getOrAddVertex(const std::string& name, const std::string& where);
 
     poplar::Tensor addTensor(uint32_t size, const std::string& name);
 

@@ -31,6 +31,7 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     graph = std::make_unique<poplar::Graph>(device->getTarget());
     workload = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("workload"));
     initializer = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("initializer"));
+    condeval = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("condeval"));
     vprog = std::make_unique<VPROGRAM>(*this);
     std::ifstream fs{CODELET_LIST /*defined by the Makefile*/, std::ios::in};
 
@@ -46,17 +47,16 @@ void VlPoplarContext::build() {
     using namespace poplar;
     using namespace poplar::program;
     Sequence prog;
+    Sequence resetReq;
     // handle any host calls invoked by the initial blocks
-    if (hostRequest.size() != 1) {
-        std::cerr << "Can only handle exactly one host request for now, you have "
-                  << hostRequest.size() << std::endl;
+    if (!interruptCond.valid()) {
+        std::cerr << "No interrupt!" << std::endl;
         std::exit(EXIT_FAILURE);
     }
     auto zeroValue = graph->addConstant(UNSIGNED_INT, {1}, false, "false value");
     graph->setTileMapping(zeroValue, 0);
-    for (auto hr : hostRequest) {
-        prog.add(Copy(zeroValue, hr[0]));  // need to clear the loop conditions
-    }
+    resetReq.add(Copy(zeroValue, interruptCond[0]));  // need to clear the loop conditions
+    for (auto hreq : hostRequest) { resetReq.add(Copy(zeroValue, hreq[0])); }
     auto withCycleCounter = [this](Program&& code, const std::string& n, bool en) {
         Sequence wrapper;
         wrapper.add(code);
@@ -67,13 +67,14 @@ void VlPoplarContext::build() {
         return wrapper;
     };
 
-    Tensor breakCond = hostRequest.front()[0];
-    Sequence loopBody{withCycleCounter(Execute{*workload}, "prof.exec", cfg.counters.exec),
-                      withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync1", cfg.counters.sync1),
-                      withCycleCounter(std::move(exchangeCopies), "prof.copy", cfg.counters.copy),
-                      withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync2", cfg.counters.copy)};
-
-    prog.add(RepeatWhileFalse{Sequence{}, breakCond, loopBody, "eval loop"});
+    Sequence loopBody{
+        withCycleCounter(Execute{*workload}, "prof.exec", cfg.counters.exec),
+        withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync1", cfg.counters.sync1),
+        withCycleCounter(std::move(exchangeCopies), "prof.copy", cfg.counters.copy),
+        withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync2", cfg.counters.sync2)};
+    Sequence preCond = withCycleCounter(Execute{*condeval}, "prof.cond", cfg.counters.cond);
+    prog.add(resetReq);
+    prog.add(RepeatWhileFalse{preCond, interruptCond[0], loopBody, "eval loop"});
     OptionFlags flags{};
     auto exec = compileGraph(*graph,
                              {Sequence{constInitCopies, Execute(*initializer), initCopies},
@@ -99,10 +100,12 @@ void VlPoplarContext::run() {
     while (!contextp->gotFinish()) {
         engine->run(EVAL_PROGRAM);
         vprog->hostHandle();
-        printCounter("prof.exec", cfg.counters.exec);
-        printCounter("prof.sync1", cfg.counters.sync1);
-        printCounter("prof.copy", cfg.counters.copy);
-        printCounter("prof.sync2", cfg.counters.sync2);
+            printCounter("prof.cond", cfg.counters.cond);
+            printCounter("prof.exec", cfg.counters.exec);
+            printCounter("prof.sync1", cfg.counters.sync1);
+            printCounter("prof.copy", cfg.counters.copy);
+            printCounter("prof.sync2", cfg.counters.sync2);
+            printCounter("prof.loop", cfg.counters.loop);
     }
 }
 
@@ -123,10 +126,20 @@ poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name
     return t;
 }
 
-poplar::VertexRef VlPoplarContext::getOrAddVertex(const std::string& name, bool isInit) {
+poplar::VertexRef VlPoplarContext::getOrAddVertex(const std::string& name,
+                                                  const std::string& where) {
     auto it = vertices.find(name);
     if (it == vertices.end()) {
-        vertices.emplace(name, graph->addVertex(isInit ? *initializer : *workload, name));
+        if (where == "compute") {
+            vertices.emplace(name, graph->addVertex(*workload, name));
+        } else if (where == "init") {
+            vertices.emplace(name, graph->addVertex(*initializer, name));
+        } else if (where == "condeval") {
+            vertices.emplace(name, graph->addVertex(*condeval, name));
+        } else {
+            std::cerr << "invalid computeset \"" << where << "\"" << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
     }
     return vertices[name];
 }
@@ -149,7 +162,15 @@ void VlPoplarContext::createHostWrite(const std::string& handle, poplar::Tensor&
     hbuffers.emplace(handle, std::make_unique<HostBuffer>(tensor.numElements()));
 }
 
-void VlPoplarContext::isHostRequest(poplar::Tensor& tensor) { hostRequest.push_back(tensor); }
+void VlPoplarContext::isHostRequest(poplar::Tensor& tensor, bool isInterruptCond) {
+    if (interruptCond.valid() && isInterruptCond) {
+        std::cerr << "Can not have multiple interrup conditions" << std::endl;
+        std::exit(EXIT_FAILURE);
+    } else if (isInterruptCond) {
+        interruptCond = tensor;
+    }
+    hostRequest.push_back(tensor);
+}
 
 RuntimeConfig parseArgs(int argc, char* argv[]) {
     namespace opts = boost::program_options;
@@ -175,6 +196,9 @@ RuntimeConfig parseArgs(int argc, char* argv[]) {
     ("instrument-sync2,S",
         opts::bool_switch(&cfg.counters.sync2)->default_value(false),
         "instrument the sync2 phase")
+    ("instrument-condition,C",
+        opts::bool_switch(&cfg.counters.cond)->default_value(false),
+        "instrument the condition evaluation")
     ("instrument-loop,L",
         opts::bool_switch(&cfg.counters.loop)->default_value(false),
         "instrument the simulation loop");

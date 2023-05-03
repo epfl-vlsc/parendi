@@ -1956,7 +1956,8 @@ public:
     const MTaskIdSet& mtaskIds() const { return m_mtaskIds; }
     void pinNum(int id) { m_pinNum = id; }
     int pinNum() const { return m_pinNum; }
-    VBspFlag& bspFlag() { return m_bspFlags; }
+    VBspFlag bspFlag() { return m_bspFlags; }
+    void bspFlag(VBspFlag flag) { m_bspFlags = flag; }
 };
 class AstVarScope final : public AstNode {
     // A particular scoped usage of a variable

@@ -307,6 +307,8 @@ private:
     int         m_reloopLimit = 40; // main switch: --reloop-limit
     VOptionBool m_skipIdentical;  // main switch: --skip-identical
     int         m_threads = 1;      // main switch: --threads
+    int         m_tiles = 1472;     // main poplar switch: --tiles
+    int         m_workers = 6;      // main poplar switch: --workers
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
     VTimescale  m_timeDefaultUnit;  // main switch: --timescale
@@ -529,6 +531,8 @@ public:
     int threads() const VL_MT_SAFE { return m_threads; }
     int threadsMaxMTasks() const { return m_threadsMaxMTasks; }
     bool mtasks() const { return (m_threads > 1); }
+    int tiles() const VL_MT_SAFE { return m_tiles; }
+    int workers() const VL_MT_SAFE { return m_workers; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }
     VTimescale timeOverridePrec() const { return m_timeOverridePrec; }

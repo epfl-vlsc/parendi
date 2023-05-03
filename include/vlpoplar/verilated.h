@@ -34,7 +34,7 @@
 
 #include "vlpoplar/verilatedos.h"
 #include "verilated_config.h"
-
+#include <print.h> // poplar print
 #include <cmath>
 
 //=========================================================================

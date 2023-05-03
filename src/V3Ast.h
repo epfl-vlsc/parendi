@@ -1241,7 +1241,8 @@ public:
         MEMBER_HOSTREAD = 4,  // host readable
         MEMBER_HOSTWRITE = 8,  // host writeable
         MEMBER_HOSTREQ   = 16, // is a host request
-        MEMBER_OPAQUE = 32,  // an opaque storage for multiple variables
+        MEMBER_HOSTANYREQ = 32, // is any host request
+        MEMBER_OPAQUE = 64,  // an opaque storage for multiple variables
     };
 private:
     int m_flag = 0;
@@ -1255,6 +1256,7 @@ public:
     bool hasHostRead() const { return (m_flag & MEMBER_HOSTREAD); }
     bool hasHostWrite() const { return (m_flag & MEMBER_HOSTWRITE); }
     bool hasHostReq() const { return (m_flag & MEMBER_HOSTREQ); }
+    bool hasAnyHostReq() const { return (m_flag & MEMBER_HOSTANYREQ); }
     bool valid() const { return hasInput() || hasOutput() || hasHostRead() ||
         hasHostWrite() || (hasHostRead() && hasHostReq()); }
 };
@@ -1263,17 +1265,32 @@ public:
     enum en : uint8_t {
         NONE = 0x0000,
         BSP_BUILTIN = 0x0001,
-        BSP_INIT_BUILTIN = 0x0002
+        BSP_INIT_BUILTIN = 0x0002,
+        BSP_COND_BUILTIN = 0x0004
     };
 private:
     uint8_t m_flag = NONE;
+    uint32_t m_tileId = -1;
+    uint32_t m_workerId = -1;
 public:
     VClassFlag& append(en v) {
         m_flag |= v;
         return *this;
     }
+    VClassFlag& withTileId(uint32_t v) {
+        m_tileId = v;
+        return *this;
+    }
+    VClassFlag& withWorkerId(uint32_t v) {
+        m_workerId = v;
+        return *this;
+    }
     bool isBsp() const { return (m_flag & BSP_BUILTIN); }
     bool isBspInit() const { return (m_flag & BSP_INIT_BUILTIN); }
+    bool isBspCond() const { return (m_flag & BSP_COND_BUILTIN); }
+    uint32_t tileId() const { return m_tileId; }
+    uint32_t workerId() const { return m_workerId; }
+
 };
 //######################################################################
 // AstNUser - Generic base class for AST User nodes.

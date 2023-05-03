@@ -28,13 +28,13 @@
 #error "verilated_types.h should only be included by verilated.h"
 #endif
 
-
+#include <ipu_intrinsics>
 
 
 //===================================================================
 // Shuffle RNG
 
-extern uint64_t vl_rand64();
+VL_ATTR_ALWINLINE uint64_t vl_rand64() { return static_cast<uint64_t>(__builtin_ipu_urand64()); }
 
 class VlURNG final {
 public:

@@ -30,6 +30,55 @@
 
 VL_DEFINE_DEBUG_FUNCTIONS;
 
+class PoplarSetTileAndWorkerVisitor final {
+private:
+    uint32_t m_numAvailTiles;
+    uint32_t m_numAvailWorkers;
+    AstNetlist* m_netlistp;
+    void doLocate(const std::vector<AstClass*> unlocated) {
+
+        if (unlocated.size() > m_numAvailTiles * m_numAvailWorkers) {
+            m_netlistp->v3warn(UNOPT, "Not enough tiles, exceeding worker limit: There are  "
+                                          << unlocated.size() << " parallel process but have only "
+                                          << m_numAvailTiles << "*" << m_numAvailWorkers
+                                          << " tiles*workers" << endl);
+        }
+        // simple tile assignment
+        uint32_t tid = 0;
+        uint32_t wid = 0;
+        for (AstClass* classp : unlocated) {
+            auto newFlag = classp->flag().withTileId(tid++).withWorkerId(wid);
+            classp->flag(newFlag);
+            if (tid == m_numAvailTiles) {
+                tid = 0;
+                wid++;
+            }
+        }
+    }
+
+public:
+    explicit PoplarSetTileAndWorkerVisitor(AstNetlist* netlistp) {
+        // collect all the bsp classes that do not have tile or worker id
+        // const auto numAvailTiles = V3Global.opt
+        m_netlistp = netlistp;
+        m_numAvailTiles = static_cast<uint32_t>(v3Global.opt.tiles());
+        m_numAvailWorkers = static_cast<uint32_t>(v3Global.opt.workers());
+        std::vector<AstClass*> unlocatedCompute;
+        std::vector<AstClass*> unlocatedInit;
+        netlistp->topModulep()->foreach([&](AstVar* varp) {
+            AstClassRefDType* clsTypep = VN_CAST(varp->dtypep(), ClassRefDType);
+            if (clsTypep && clsTypep->classp()->flag().isBsp()
+                && clsTypep->classp()->flag().tileId() >= m_numAvailTiles) {
+                if (clsTypep->classp()->flag().isBspInit())
+                    unlocatedInit.push_back(clsTypep->classp());
+                else
+                    unlocatedCompute.push_back(clsTypep->classp());
+            }
+        });
+        doLocate(unlocatedCompute);
+        doLocate(unlocatedInit);
+    }
+};
 class PoplarPlusArgsVisitor final : public VNVisitor {
 private:
     V3UniqueNames m_hostFuncs;
@@ -71,7 +120,7 @@ private:
         // on the class and and then push it to the m_substs to later deal with
         AstVar* varp = new AstVar{nodep->fileline(), VVarType::MEMBER, m_varNames.get("test"),
                                   nodep->dtypep()};
-        varp->bspFlag().append(VBspFlag::MEMBER_INPUT);
+        varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
         AstVarScope* vscp = new AstVarScope{varp->fileline(), m_scopep, varp};
         m_classp->stmtsp()->addHereThisAsNext(varp);
         m_scopep->addVarsp(vscp);
@@ -84,7 +133,7 @@ private:
         UINFO(3, "replacing " << nodep << endl);
         auto addVarToClass = [this, nodep](const std::string& name, AstNodeDType* dtypep) {
             AstVar* varp = new AstVar{nodep->fileline(), VVarType::MEMBER, name, dtypep};
-            varp->bspFlag().append(VBspFlag::MEMBER_INPUT);
+            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_scopep, varp};
             m_classp->stmtsp()->addHereThisAsNext(varp);
             m_scopep->addVarsp(vscp);
@@ -212,10 +261,10 @@ private:
             AstVar* varp
                 = new AstVar{m_ctx.m_classp->fileline(), VVarType::MEMBER,
                              m_memberName.get("needInteraction"), m_netlistp->findUInt32DType()};
-            varp->bspFlag()
-                .append(VBspFlag::MEMBER_HOSTREAD)
-                .append(VBspFlag::MEMBER_HOSTREQ)
-                .append(VBspFlag::MEMBER_OUTPUT);
+            varp->bspFlag(VBspFlag{}
+                              .append(VBspFlag::MEMBER_HOSTREAD)
+                              .append(VBspFlag::MEMBER_OUTPUT)
+                              .append(VBspFlag::MEMBER_HOSTREQ));
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_ctx.m_scopep, varp};
             UASSERT(m_ctx.m_classp->stmtsp(), "class with no vars!");
             m_ctx.m_classp->stmtsp()->addHereThisAsNext(varp);
@@ -234,7 +283,8 @@ private:
                 m_netlistp->findBitDType(m_ctx.m_numCalls,
                                          std::max(m_ctx.m_numCalls, VL_EDATASIZE),
                                          VSigning::UNSIGNED)};
-            varp->bspFlag().append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT);
+            varp->bspFlag(
+                VBspFlag{}.append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT));
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_ctx.m_scopep, varp};
             UASSERT(m_ctx.m_classp->stmtsp(), "Class with no vars!");
             m_ctx.m_classp->stmtsp()->addHereThisAsNext(varp);
@@ -297,7 +347,8 @@ private:
                                          m_memberName.get("fmtArg"), exprp->dtypep()};
             membersp.push_back(memberp);
             // mark the variable as something that can be read by the host
-            memberp->bspFlag().append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT);
+            memberp->bspFlag(
+                VBspFlag{}.append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT));
             UASSERT(m_ctx.m_classp->stmtsp(), "Expected at least one stmt!");
             m_ctx.m_classp->stmtsp()->addHereThisAsNext(memberp);
             // need a variable scope as well
@@ -343,6 +394,147 @@ private:
     void visit(AstClass* classp) override {}
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
+    void interactionAggregate() {
+        FileLine* flp = m_netlistp->fileline();
+        AstClass* newClsp = new AstClass{flp, m_memberName.get("condeval")};
+        newClsp->classOrPackagep(
+            new AstClassPackage{flp, V3BspSched::V3BspModules::builtinBaseClassPkg});
+        newClsp->classOrPackagep()->classp(newClsp);
+
+        AstClassRefDType* dtypep = new AstClassRefDType{flp, newClsp, nullptr};
+        AstPackage* parentPkgp = nullptr;
+        AstScope* parentScopep = nullptr;
+        m_netlistp->foreach([&parentPkgp, &parentScopep](AstPackage* pkgp) {
+            if (pkgp->name() == V3BspSched::V3BspModules::builtinBspPkg) {
+                parentPkgp = pkgp;
+                pkgp->foreach([&parentScopep](AstScope* scopep) { parentScopep = scopep; });
+            }
+        });
+
+        dtypep->classOrPackagep(parentPkgp);
+        m_netlistp->typeTablep()->addTypesp(dtypep);
+        AstClassRefDType* baseDTypep = nullptr;
+        m_netlistp->foreach([&baseDTypep](AstClassRefDType* clsDTypep) {
+            if (clsDTypep->classp()->name() == V3BspSched::V3BspModules::builtinBaseClass) {
+                baseDTypep = clsDTypep;
+            }
+        });
+        AstClassExtends* extendsp = new AstClassExtends{flp, nullptr, false};
+        extendsp->dtypep(baseDTypep);
+        newClsp->addExtendsp(extendsp);
+        newClsp->isExtended(true);
+        newClsp->level(4);
+        newClsp->flag(VClassFlag{}
+                          .append(VClassFlag::BSP_BUILTIN)
+                          .append(VClassFlag::BSP_COND_BUILTIN)
+                          .withTileId(0)
+                          .withWorkerId(0));
+        AstVar* classInstp
+            = new AstVar{flp, VVarType::VAR, m_memberName.get("condevalinst"), dtypep};
+        classInstp->lifetime(VLifetime::STATIC);
+        AstVarScope* instVscp
+            = new AstVarScope{flp, m_netlistp->topScopep()->scopep(), classInstp};
+        m_netlistp->topScopep()->scopep()->addVarsp(instVscp);
+        m_netlistp->topModulep()->addStmtsp(classInstp);
+
+        AstCell* parentCellp = nullptr;
+        m_netlistp->topModulep()->foreach([&parentCellp, parentPkgp](AstCell* cellp) {
+            if (cellp->modp() == parentPkgp) { parentCellp = cellp; }
+        });
+        AstScope* scopep = new AstScope{flp, newClsp, parentScopep->name() + "." + newClsp->name(),
+                                        parentScopep, parentCellp};
+
+        // create the compute func
+        AstCFunc* compFuncp = new AstCFunc{flp, "compute", scopep, "void"};
+        // find the exchange function
+        AstCFunc* exchp = nullptr;
+        m_netlistp->topModulep()->foreach([&exchp](AstCFunc* funcp) {
+            if (funcp->name() == "exchange") { exchp = funcp; }
+        });
+
+        compFuncp->dontCombine(true);
+        compFuncp->isMethod(true);
+        compFuncp->isInline(false);
+        // for each host request, create new member variable + one extra member
+        // variable that is the disjunction of the rest
+
+        AstVar* disjunctVarp = new AstVar{flp, VVarType::MEMBER, m_memberName.get("disjucntion"),
+                                          m_netlistp->findUInt32DType()};
+        AstVarScope* disjunctVscp = new AstVarScope{flp, scopep, disjunctVarp};
+        scopep->addVarsp(disjunctVscp);
+        newClsp->addStmtsp(disjunctVarp);
+
+        AstVar* tmpVarp = new AstVar{flp, VVarType::MEMBER, m_memberName.get("stacktemp"),
+                                     m_netlistp->findUInt32DType()};
+        AstVarScope* tmpVscp = new AstVarScope{flp, scopep, tmpVarp};
+        scopep->addVarsp(tmpVscp);
+        compFuncp->addStmtsp(tmpVarp);
+        tmpVarp->funcLocal(true);
+        compFuncp->addStmtsp(new AstAssign{flp, new AstVarRef{flp, tmpVscp, VAccess::WRITE},
+                                           new AstConst{flp, AstConst::Unsized32{}, 0}});
+
+        for (const auto info : m_info) {
+            if (info.m_classp->flag().isBspInit()) continue;  // should not consider them here
+            AstVar* condVarp = new AstVar{flp, VVarType::MEMBER, m_memberName.get("cond"),
+                                          m_netlistp->findUInt32DType()};
+            condVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
+            AstVarScope* condVscp = new AstVarScope{flp, scopep, condVarp};
+            scopep->addVarsp(condVscp);
+            newClsp->addStmtsp(condVarp);
+            // clang-format off
+            // OR condition
+            compFuncp->addStmtsp(
+                new AstAssign{
+                    flp,
+                    new AstVarRef{flp, tmpVscp, VAccess::WRITE},
+                    new AstOr{flp,
+                        new AstVarRef{flp, tmpVscp, VAccess::READ},
+                        new AstVarRef{flp, condVscp, VAccess::READ}
+                    }
+                }
+            );
+            // clear on read
+            compFuncp->addStmtsp(
+                new AstAssign{
+                    flp,
+                    new AstVarRef{flp, condVscp, VAccess::WRITE},
+                    new AstConst{flp, AstConst::Unsized32{}, 0}
+                }
+            );
+            // clang-format on
+            // add the exchange
+            AstMemberSel* sourceSelp
+                = new AstMemberSel{flp, new AstVarRef{flp, info.m_instp, VAccess::READ},
+                                   VFlagChildDType{}, info.m_classInteractionp->name()};
+            sourceSelp->varp(info.m_classInteractionp->varp());
+            sourceSelp->dtypep(info.m_classInteractionp->varp()->dtypep());
+            AstMemberSel* targetSelp
+                = new AstMemberSel{flp, new AstVarRef{flp, instVscp, VAccess::WRITE},
+                                   VFlagChildDType{}, condVarp->name()};
+            targetSelp->varp(condVarp);
+            targetSelp->dtypep(condVarp->dtypep());
+            exchp->addStmtsp(new AstAssign{flp, targetSelp, sourceSelp});
+        }
+        // clang-format off
+        compFuncp->addStmtsp(
+            new AstAssign{
+                flp,
+                new AstVarRef{flp, disjunctVscp, VAccess::WRITE},
+                new AstVarRef{flp, tmpVscp, VAccess::READ}
+            }
+        );
+        // clang-format on
+        disjunctVarp->bspFlag(VBspFlag{}
+                                  .append(VBspFlag::MEMBER_HOSTREAD)
+                                  .append(VBspFlag::MEMBER_OUTPUT)
+                                  .append(VBspFlag::MEMBER_HOSTREQ)
+                                  .append(VBspFlag::MEMBER_HOSTANYREQ));
+
+        scopep->addBlocksp(compFuncp);
+        newClsp->addStmtsp(scopep);
+        m_netlistp->addModulesp(newClsp);
+    }
+
 public:
     explicit PoplarHostInteractionVisitor(AstNetlist* nodep)
         : m_funcNames{"__VbspHost"}
@@ -373,6 +565,7 @@ public:
                 });
                 if (m_ctx.m_numCalls > 0) {
                     iterateChildren(m_ctx.m_classp);
+                    m_info.push_back(m_ctx);
                     // reset trigger and callId
                     AstAssign* trigResetp
                         = new AstAssign{m_ctx.m_classInteractionp->fileline(),
@@ -415,6 +608,7 @@ public:
                 }
             }
         });
+        interactionAggregate();
         // create a function that handles are host interactions
         m_netlistp->topScopep()->scopep()->addBlocksp(hostHandlep);
     }
@@ -530,15 +724,16 @@ private:
     AstVar* m_ctxVarp = nullptr;
     AstVarScope* m_ctxVscp = nullptr;
 
-    uint32_t m_callerId = 0;
     struct TensorHandle {
         std::string tensor;
         std::string hostRead;
         std::string hostWrite;
+        bool isReq;
         TensorHandle() {
             tensor.erase();
             hostRead.erase();
             hostWrite.erase();
+            isReq = false;
         }
     };
     VNUser1InUse m_user1InUse;
@@ -600,7 +795,10 @@ private:
             fl, new AstVarRef{fl, vtxVscp, VAccess::WRITE},
             mkCall(fl, "getOrAddVertex",
                    {new AstConst{fl, AstConst::String{}, className},
-                    new AstConst{fl, AstConst::BitTrue{}, classp->flag().isBspInit()}},
+                    new AstConst{fl, AstConst::String{},
+                                 classp->flag().isBspInit()
+                                     ? "init"
+                                     : classp->flag().isBspCond() ? "condeval" : "compute"}},
                    m_vtxRefTypep)};
         ctorp->addStmtsp(mkVtx);
         auto setTileMapping = [this, &fl, &ctorp](AstVarScope* vscp, uint32_t tid) {
@@ -654,10 +852,14 @@ private:
                                                {new AstConst{fl, AstConst::String{}, hrHandle},
                                                 new AstVarRef{fl, tensorVscp, VAccess::READWRITE}},
                                                nullptr)});
+
                 if (varp->bspFlag().hasHostReq()) {
-                    ctorp->addStmtsp(new AstStmtExpr{
-                        fl, mkCall(fl, "isHostRequest",
-                                   {new AstVarRef{fl, tensorVscp, VAccess::READ}}, nullptr)});
+                    ctorp->addStmtsp(
+                        new AstStmtExpr{fl, mkCall(fl, "isHostRequest",
+                                                   {new AstVarRef{fl, tensorVscp, VAccess::READ},
+                                                    new AstConst{fl, AstConst::BitTrue{},
+                                                                 varp->bspFlag().hasAnyHostReq()}},
+                                                   nullptr)});
                 }
             }
             if (varp->bspFlag().hasHostWrite()) {
@@ -763,6 +965,10 @@ private:
         }
     }
 
+    // create a vertex that ORs all the needInteraction signals. Ideally this
+    // vertex should be a multivertex for better performance, but I'll leave that
+    // for later.
+
 public:
     explicit PoplarComputeGraphBuilder(AstNetlist* nodep)
         : m_newNames{"__VPoplar"} {
@@ -775,8 +981,7 @@ public:
         m_ctxVscp = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(),
                                     m_ctxVarp};
         m_netlistp->topScopep()->scopep()->addVarsp(m_ctxVscp);
-        uint32_t tileId = 0;
-        const uint32_t maxTileId = 1472;  // should be a cli arg
+
         // Step 1.
         // go through each class and create constructors. All that happens here
         // depends on a hard coded PoplarContext that provides a few methods
@@ -787,13 +992,12 @@ public:
         constructAllp->isMethod(true);
         constructAllp->dontCombine(true);
         m_netlistp->topScopep()->scopep()->addBlocksp(constructAllp);
-        m_netlistp->foreach([this, &constructAllp, &tileId](AstClass* classp) {
+
+        m_netlistp->foreach([this, &constructAllp](AstClass* classp) {
             // go through each deriviation of the base bsp class and create
             // host constructors
             if (!classp->flag().isBsp()) { return; /*some other class*/ }
-            AstCFunc* ctorp = createVertexCons(classp, tileId);
-            tileId++;
-            tileId %= maxTileId;
+            AstCFunc* ctorp = createVertexCons(classp, classp->flag().tileId());
             m_netlistp->topScopep()->scopep()->addBlocksp(ctorp);
 
             AstCCall* callp = new AstCCall{ctorp->fileline(), ctorp};
@@ -805,13 +1009,15 @@ public:
         AstCFunc* plusArgsFuncp = getFunc(m_netlistp->topModulep(), "plusArgs");
         AstCCall* plusArgsFuncCallp = new AstCCall{plusArgsFuncp->fileline(), plusArgsFuncp};
         plusArgsFuncCallp->dtypeSetVoid();
-        constructAllp->addStmtsp(new AstStmtExpr{plusArgsFuncCallp->fileline(), plusArgsFuncCallp});
+        constructAllp->addStmtsp(
+            new AstStmtExpr{plusArgsFuncCallp->fileline(), plusArgsFuncCallp});
         // copy the cache values of args to the tensors on startup
         AstCFunc* plusArgsCopyp = getFunc(m_netlistp->topModulep(), "plusArgsCopy");
         addInitConstCopies(plusArgsCopyp);
         AstCCall* plusArgsCopyCallp = new AstCCall{plusArgsCopyp->fileline(), plusArgsCopyp};
         plusArgsCopyCallp->dtypeSetVoid();
-        constructAllp->addStmtsp(new AstStmtExpr{plusArgsCopyCallp->fileline(), plusArgsCopyCallp});
+        constructAllp->addStmtsp(
+            new AstStmtExpr{plusArgsCopyCallp->fileline(), plusArgsCopyCallp});
         // Step 2.
         // create a poplar program with the following structure:
         // Add the copy operations
@@ -827,8 +1033,9 @@ public:
     }
 };
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
-
+    // reoder passes only if you know what you are doing
     UINFO(3, "Creating poplar program" << endl);
+    { PoplarSetTileAndWorkerVisitor{nodep}; }
     { PoplarPlusArgsVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPlusArg", 0, dumpTree() >= 1);
     { PoplarHostInteractionVisitor{nodep}; }  // destroy before checking
@@ -838,5 +1045,5 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     { PoplarViewsVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarView", 0, dumpTree() >= 1);
     { PoplarComputeGraphBuilder{nodep}; }  // destroy before checking
-    V3Global::dumpCheckGlobalTree("bscPoplalProgram", 0, dumpTree() >= 1);
+    V3Global::dumpCheckGlobalTree("bscPoplarProgram", 0, dumpTree() >= 1);
 }
