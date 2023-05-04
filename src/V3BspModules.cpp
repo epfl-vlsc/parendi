@@ -93,8 +93,6 @@ private:
     // NODE STATE
     //      VarScope::user1     -> consumers and producer of the variable
     VNUser1InUse user1InUse;
-    VNUser2InUse user2InUse;
-    VNUser3InUse user3InUse;
     AstUser1Allocator<AstVarScope, VarScopeReferences> m_vscpRefs;
     V3UniqueNames m_modNames;
     AstNetlist* m_netlistp;  // original netlist
@@ -230,6 +228,8 @@ private:
         // STATE
         // VarScope::user2   -> true if already processed
         // VarScope::user3p  -> new var scope inside the class
+        VNUser2InUse user2InUse;
+        VNUser3InUse user3InUse;
         AstNode::user2ClearTree();
         AstNode::user3ClearTree();
 
@@ -247,11 +247,13 @@ private:
                     auto& refInfo = m_vscpRefs(vscp);
                     AstVar* varp = new AstVar{vscp->varp()->fileline(), VVarType::MEMBER,
                                               vscp->varp()->name(), vscp->varp()->dtypep()};
+
                     varp->lifetime(VLifetime::AUTOMATIC);
                     AstVarScope* newVscp = new AstVarScope{vscp->fileline(), scopep, varp};
                     newVscp->trace(vscp->isTrace());
                     scopep->addVarsp(newVscp);
                     vscp->user3p(newVscp);
+                    vscp->user2(true);  // mark visited
                     if (VN_IS(vscp->dtypep()->skipRefp(), BasicDType)
                         || VN_IS(vscp->dtypep()->skipRefp(), UnpackArrayDType)) {
 
@@ -284,7 +286,6 @@ private:
                     } else {
                         vscp->v3fatalSrc("Unknown data type" << vscp->dtypep());
                     }
-                    vscp->user2(true);  // mark visited
                 }
             }
         }
@@ -316,7 +317,10 @@ private:
         for (AstNode* nodep : stmtps) {
             nodep->foreach([this](AstVarRef* vrefp) {
                 // replace with the new variables
-                UASSERT_OBJ(vrefp->varScopep()->user3p(), vrefp->varScopep(), "Expected user3p");
+
+                UASSERT_OBJ(
+                    vrefp->varScopep()->user3p(), vrefp->varScopep(),
+                    "Expected user3p, perhaps you have created a combinational partition?");
                 AstVarScope* substp = VN_AS(vrefp->varScopep()->user3p(), VarScope);
                 // replace the reference
                 AstVarRef* newp = new AstVarRef{vrefp->fileline(), substp, vrefp->access()};
@@ -410,6 +414,7 @@ private:
     // make a top level module with a single "exchange" function that emulates "AssignPost"
     void makeCopyOperations(const std::vector<AstClass*>& computeClassesp) {
         // AstVarScope::user2 -> true if variable already processed
+        VNUser2InUse user2InUse;
         AstNode::user2ClearTree();
 
         // function to run after computation
@@ -552,7 +557,7 @@ private:
 
         // STATE
         //      AstVarScope::user3p  -> new var scope local to the class
-
+        VNUser3InUse user3Inuse;
         AstNode::user3ClearTree();
         auto replaceOldVarRef = [this, &scopep, &classp, &cfuncp, &instVscp](AstVarRef* vrefp) {
             AstVarScope* oldVscp = vrefp->varScopep();

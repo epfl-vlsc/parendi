@@ -447,6 +447,7 @@ private:
         // create the compute func
         AstCFunc* compFuncp = new AstCFunc{flp, "compute", scopep, "void"};
         // find the exchange function
+        compFuncp->isInline(true);
         AstCFunc* exchp = nullptr;
         m_netlistp->topModulep()->foreach([&exchp](AstCFunc* funcp) {
             if (funcp->name() == "exchange") { exchp = funcp; }

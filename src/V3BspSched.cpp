@@ -185,13 +185,17 @@ void schedule(AstNetlist* netlistp) {
     // the V3Order graph in many ways but the most notably difference is wrt ordering
     // of combinational logic. This graph pushes combinational logic before clocked
     // logic, in parallel with AssignPre logic.
-    const std::unique_ptr<DepGraph> graphp = DepGraphBuilder::build(nbaLogic);
+    std::unique_ptr<DepGraph> graphp = DepGraphBuilder::build(nbaLogic);
     graphp->dumpDotFilePrefixed("nba_orig");
 
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs
-    std::vector<std::unique_ptr<DepGraph>> splitGraphsp
-        = DepGraphBuilder::splitIndependent(graphp);
+    std::vector<std::unique_ptr<DepGraph>> splitGraphsp;
+    if (v3Global.opt.tiles() == 1 && v3Global.opt.workers() == 1) {
+        splitGraphsp.emplace_back(std::move(graphp));
+    } else {
+        splitGraphsp = DepGraphBuilder::splitIndependent(graphp);
+    }
 
     // Step 8. Merge the, skipped for now.
 
