@@ -626,14 +626,14 @@ DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
         auto commitVtx = dynamic_cast<ConstrCommitVertex*>(itp);
         if (compVtx
             && (VN_IS(compVtx->nodep(), AlwaysPost) || VN_IS(compVtx->nodep(), AssignPost))) {
-            UASSERT_OBJ(compVtx->outSize1() == 0, compVtx,
+            UASSERT_OBJ(compVtx->outEmpty(), compVtx,
                         "Assign/AlwaysPost can not have a successor");
             processSinks.push_back(itp);
         } /* pattern 2 */ else if (compVtx && VN_IS(compVtx->nodep(), Always)
-                                   && compVtx->outSize1() == 0) {
+                                   && compVtx->outEmpty()) {
             processSinks.push_back(itp);
-        } /* pattern 1 */ else if (commitVtx && commitVtx->outSize1() == 0) {
-            UASSERT_OBJ(commitVtx->inSize1() > 0, commitVtx, "stranded commit?");
+        } /* pattern 1 */ else if (commitVtx && commitVtx->outEmpty()) {
+            UASSERT_OBJ(!commitVtx->inEmpty(), commitVtx, "stranded commit?");
             processSinks.push_back(itp);
         }
     }
@@ -641,6 +641,7 @@ DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
     std::vector<std::unique_ptr<DepGraph>> partitionsp;
     for (AnyVertex* const vtx : processSinks) {
         partitionsp.emplace_back(collectBackwardsBfs(graphp, vtx));
+        partitionsp.back()->dumpDotFilePrefixed("partition_" + std::to_string(partitionsp.size() - 1));
     }
 
     return partitionsp;

@@ -57,7 +57,7 @@ public:
         return !isLocal() && !isOwned(graphp);
     }
     inline void producer(const std::unique_ptr<DepGraph>& graphp) {
-        UASSERT(!m_producer, "multiple producers!");
+        UASSERT(!m_producer || m_producer == graphp.get(), "multiple producers!");
         m_producer = graphp.get();
     }
 
@@ -126,9 +126,30 @@ private:
                 if (ConstrDefVertex* const defp = dynamic_cast<ConstrDefVertex*>(vtxp)) {
                     UINFO(100, "consumed: " << defp->vscp()->name() << endl);
                     m_vscpRefs(defp->vscp()).consumer(graphp);
-                } else if (ConstrCommitVertex* const commitp = dynamic_cast<ConstrCommitVertex*>(vtxp)) {
-                    UINFO(100, "produced: " << commitp->vscp()->name() << endl);
-                    m_vscpRefs(commitp->vscp()).producer(graphp);
+                } else if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
+                    if (VN_IS(compp->nodep(), AssignPost) || VN_IS(compp->nodep(), AlwaysPost)) {
+                        // this is a commit node whose variables appears in the LHS of some post
+                        // assignment
+                        compp->nodep()->foreach([this, compp, &graphp](const AstVarRef* vrefp) {
+                            if (vrefp->access().isWriteOrRW()) {
+                                UINFO(100, "produced: " << vrefp->varScopep()->name() << " from "
+                                                        << cvtToHex(compp->nodep()) << endl);
+                                m_vscpRefs(vrefp->varScopep()).producer(graphp);
+                            }
+                        });
+                    }
+                } else if (ConstrCommitVertex* const commitp
+                           = dynamic_cast<ConstrCommitVertex*>(vtxp)) {
+                    if (commitp->outEmpty()) {
+                        UINFO(100,
+                              "produced: " << commitp->vscp()->name() << " from commit" << endl);
+                        m_vscpRefs(commitp->vscp()).producer(graphp);
+                    } else {
+                        // Leads to an LHS of a post assignment which is handled above.
+                        // Note that a commit node with both and incoming edge and outgoing
+                        // edge is considered duplicable and hence is not considered as "produced"
+                        // since production should be unique to a single partition
+                    }
                 }
             }
         }
