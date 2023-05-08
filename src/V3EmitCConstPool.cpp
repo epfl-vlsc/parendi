@@ -44,13 +44,22 @@ class EmitCConstPool final : public EmitCConstInit {
     V3OutCFile* newOutCFile() const {
         const string fileName = v3Global.opt.makeDir() + "/" + topClassName() + "__ConstPool_"
                                 + cvtToStr(m_outFileCount) + ".cpp";
-        newCFile(fileName, /* slow: */ true, /* source: */ true);
+        auto cfilep = newCFile(fileName, /* slow: */ true, /* source: */ true);
+        cfilep->constPool(true);
         V3OutCFile* const ofp = new V3OutCFile{fileName};
         ofp->putsHeader();
         ofp->puts("// DESCRIPTION: Verilator output: Constant pool\n");
         ofp->puts("//\n");
         ofp->puts("\n");
-        ofp->puts("#include \"verilated.h\"\n");
+        if (v3Global.opt.poplar()) {
+            ofp->puts("#ifdef __IPU__\n");
+            ofp->puts("#include \"vlpoplar/verilated.h\"\n");
+            ofp->puts("#else\n");
+            ofp->puts("#include \"verilated.h\"\n");
+            ofp->puts("#endif\n");
+        } else {
+            ofp->puts("#include \"verilated.h\"\n");
+        }
         return ofp;
     }
 

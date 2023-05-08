@@ -146,7 +146,7 @@ public:
             // hacky stuff to handle padded uint32_t values
             std::array<uint32_t, 2> v;
             engine->readTensor(handle, v.data(), v.data() + 2);
-            return v[0];
+            return (*reinterpret_cast<T*>(v.data()));
         } else {
             engine->readTensor(handle, it->second->buff.data(),
                                it->second->buff.data() + it->second->buff.size());

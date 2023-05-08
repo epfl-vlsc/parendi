@@ -564,6 +564,7 @@ static void process() {
 
     // Output the text
     if (v3Global.opt.poplar()) {
+        V3EmitC::emitcConstPool();
         V3EmitPoplar::emitVertex();
         V3EmitPoplar::emitProgram();
     } else {

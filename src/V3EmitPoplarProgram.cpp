@@ -149,7 +149,7 @@ public:
         {
 
             std::ofstream listFs{v3Global.opt.makeDir() + "/" + listFile, std::ios::out};
-            iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet(); },
+            iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },
                           [&](AstCFile* cfilep) {
                               listFs << V3Os::filenameNonExt(cfilep->name()) << ".gp" << std::endl;
                           });
@@ -183,14 +183,14 @@ public:
         ofp->puts("IPU_FLAGS = -O2 $(INCLUDES)\n");
         ofp->puts("\n");
         ofp->puts("CODELETS =  \\\n");
-        iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet(); },
+        iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },
                       [&](AstCFile* cfilep) {
                           ofp->puts("\t" + V3Os::filenameNonDir(cfilep->name()) + " \\\n");
                       });
 
         ofp->puts("\n");
         ofp->puts("HOST_SOURCES =  \\\n");
-        iterateCFiles([](AstCFile* cfilep) { return !cfilep->codelet(); },
+        iterateCFiles([](AstCFile* cfilep) { return !cfilep->codelet() || cfilep->constPool(); },
                       [&](AstCFile* cfilep) {
                           ofp->puts("\t" + V3Os::filenameNonDir(cfilep->name()) + " \\\n");
                       });

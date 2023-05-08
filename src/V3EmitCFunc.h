@@ -354,7 +354,8 @@ public:
                    && !VN_IS(nodep->rhsp(), CMethodHard)  //
                    && !VN_IS(nodep->rhsp(), VarRef)  //
                    && !VN_IS(nodep->rhsp(), AssocSel)  //
-                   && !VN_IS(nodep->rhsp(), ArraySel)) {
+                   && !VN_IS(nodep->rhsp(), ArraySel) //
+                   && !VN_IS(nodep->rhsp(), VarRefView)) {
             // Wide functions assign into the array directly, don't need separate assign statement
             m_wideTempRefp = VN_AS(nodep->lhsp(), VarRef);
             paren = false;
