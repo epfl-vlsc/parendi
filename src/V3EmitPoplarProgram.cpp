@@ -149,10 +149,11 @@ public:
         {
 
             std::ofstream listFs{v3Global.opt.makeDir() + "/" + listFile, std::ios::out};
-            iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },
-                          [&](AstCFile* cfilep) {
-                              listFs << V3Os::filenameNonExt(cfilep->name()) << ".gp" << std::endl;
-                          });
+            iterateCFiles(
+                [](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },
+                [&](AstCFile* cfilep) {
+                    listFs << V3Os::filenameNonExt(cfilep->name()) << ".gp" << std::endl;
+                });
             listFs.close();
         }
 
@@ -205,7 +206,7 @@ public:
         ofp->puts("OBJS_GP = $(CODELETS:cpp=gp)\n");
         ofp->puts("OBJS_S = $(CODELETS:cpp=s)\n");
         ofp->puts("\n");
-        ofp->puts("all: main\n\n");
+        ofp->puts("all: " + EmitPoplarProgram::topClassName() + "\n\n");
         ofp->puts("$(OBJS_GP):%.gp: %.cpp\n");
         ofp->puts("\t$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@\n");
         ofp->puts("$(OBJS_S):%.s: %.cpp\n");
@@ -217,15 +218,19 @@ public:
         ofp->puts("$(OBJS_HOST):%.o: %.cpp\n");
         ofp->puts("\t$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@\n");
         ofp->puts("\n");
-        ofp->puts("graph_compile: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)\n");
+        ofp->puts(EmitPoplarProgram::topClassName()
+                  + "_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)\n");
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -DGRAPH_COMPILE "
                   "-o $@\n");
-        ofp->puts("main.graph.bin: graph_compile\n");
+        ofp->puts(EmitPoplarProgram::topClassName()
+                  + ".graph.bin: " + EmitPoplarProgram::topClassName() + "_graph_compiler\n");
         ofp->puts("\t./$<\n");
-        ofp->puts("main: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) main.graph.bin\n");
+        ofp->puts(EmitPoplarProgram::topClassName()
+                  + ": $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) " + EmitPoplarProgram::topClassName() + ".graph.bin\n");
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -o $@\n");
         ofp->puts("clean:\n");
-        ofp->puts("\trm -rf main *.o *.gp *.s report\n");
+        ofp->puts("\trm -rf *.o *.gp *.s report *.graph.bin " + EmitPoplarProgram::topClassName()
+                  + " " + EmitPoplarProgram::topClassName() + "_graph_compiler \n");
 
         delete ofp;
     }
