@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <iomanip>
 
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
@@ -27,15 +28,18 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     }
 
     device = std::make_unique<poplar::Device>(std::move(*devIt));
-
+    vprog = std::make_unique<VPROGRAM>(*this);
     graph = std::make_unique<poplar::Graph>(device->getTarget());
     workload = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("workload"));
     initializer = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("initializer"));
     condeval = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("condeval"));
-    vprog = std::make_unique<VPROGRAM>(*this);
+#ifdef GRAPH_COMPILE
     std::ifstream fs{CODELET_LIST /*defined by the Makefile*/, std::ios::in};
-
-    for (std::string ln; std::getline(fs, ln);) { graph->addCodelets(ln); }
+    for (std::string ln; std::getline(fs, ln);) {
+        std::cout << "adding codelet " << ln << std::endl;
+        graph->addCodelets(ln);
+    }
+#endif
     // std::cout << "initializing simulation context " << std::endl;
     vprog->constructAll();
     vprog->initialize();
@@ -46,8 +50,10 @@ void VlPoplarContext::build() {
     // build the poplar graph
     using namespace poplar;
     using namespace poplar::program;
+
     Sequence prog;
     Sequence resetReq;
+    Sequence callbacks;
     // handle any host calls invoked by the initial blocks
     if (!interruptCond.valid()) {
         std::cerr << "No interrupt!" << std::endl;
@@ -57,12 +63,14 @@ void VlPoplarContext::build() {
     graph->setTileMapping(zeroValue, 0);
     resetReq.add(Copy(zeroValue, interruptCond[0]));  // need to clear the loop conditions
     for (auto hreq : hostRequest) { resetReq.add(Copy(zeroValue, hreq[0])); }
-    auto withCycleCounter = [this](Program&& code, const std::string& n, bool en) {
+
+    auto withCycleCounter = [this, &callbacks](Program&& code, const std::string& n, bool en) {
         Sequence wrapper;
         wrapper.add(code);
         if (en) {
             auto t = cycleCount(*graph, wrapper, 0, SyncType::INTERNAL);
-            graph->createHostRead(n, t);
+            auto cb = graph->addHostFunction(n, {{UNSIGNED_INT, 2}}, {});
+            callbacks.add(Call(cb, {t}, {}));
         }
         return wrapper;
     };
@@ -74,43 +82,82 @@ void VlPoplarContext::build() {
         withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync2", cfg.counters.sync2)};
     Sequence preCond = withCycleCounter(Execute{*condeval}, "prof.cond", cfg.counters.cond);
     prog.add(resetReq);
-    prog.add(RepeatWhileFalse{preCond, interruptCond[0], loopBody, "eval loop"});
+    prog.add(withCycleCounter(RepeatWhileFalse{preCond, interruptCond[0], loopBody, "eval loop"},
+                              "prof.loop", cfg.counters.loop));
+    prog.add(callbacks);
     OptionFlags flags{};
-    auto exec = compileGraph(*graph,
-                             {Sequence{constInitCopies, Execute(*initializer), initCopies},
-                              withCycleCounter(std::move(prog), "prof.loop", cfg.counters.loop)},
-                             flags);
+    auto exec = compileGraph(*graph, {Sequence{Execute(*initializer), initCopies}, prog}, flags);
 
-    engine = std::make_unique<Engine>(exec, flags);
-    engine->load(*device);
+    std::ofstream execOut("main.graph.bin", std::ios::binary);
+    exec.serialize(execOut);
 }
 
 void VlPoplarContext::run() {
-    auto contextp = std::make_unique<VerilatedContext>();
-    engine->run(INIT_PROGRAM);
-    vprog->hostHandle();
-    uint64_t cycleCounter = 0;
-    auto printCounter = [this](const std::string& name, bool en) {
-        if (en) {
-            uint64_t value = 0;
-            engine->readTensor(name, &value, &value + 1);
-            std::cout << "\t" << name << ": " << value << std::endl;
-        }
+    std::ofstream profile("vlpoplar.log", std::ios::out);
+    const auto simStartTime = std::chrono::high_resolution_clock::now();
+    auto timed = [](auto&& lazyValue) {
+        const auto t0 = std::chrono::high_resolution_clock::now();
+        lazyValue();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double>(t1 - t0).count();
     };
-    while (!contextp->gotFinish()) {
-        engine->run(EVAL_PROGRAM);
-        vprog->hostHandle();
-            printCounter("prof.cond", cfg.counters.cond);
-            printCounter("prof.exec", cfg.counters.exec);
-            printCounter("prof.sync1", cfg.counters.sync1);
-            printCounter("prof.copy", cfg.counters.copy);
-            printCounter("prof.sync2", cfg.counters.sync2);
-            printCounter("prof.loop", cfg.counters.loop);
+
+    auto measure = [&timed, &profile](auto&& lazyValue, const std::string& n) {
+        const auto t = timed(std::forward<decltype(lazyValue)>(lazyValue));
+        profile << n << ": " << std::fixed << std::setw(15) << std::setprecision(6) << t << "s"
+                << std::endl;
+    };
+
+    measure(
+        [this]() {
+            std::ifstream graphIn(OBJ_DIR "/main.graph.bin", std::ios::binary);
+            auto exec = poplar::Executable::deserialize(graphIn);
+            graphIn.close();
+            poplar::OptionFlags flags{};
+            engine = std::make_unique<poplar::Engine>(exec, flags);
+            engine->load(*device);
+            vprog->plusArgs();
+            vprog->plusArgsCopy();
+        },
+        "load");
+    measure([this]() { engine->run(INIT_PROGRAM); }, "init");
+
+    vprog->hostHandle();
+    int invIx = 0;
+
+    for (const auto p : {"cond", "exec", "sync1", "copy", "sync2", "loop"}) {
+        const std::string handle = std::string{"prof."} + p;
+        try {
+            engine->connectHostFunction(
+                handle, 0,
+                [handle /*copy*/, &profile](poplar::ArrayRef<const void*> v,
+                                            poplar::ArrayRef<void*> /*unused*/) -> void {
+                    profile << "\t" << handle << ": " << reinterpret_cast<const uint64_t*>(v[0])[0]
+                            << std::endl;
+                });
+        } catch (poplar::stream_connection_error& e) {
+            // skip
+        }
     }
+
+    auto simLoopStart = std::chrono::high_resolution_clock::now();
+    while (!Verilated::gotFinish()) {
+        profile << "run " << invIx++ << std::endl;
+        measure([this]() { engine->run(EVAL_PROGRAM); }, "\twall");
+        vprog->hostHandle();
+    }
+    auto simEnd = std::chrono::high_resolution_clock::now();
+
+    profile << "sim: " << std::chrono::duration<double>(simEnd - simLoopStart).count() << "s"
+            << std::endl;
+            profile << "all: " << std::chrono::duration<double>(simEnd - simStartTime).count() << "s"
+            << std::endl;
+    profile.close();
 }
 
 void VlPoplarContext::addCopy(const std::string& from, const std::string& to, uint32_t size,
                               bool isInit) {
+#ifdef GRAPH_COMPILE
     poplar::Tensor fromTensor = getTensor(from);
     poplar::Tensor toTensor = getTensor(to);
     poplar::program::Copy cp{fromTensor, toTensor, false, from + " ==> " + to};
@@ -119,15 +166,24 @@ void VlPoplarContext::addCopy(const std::string& from, const std::string& to, ui
     } else {
         exchangeCopies.add(cp);
     }
+#endif
 }
 poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name) {
-    poplar::Tensor t = graph->addVariable(poplar::UNSIGNED_INT, {size}, name);
+#ifdef GRAPH_COMPILE
+    poplar::Tensor t = graph->addVariable(
+        poplar::UNSIGNED_INT,
+        {std::max(size, 2u) /*pad single-word tensors to 8 bytes to optimize on-tile copies*/},
+        name);
     tensors.emplace(name, t);
     return t;
+#else
+    return poplar::Tensor{};
+#endif
 }
 
 poplar::VertexRef VlPoplarContext::getOrAddVertex(const std::string& name,
                                                   const std::string& where) {
+#ifdef GRAPH_COMPILE
     auto it = vertices.find(name);
     if (it == vertices.end()) {
         if (where == "compute") {
@@ -142,27 +198,43 @@ poplar::VertexRef VlPoplarContext::getOrAddVertex(const std::string& name,
         }
     }
     return vertices[name];
+#else
+    return poplar::VertexRef{};
+#endif
 }
 void VlPoplarContext::setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId) {
+#ifdef GRAPH_COMPILE
     graph->setTileMapping(vtxRef, tileId);
+#endif
 }
 void VlPoplarContext::setTileMapping(poplar::Tensor& tensor, uint32_t tileId) {
+#ifdef GRAPH_COMPILE
     graph->setTileMapping(tensor, tileId);
+#endif
 }
 void VlPoplarContext::connect(poplar::VertexRef& vtx, const std::string& field,
                               poplar::Tensor& tensor) {
+#ifdef GRAPH_COMPILE
     graph->connect(vtx[field], tensor);
+#endif
 }
-void VlPoplarContext::createHostRead(const std::string& handle, poplar::Tensor& tensor) {
+void VlPoplarContext::createHostRead(const std::string& handle, poplar::Tensor& tensor,
+                                     uint32_t numElems) {
+#ifdef GRAPH_COMPILE
     graph->createHostRead(handle, tensor);
-    hbuffers.emplace(handle, std::make_unique<HostBuffer>(tensor.numElements()));
+#endif
+    hbuffers.emplace(handle, std::make_unique<HostBuffer>(numElems));
 }
-void VlPoplarContext::createHostWrite(const std::string& handle, poplar::Tensor& tensor) {
+void VlPoplarContext::createHostWrite(const std::string& handle, poplar::Tensor& tensor,
+                                      uint32_t numElems) {
+#ifdef GRAPH_COMPILE
     graph->createHostWrite(handle, tensor);
-    hbuffers.emplace(handle, std::make_unique<HostBuffer>(tensor.numElements()));
+#endif
+    hbuffers.emplace(handle, std::make_unique<HostBuffer>(numElems));
 }
 
 void VlPoplarContext::isHostRequest(poplar::Tensor& tensor, bool isInterruptCond) {
+#ifdef GRAPH_COMPILE
     if (interruptCond.valid() && isInterruptCond) {
         std::cerr << "Can not have multiple interrup conditions" << std::endl;
         std::exit(EXIT_FAILURE);
@@ -170,14 +242,16 @@ void VlPoplarContext::isHostRequest(poplar::Tensor& tensor, bool isInterruptCond
         interruptCond = tensor;
     }
     hostRequest.push_back(tensor);
+#endif
 }
 
 RuntimeConfig parseArgs(int argc, char* argv[]) {
+
     namespace opts = boost::program_options;
 
-    opts::options_description opt_desc("Allowed options");
-
     RuntimeConfig cfg;
+#ifdef GRAPH_COMPILE
+    opts::options_description opt_desc("Allowed options");
     // clang-format off
     opt_desc.add_options()
     ("help,h", "show the help message and exit")
@@ -218,15 +292,20 @@ RuntimeConfig parseArgs(int argc, char* argv[]) {
         std::exit(-1);
     }
     opts::notify(vm);
+#else
     // for +args
     Verilated::commandArgs(argc, argv);
+#endif
     return cfg;
 }
 
 int main(int argc, char* argv[]) {
     VlPoplarContext ctx;
     ctx.init(argc, argv);
+#ifdef GRAPH_COMPILE
     ctx.build();
+#else
     ctx.run();
+#endif
     return EXIT_SUCCESS;
 }

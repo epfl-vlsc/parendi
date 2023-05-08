@@ -21,10 +21,12 @@
 
 // #include "VProgram.h"
 #include "verilated.h"
+
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <unordered_map>
-#include <chrono>
+
 #include <boost/filesystem.hpp>
 #include <poplar/CycleCount.hpp>
 #include <poplar/DeviceManager.hpp>
@@ -87,8 +89,6 @@ private:
     poplar::program::Sequence constInitCopies;
     poplar::program::Sequence exchangeCopies;
 
-
-
     // std::chrono::time_point<std::chrono::high_resolution_clock> m_startTime;
     // double m_simRateLast;
     poplar::Tensor getTensor(const std::string& name) {
@@ -105,24 +105,28 @@ public:
     void build();
     void run();
     void addCopy(const std::string& from, const std::string& to, uint32_t size, bool isInit);
-    template<std::size_t T_Words>
+    template <std::size_t T_Words>
     void addInitConstCopy(const VlWide<T_Words>& value, const std::string& to) {
+#ifdef GRAPH_COMPILE
         auto constTensor = graph->addConstant(poplar::UNSIGNED_INT, {T_Words}, value.m_storage);
         graph->setTileMapping(constTensor, 0);
         constInitCopies.add(poplar::program::Copy(constTensor, getTensor(to)));
+#endif
     }
     void addInitConstCopy(const IData value, const std::string& to) {
+#ifdef GRAPH_COMPILE
         VlWide<1> valuew;
         valuew[0] = value;
         addInitConstCopy(valuew, to);
+#endif
     }
 
     void setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId);
     void setTileMapping(poplar::Tensor& tensor, uint32_t tileId);
     void connect(poplar::VertexRef& vtxRef, const std::string& vtxField, poplar::Tensor& tensor);
     void isHostRequest(poplar::Tensor& tensor, bool isInterruptCond);
-    void createHostRead(const std::string& handleName, poplar::Tensor& tensor);
-    void createHostWrite(const std::string& handleName, poplar::Tensor& tensor);
+    void createHostRead(const std::string& handleName, poplar::Tensor& tensor, uint32_t numElems);
+    void createHostWrite(const std::string& handleName, poplar::Tensor& tensor, uint32_t numElems);
     void setPerfEstimate(poplar::VertexRef&, int) {}
     poplar::VertexRef getOrAddVertex(const std::string& name, const std::string& where);
 
@@ -138,12 +142,37 @@ public:
             std::cerr << "Can not find host handle " << handle << std::endl;
             std::exit(EXIT_FAILURE);
         }
-        engine->readTensor(handle, it->second->buff.data(),
-                           it->second->buff.data() + it->second->buff.size());
+        if (it->second->buff.size() == 1) {
+            // hacky stuff to handle padded uint32_t values
+            std::array<uint32_t, 2> v;
+            engine->readTensor(handle, v.data(), v.data() + 2);
+            return v[0];
+        } else {
+            engine->readTensor(handle, it->second->buff.data(),
+                               it->second->buff.data() + it->second->buff.size());
 
-        return (*reinterpret_cast<T*>(it->second->buff.data()));
+            return (*reinterpret_cast<T*>(it->second->buff.data()));
+        }
+    }
+    template <typename T>
+    inline void setHostData(const std::string& handle, const T& value) {
+        static_assert(std::is_trivially_copy_assignable<T>());
+        static_assert(std::is_trivially_copy_constructible<T>());
+        auto it = hbuffers.find(handle);
+        if (it == hbuffers.end()) {
+            std::cerr << "Can not find host handle " << handle << std::endl;
+        }
+        auto datap = reinterpret_cast<const uint32_t*>(&value);
+        if (it->second->buff.size() == 1) {
+            // handle padded uint32_t values, see also addTensor method
+            std::array<uint32_t, 2> v;
+            v[0] = datap[0];
+            v[1] = 0;
+            engine->writeTensor(handle, v.data(), v.data() + 2);
+        } else {
+            engine->writeTensor(handle, datap, datap + it->second->buff.size());
+        }
     }
 };
-
 
 #endif

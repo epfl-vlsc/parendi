@@ -120,7 +120,8 @@ private:
         // on the class and and then push it to the m_substs to later deal with
         AstVar* varp = new AstVar{nodep->fileline(), VVarType::MEMBER, m_varNames.get("test"),
                                   nodep->dtypep()};
-        varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
+        varp->bspFlag(
+            VBspFlag{}.append(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_HOSTWRITE));
         AstVarScope* vscp = new AstVarScope{varp->fileline(), m_scopep, varp};
         m_classp->stmtsp()->addHereThisAsNext(varp);
         m_scopep->addVarsp(vscp);
@@ -133,7 +134,8 @@ private:
         UINFO(3, "replacing " << nodep << endl);
         auto addVarToClass = [this, nodep](const std::string& name, AstNodeDType* dtypep) {
             AstVar* varp = new AstVar{nodep->fileline(), VVarType::MEMBER, name, dtypep};
-            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
+            varp->bspFlag(
+                VBspFlag{}.append(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_HOSTWRITE));
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_scopep, varp};
             m_classp->stmtsp()->addHereThisAsNext(varp);
             m_scopep->addVarsp(vscp);
@@ -655,8 +657,9 @@ private:
             return dtp->widthWords();
         } else if (AstNodeArrayDType* arrayp = VN_CAST(dtp, NodeArrayDType)) {
             // auto dims = arrayp->dimensions(false /*do not include the basic types*/);
-            // UINFO(10, "dimensions " << dtp << " " << dims.first << ", " << dims.second << " " << arrayp->elementsConst() << endl);
-            // UASSERT(dims.first == 0, "Not sure if I can do unpack arrays yet! " << dtp << endl);
+            // UINFO(10, "dimensions " << dtp << " " << dims.first << ", " << dims.second << " " <<
+            // arrayp->elementsConst() << endl); UASSERT(dims.first == 0, "Not sure if I can do
+            // unpack arrays yet! " << dtp << endl);
             return arrayp->elementsConst() * calcSize(arrayp->subDTypep());
         } else {
             UASSERT_OBJ(false, dtp, "Can not handle data type " << dtp << endl);
@@ -850,11 +853,12 @@ private:
             if (varp->bspFlag().hasHostRead()) {
                 const std::string hrHandle = "hr." + tensorDeviceHandle;
                 m_handles(varp).hostRead = hrHandle;
-                ctorp->addStmtsp(
-                    new AstStmtExpr{fl, mkCall(fl, "createHostRead",
-                                               {new AstConst{fl, AstConst::String{}, hrHandle},
-                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE}},
-                                               nullptr)});
+                ctorp->addStmtsp(new AstStmtExpr{
+                    fl, mkCall(fl, "createHostRead",
+                               {new AstConst{fl, AstConst::String{}, hrHandle},
+                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
+                                new AstConst{fl, AstConst::Unsized32{}, dtp->size()}},
+                               nullptr)});
 
                 if (varp->bspFlag().hasHostReq()) {
                     ctorp->addStmtsp(
@@ -868,11 +872,12 @@ private:
             if (varp->bspFlag().hasHostWrite()) {
                 const std::string hwHandle = "hw." + tensorDeviceHandle;
                 m_handles(varp).hostWrite = hwHandle;
-                ctorp->addStmtsp(
-                    new AstStmtExpr{fl, mkCall(fl, "createHostWrite",
-                                               {new AstConst{fl, AstConst::String{}, hwHandle},
-                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE}},
-                                               nullptr)});
+                ctorp->addStmtsp(new AstStmtExpr{
+                    fl, mkCall(fl, "createHostWrite",
+                               {new AstConst{fl, AstConst::String{}, hwHandle},
+                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
+                                new AstConst{fl, AstConst::Unsized32{}, dtp->size()}},
+                               nullptr)});
             }
         }
 
@@ -912,12 +917,14 @@ private:
             AstAssign* const assignp = VN_AS(nodep, Assign);
             AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
             AstVarRef* const fromp = VN_AS(assignp->rhsp(), VarRef);
-            auto toHandle = m_handles(top).tensor;
+            auto toHandle = m_handles(top).hostWrite;
             AstStmtExpr* newp = new AstStmtExpr{
                 nodep->fileline(),
-                mkCall(assignp->fileline(), "addInitConstCopy",
-                       {fromp->cloneTree(false),
-                        new AstConst{nodep->fileline(), AstConst::String{}, toHandle}})};
+                mkCall(assignp->fileline(), "setHostData",
+                       {
+                           new AstConst{nodep->fileline(), AstConst::String{}, toHandle},
+                           fromp->cloneTree(false),
+                       })};
             nodep->replaceWith(newp);
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
             nodep = newp->nextp();
@@ -1009,18 +1016,13 @@ public:
         });
         // add the plusArgs function right after construction, this will set a bunch
         // of host variables later needed to be copied to the user vertcies
-        AstCFunc* plusArgsFuncp = getFunc(m_netlistp->topModulep(), "plusArgs");
-        AstCCall* plusArgsFuncCallp = new AstCCall{plusArgsFuncp->fileline(), plusArgsFuncp};
-        plusArgsFuncCallp->dtypeSetVoid();
-        constructAllp->addStmtsp(
-            new AstStmtExpr{plusArgsFuncCallp->fileline(), plusArgsFuncCallp});
         // copy the cache values of args to the tensors on startup
         AstCFunc* plusArgsCopyp = getFunc(m_netlistp->topModulep(), "plusArgsCopy");
         addInitConstCopies(plusArgsCopyp);
-        AstCCall* plusArgsCopyCallp = new AstCCall{plusArgsCopyp->fileline(), plusArgsCopyp};
-        plusArgsCopyCallp->dtypeSetVoid();
-        constructAllp->addStmtsp(
-            new AstStmtExpr{plusArgsCopyCallp->fileline(), plusArgsCopyCallp});
+        // AstCCall* plusArgsCopyCallp = new AstCCall{plusArgsCopyp->fileline(), plusArgsCopyp};
+        // plusArgsCopyCallp->dtypeSetVoid();
+        // constructAllp->addStmtsp(
+        //     new AstStmtExpr{plusArgsCopyCallp->fileline(), plusArgsCopyCallp});
         // Step 2.
         // create a poplar program with the following structure:
         // Add the copy operations

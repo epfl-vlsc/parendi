@@ -144,18 +144,16 @@ public:
                 if (pred(cfilep)) { action(cfilep); }
             }
         };
-        const std::string listFile{v3Global.opt.makeDir() + "/"
-                                   + EmitPoplarProgram::prefixNameProtect(netlistp->topModulep())
+        const std::string listFile{EmitPoplarProgram::prefixNameProtect(netlistp->topModulep())
                                    + ".list"};
         {
 
-            std::ofstream listFs{listFile, std::ios::out};
+            std::ofstream listFs{v3Global.opt.makeDir() + "/" + listFile, std::ios::out};
             iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet(); },
                           [&](AstCFile* cfilep) {
-                              listFs << V3Os::filenameDir(cfilep->name()) + "/"
-                                            + V3Os::filenameNonExt(cfilep->name())
-                                     << ".gp" << std::endl;
+                              listFs << V3Os::filenameNonExt(cfilep->name()) << ".gp" << std::endl;
                           });
+            listFs.close();
         }
 
         V3OutMkFile* ofp = new V3OutMkFile{v3Global.opt.makeDir() + "/Makefile"};
@@ -177,7 +175,9 @@ public:
         ofp->puts(" \\\n");
         ofp->puts("\t-DCODELET_LIST=");
         ofp->putsQuoted("\"" + listFile + "\"");
-
+        ofp->puts("\\\n");
+        ofp->puts("\t-DOBJ_DIR=");
+        ofp->putsQuoted("\"" + v3Global.opt.makeDir() + "\"");
         ofp->puts("\n");
         ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES)\n");
         ofp->puts("IPU_FLAGS = -O2 $(INCLUDES)\n");
@@ -217,9 +217,13 @@ public:
         ofp->puts("$(OBJS_HOST):%.o: %.cpp\n");
         ofp->puts("\t$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@\n");
         ofp->puts("\n");
-        ofp->puts("main: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)\n");
+        ofp->puts("graph_compile: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)\n");
+        ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -DGRAPH_COMPILE "
+                  "-o $@\n");
+        ofp->puts("main.graph.bin: graph_compile\n");
+        ofp->puts("\t./$<\n");
+        ofp->puts("main: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) main.graph.bin\n");
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -o $@\n");
-
         ofp->puts("clean:\n");
         ofp->puts("\trm -rf main *.o *.gp *.s report\n");
 
