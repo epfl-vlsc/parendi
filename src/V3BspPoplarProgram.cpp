@@ -79,6 +79,7 @@ public:
         doLocate(unlocatedInit);
     }
 };
+
 class PoplarPlusArgsVisitor final : public VNVisitor {
 private:
     V3UniqueNames m_hostFuncs;
@@ -89,6 +90,17 @@ private:
     AstScope* m_scopep = nullptr;
     AstNetlist* m_netlistp = nullptr;
 
+    struct ReadMemSubst {
+        AstReadMem* origp = nullptr;
+        AstVar* hostMemp = nullptr;
+        AstVarScope* classInstp = nullptr;
+        ReadMemSubst(AstReadMem* origp, AstVar* hostMemp, AstVarScope* classInstp)
+            : origp{origp}
+            , hostMemp{hostMemp}
+            , classInstp{classInstp} {}
+    };
+
+    std::vector<ReadMemSubst> m_rmems;
     struct PlusArgSubst {
         AstNodeExpr* origp = nullptr;
         AstVar* firep = nullptr;
@@ -158,6 +170,39 @@ private:
         nodep->replaceWith(proxyp);
     }
 
+    void visit(AstReadMem* nodep) {
+        UINFO(3, "replacing " << nodep << endl);
+        if (nodep->lsbp() || nodep->msbp()) {
+            nodep->v3warn(E_UNSUPPORTED, "can not have start and end address");
+        }
+        // $read/writememh/b(filename, memvar, start, end);
+        // becomes
+        // ## IPU : for (i = start to end) memvar[i] = hostMemVar[i - start];
+        // ## HOST: $read/writememh/b(filename, hostMemVar, start, end);
+        //          copyToDevice(hostMemVar);
+
+        // note that this transformation may introduce false warnings in case
+        // the file does not exist and is never also read. It also breaks if
+        // the memory is too large, since we now need to keep two copies of the
+        // same array on the same vertex
+        FileLine* flp = nodep->fileline();
+        AstVar* varp
+            = new AstVar{flp, VVarType::MEMBER, m_varNames.get("rmrepl"), nodep->memp()->dtypep()};
+        varp->bspFlag(
+            VBspFlag{}.append(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_HOSTWRITE));
+        AstVarScope* vscp = new AstVarScope{flp, m_scopep, varp};
+        m_classp->stmtsp()->addHereThisAsNext(varp);
+        m_scopep->addVarsp(vscp);
+        // replace the current node with
+        AstReadMemProxy* proxyp
+            = new AstReadMemProxy{nodep->fileline(), nodep->isHex(),
+                                  new AstVarRef{flp, vscp, VAccess::READ} /*filenamep, abused?*/,
+                                  nodep->memp()->cloneTree(false)};
+        m_rmems.emplace_back(nodep, varp, m_instp);
+
+        proxyp->dtypep(nodep->dtypep());
+        nodep->replaceWith(proxyp);
+    }
     void visit(AstNode* nodep) { iterateChildren(nodep); }
 
 public:
@@ -217,6 +262,36 @@ public:
             AstAssign* setCondp
                 = new AstAssign{flp, new AstVarRef{flp, fireHostp, VAccess::WRITE}, subst.origp};
             hostFuncSetp->addStmtsp(setCondp);
+        }
+
+        AstCFunc* hostReadMemp = new AstCFunc{netlistp->fileline(), "readMem",
+                                              m_netlistp->topScopep()->scopep(), "void"};
+        AstCFunc* hostReadMemCopyp = new AstCFunc{netlistp->fileline(), "readMemCopy",
+                                                  m_netlistp->topScopep()->scopep(), "void"};
+        hostReadMemp->dontCombine(true);
+        hostReadMemCopyp->dontCombine(true);
+        m_netlistp->topScopep()->scopep()->addBlocksp(hostReadMemp);
+        m_netlistp->topScopep()->scopep()->addBlocksp(hostReadMemCopyp);
+        for (const ReadMemSubst& subst : m_rmems) {
+            FileLine* flp = subst.origp->fileline();
+            AstMemberSel* memselp
+                = new AstMemberSel{flp, new AstVarRef{flp, subst.classInstp, VAccess::WRITE},
+                                   VFlagChildDType{}, subst.hostMemp->name()};
+            memselp->varp(subst.hostMemp);
+            memselp->dtypep(subst.hostMemp->dtypep());
+            AstVarScope* hostValuep = m_netlistp->topScopep()->scopep()->createTemp(
+                m_hostFuncs.get("valuehost"), subst.hostMemp->dtypep());
+
+            AstReadMem* newp = new AstReadMem{flp,
+                                              subst.origp->isHex(),
+                                              subst.origp->filenamep()->cloneTree(false),
+                                              new AstVarRef{flp, hostValuep, VAccess::WRITE},
+                                              nullptr,
+                                              nullptr};
+            hostReadMemp->addStmtsp(newp);
+            subst.origp->deleteTree();
+            hostReadMemCopyp->addStmtsp(
+                new AstAssign{flp, memselp, new AstVarRef{flp, hostValuep, VAccess::READ}});
         }
     }
 };
@@ -336,7 +411,10 @@ private:
         // a single member for all the host functions within this class but we leave that
         // as an optimization, since it requires low-level indexing and casting.
         AstSFormatF* fmtp = nodep->fmtp();
-        UASSERT(!fmtp->scopeNamep(), "did not expect op2 on AstFormatF " << fmtp << endl);
+        UASSERT(!fmtp->scopeNamep() || fmtp->scopeNamep()->forall([fmtp](const AstNode* nodep) {
+            return VN_IS(nodep, Text) || fmtp->scopeNamep() == nodep;
+        }),
+                "did not expect op2 on AstFormatF " << fmtp << endl);
         std::vector<AstNodeExpr*> exprsp;
         for (AstNodeExpr* exprp = fmtp->exprsp(); exprp; exprp = VN_AS(exprp->nextp(), NodeExpr)) {
             exprsp.push_back(exprp);
@@ -1019,6 +1097,9 @@ public:
         // copy the cache values of args to the tensors on startup
         AstCFunc* plusArgsCopyp = getFunc(m_netlistp->topModulep(), "plusArgsCopy");
         addInitConstCopies(plusArgsCopyp);
+        // same goes for readmem
+        AstCFunc* readMemCopyp = getFunc(m_netlistp->topModulep(), "readMemCopy");
+        addInitConstCopies(readMemCopyp);
         // AstCCall* plusArgsCopyCallp = new AstCCall{plusArgsCopyp->fileline(), plusArgsCopyp};
         // plusArgsCopyCallp->dtypeSetVoid();
         // constructAllp->addStmtsp(

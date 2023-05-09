@@ -118,6 +118,8 @@ void VlPoplarContext::run() {
             engine->load(*device);
             vprog->plusArgs();
             vprog->plusArgsCopy();
+            vprog->readMem();
+            vprog->readMemCopy();
         },
         "load");
     measure([this]() { engine->run(INIT_PROGRAM); }, "init");

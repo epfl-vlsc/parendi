@@ -41,7 +41,30 @@ private:
     const bool m_slow;
     V3UniqueNames m_uniqueNames;
 
-    void emitFileList() {}
+    void visit(AstReadMemProxy* nodep) override {
+        puts(nodep->cFuncPrefixp());
+        puts("(");
+        UASSERT_OBJ(!nodep->lsbp() && !nodep->msbp(), nodep, "can not do start/end address!");
+        const AstVarRefView* const viewp = VN_CAST(nodep->memp(), VarRefView);
+        const AstVarRefView* const hviewp = VN_CAST(nodep->filenamep(), VarRefView);
+        if (!viewp || !hviewp) {
+            nodep->v3error(nodep->verilogKwd() << " expected VarRefView");
+        }
+        AstVarRef* const vrefp = viewp->vrefp();
+        AstVarRef* const hvrefp = hviewp->vrefp();
+        AstVectorDType* const dtypep = VN_CAST(vrefp->varp()->dtypeSkipRefp(), VectorDType);
+        if (!dtypep) {
+            nodep->v3error(nodep->verilogKwd() << "unsupported data type");
+        }
+        puts(cvtToStr(dtypep->size()));
+        puts(", ");
+        iterateAndNextNull(nodep->filenamep());
+        puts(", ");
+        iterateAndNextNull(nodep->memp());
+        puts(");\n");
+    }
+
+
     void openNextOutputFile(const string& subFileName) {
         UASSERT(!m_ofp, "Output file already open");
 

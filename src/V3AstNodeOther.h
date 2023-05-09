@@ -3538,6 +3538,14 @@ public:
     string verilogKwd() const override { return (isHex() ? "$readmemh" : "$readmemb"); }
     const char* cFuncPrefixp() const override { return "VL_READMEM_"; }
 };
+class AstReadMemProxy final : public AstNodeReadWriteMem {
+public:
+    AstReadMemProxy(FileLine* fl, bool hex, AstNodeExpr* filenamep, AstNodeExpr* memp)
+        : ASTGEN_SUPER_ReadMemProxy(fl, hex, filenamep, memp, nullptr /*hard coded */, nullptr /*hard coded*/) {}
+    ASTGEN_MEMBERS_AstReadMemProxy;
+    string verilogKwd() const override { return (isHex() ? "$readmemhproxy" : "$readmembproxy"); }
+    const char* cFuncPrefixp() const override { return "VL_READMEM_PROXY"; }
+};
 class AstWriteMem final : public AstNodeReadWriteMem {
 public:
     AstWriteMem(FileLine* fl, bool hex, AstNodeExpr* filenamep, AstNodeExpr* memp,

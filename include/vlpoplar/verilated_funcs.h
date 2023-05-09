@@ -2142,6 +2142,18 @@ VL_ATTR_ALWINLINE IData VL_VALUEPLUSARGSPROXY_IQ(int obits, IData en, QData val,
     if (got) out = VL_SET_QW(outp);
     return got;
 }
+// =============================================================================
+// $readmem(h/b)
+// =============================================================================
+
+template<typename T>
+void VL_READMEM_PROXY(uint32_t numWords, const T& fileproxy, T& dest) {
+
+    const IData* fileproxyp = reinterpret_cast<const IData*>(&fileproxy);
+    IData* destp = reinterpret_cast<IData*>(&dest);
+    for (int i = 0; i < numWords; i++) destp[i] = fileproxyp[i];
+
+}
 
 // VL_VIEW
 template <typename T, typename V>
