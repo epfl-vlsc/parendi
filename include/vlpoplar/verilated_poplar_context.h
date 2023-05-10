@@ -88,6 +88,7 @@ private:
     poplar::program::Sequence initCopies;
     poplar::program::Sequence constInitCopies;
     poplar::program::Sequence exchangeCopies;
+    bool hasCompute = false, hasInit = false, hasCond = false;
 
     // std::chrono::time_point<std::chrono::high_resolution_clock> m_startTime;
     // double m_simRateLast;

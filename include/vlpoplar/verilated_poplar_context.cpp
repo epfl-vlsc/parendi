@@ -74,19 +74,24 @@ void VlPoplarContext::build() {
         }
         return wrapper;
     };
-
-    Sequence loopBody{
-        withCycleCounter(Execute{*workload}, "prof.exec", cfg.counters.exec),
-        withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync1", cfg.counters.sync1),
-        withCycleCounter(std::move(exchangeCopies), "prof.copy", cfg.counters.copy),
-        withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync2", cfg.counters.sync2)};
-    Sequence preCond = withCycleCounter(Execute{*condeval}, "prof.cond", cfg.counters.cond);
-    prog.add(resetReq);
-    prog.add(withCycleCounter(RepeatWhileFalse{preCond, interruptCond[0], loopBody, "eval loop"},
-                              "prof.loop", cfg.counters.loop));
-    prog.add(callbacks);
+    if (hasCompute) {
+        Sequence loopBody{
+            withCycleCounter(Execute{*workload}, "prof.exec", cfg.counters.exec),
+            withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync1", cfg.counters.sync1),
+            withCycleCounter(std::move(exchangeCopies), "prof.copy", cfg.counters.copy),
+            withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync2", cfg.counters.sync2)};
+        Sequence preCond = withCycleCounter(Execute{*condeval}, "prof.cond", cfg.counters.cond);
+        prog.add(resetReq);
+        prog.add(
+            withCycleCounter(RepeatWhileFalse{preCond, interruptCond[0], loopBody, "eval loop"},
+                             "prof.loop", cfg.counters.loop));
+        prog.add(callbacks);
+    }
+    Sequence initProg;
+    if (hasInit) { initProg.add(Execute(*initializer)); }
+    initProg.add(initCopies);
     OptionFlags flags{};
-    auto exec = compileGraph(*graph, {Sequence{Execute(*initializer), initCopies}, prog}, flags);
+    auto exec = compileGraph(*graph, {initProg, prog}, flags);
 
     std::ofstream execOut("main.graph.bin", std::ios::binary);
     exec.serialize(execOut);
@@ -152,7 +157,7 @@ void VlPoplarContext::run() {
 
     profile << "sim: " << std::chrono::duration<double>(simEnd - simLoopStart).count() << "s"
             << std::endl;
-            profile << "all: " << std::chrono::duration<double>(simEnd - simStartTime).count() << "s"
+    profile << "all: " << std::chrono::duration<double>(simEnd - simStartTime).count() << "s"
             << std::endl;
     profile.close();
 }
@@ -189,10 +194,13 @@ poplar::VertexRef VlPoplarContext::getOrAddVertex(const std::string& name,
     auto it = vertices.find(name);
     if (it == vertices.end()) {
         if (where == "compute") {
+            hasCompute = true;
             vertices.emplace(name, graph->addVertex(*workload, name));
         } else if (where == "init") {
+            hasInit = true;
             vertices.emplace(name, graph->addVertex(*initializer, name));
         } else if (where == "condeval") {
+            hasCond = true;
             vertices.emplace(name, graph->addVertex(*condeval, name));
         } else {
             std::cerr << "invalid computeset \"" << where << "\"" << std::endl;

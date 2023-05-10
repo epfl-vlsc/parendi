@@ -78,6 +78,14 @@ public:
         });
         doLocate(unlocatedCompute);
         doLocate(unlocatedInit);
+
+        // netlistp->foreach([&](AstClass* classp) {
+        //     if (classp->flag().isBsp() && classp->flag().tileId() >= m_numAvailTiles) {
+        //         classp->flag(classp->flag().withTileId(0).withWorkerId(
+        //             0));  // dead class, but assign anyway
+        //         if (!classp->flag().isB)
+        //     }
+        // });
     }
 };
 
@@ -470,7 +478,9 @@ private:
 
     void visit(AstScope* nodep) override {
         if (m_ctx.m_classp) {
-            UASSERT(!m_ctx.m_scopep, "should not nest scopes!");
+            UINFO(10, "Visiting " << nodep << endl);
+            UASSERT_OBJ(!m_ctx.m_scopep || nodep == m_ctx.m_scopep, m_ctx.m_classp,
+                        "should not nest scopes: " << m_ctx.m_scopep << endl);
             m_ctx.m_scopep = nodep;
             iterateChildren(nodep);
         }
@@ -651,6 +661,7 @@ public:
                     }
                 });
                 if (m_ctx.m_numCalls > 0) {
+                    UINFO(15, "Visiting class " << clsRefp->classp() << endl);
                     iterateChildren(m_ctx.m_classp);
                     m_info.push_back(m_ctx);
                     // reset trigger and callId
@@ -1113,10 +1124,12 @@ public:
         constructAllp->dontCombine(true);
         m_netlistp->topScopep()->scopep()->addBlocksp(constructAllp);
 
-        m_netlistp->foreach([this, &constructAllp](AstClass* classp) {
+        m_netlistp->topModulep()->foreach([this, &constructAllp](AstVar* varp) {
+            auto clsRefp = VN_CAST(varp->dtypep(), ClassRefDType);
+            if (!clsRefp || !clsRefp->classp()->flag().isBsp()) return;
             // go through each deriviation of the base bsp class and create
             // host constructors
-            if (!classp->flag().isBsp()) { return; /*some other class*/ }
+            AstClass* classp = clsRefp->classp();
             AstCFunc* ctorp = createVertexCons(classp, classp->flag().tileId());
             m_netlistp->topScopep()->scopep()->addBlocksp(ctorp);
 
