@@ -186,7 +186,9 @@ void schedule(AstNetlist* netlistp) {
     // of combinational logic. This graph pushes combinational logic before clocked
     // logic, in parallel with AssignPre logic.
     std::unique_ptr<DepGraph> graphp = DepGraphBuilder::build(nbaLogic);
-    graphp->dumpDotFilePrefixed("nba_orig");
+    if (dumpGraph() > 0) {
+        graphp->dumpDotFilePrefixed("nba_orig");
+    }
 
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs

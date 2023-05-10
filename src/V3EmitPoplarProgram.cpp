@@ -157,14 +157,14 @@ public:
             listFs.close();
         }
 
-        V3OutMkFile* ofp = new V3OutMkFile{v3Global.opt.makeDir() + "/Makefile"};
+        V3OutMkFile* ofp = new V3OutMkFile{v3Global.opt.makeDir() + "/" + EmitPoplarProgram::topClassName() + ".mk" };
 
         ofp->puts("CXX ?= g++\n");
         ofp->puts("POPC ?= popc\n");
         // ofp->puts("VERIPOPLAR_ROOT ?= " + v3Global.opt.getenvVERILATOR_ROOT() + "\n");
         ofp->puts("VERIPOPLAR_ROOT = /home/mayy/workspace/veripoplar\n");
         ofp->puts("INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I.\n");
-        ofp->puts("LIBS = -lpoplar -lpopops -lpoputil -lpthread -lboost_filesystem "
+        ofp->puts("LIBS = -lpoplar -lpopops -lpoputil -lpthread "
                   "-lboost_program_options\n");
         ofp->puts("HOST_DEFINES =  \\\n");
         ofp->puts("\t-DVPROGRAM=");

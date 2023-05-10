@@ -37,25 +37,22 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 class EmitPoplarVertex final : public EmitCFunc {
 private:
     // MEMBERS
-    const AstClass* const m_fileClassp;
-    const bool m_slow;
+    // const AstClass* const m_fileClassp;
+    // const bool m_slow;
     V3UniqueNames m_uniqueNames;
 
+    // hacky override
     void visit(AstReadMemProxy* nodep) override {
         puts(nodep->cFuncPrefixp());
         puts("(");
         UASSERT_OBJ(!nodep->lsbp() && !nodep->msbp(), nodep, "can not do start/end address!");
         const AstVarRefView* const viewp = VN_CAST(nodep->memp(), VarRefView);
         const AstVarRefView* const hviewp = VN_CAST(nodep->filenamep(), VarRefView);
-        if (!viewp || !hviewp) {
-            nodep->v3error(nodep->verilogKwd() << " expected VarRefView");
-        }
+        if (!viewp || !hviewp) { nodep->v3error(nodep->verilogKwd() << " expected VarRefView"); }
         AstVarRef* const vrefp = viewp->vrefp();
         AstVarRef* const hvrefp = hviewp->vrefp();
         AstVectorDType* const dtypep = VN_CAST(vrefp->varp()->dtypeSkipRefp(), VectorDType);
-        if (!dtypep) {
-            nodep->v3error(nodep->verilogKwd() << "unsupported data type");
-        }
+        if (!dtypep) { nodep->v3error(nodep->verilogKwd() << "unsupported data type"); }
         puts(cvtToStr(dtypep->size()));
         puts(", ");
         iterateAndNextNull(nodep->filenamep());
@@ -64,23 +61,27 @@ private:
         puts(");\n");
     }
 
-
+    void maybeOpenNextFile() {
+        if (!m_ofp || splitNeeded()) {
+            if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+            openNextOutputFile("codelet");
+        }
+    }
     void openNextOutputFile(const string& subFileName) {
         UASSERT(!m_ofp, "Output file already open");
 
         splitSizeReset();  // Reset file size tracking
         m_lazyDecls.reset();  // Need to emit new lazy declarations
 
-        string filename = v3Global.opt.makeDir() + "/" + prefixNameProtect(m_fileClassp);
+        string filename = v3Global.opt.makeDir() + "/" + topClassName();
         if (!subFileName.empty()) {
             filename += "__" + subFileName;
             filename = m_uniqueNames.get(filename);
         }
-        if (m_slow) filename += "__Slow";
         filename += ".cpp";
 
         AstCFile* const cfilep = new AstCFile{v3Global.rootp()->fileline(), filename};
-        cfilep->slow(m_slow);
+        cfilep->slow(false);
         cfilep->source(true);
         cfilep->codelet(true);
         v3Global.rootp()->addFilesp(cfilep);
@@ -97,21 +98,29 @@ private:
         if (v3Global.dpi()) { v3fatal("dpi not supported with poplar\n"); }
     }
 
-    void emitClass() {
+    void emitClass(const AstClass* classp) {
 
-        openNextOutputFile(m_fileClassp->name());
-
+        m_modp = classp;  // used by EmitCFunc::visit
+        maybeOpenNextFile();
         puts("\nclass ");
-        puts(prefixNameProtect(m_fileClassp));
+        puts(prefixNameProtect(classp));
         puts(" : public poplar::Vertex {\n");
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);  // public
 
         // emit the members
 
-        for (AstNode* stmtp = m_fileClassp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+        for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
                 UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
+                auto flag = vrefp->bspFlag();
+                puts("/*");
+                if (flag.hasInput()) { puts("INPUT "); }
+                if (flag.hasOutput()) { puts("OUTPUT "); }
+                if (flag.hasHostRead()) { puts("HOST_READ "); }
+                if (flag.hasHostWrite()) { puts("HOST_WRITE "); }
+                if (flag.hasHostReq()) { puts("HOST_REQ "); }
+                puts("*/\n");
                 puts("poplar::InOut<");
                 puts(vrefp->dtypep()->cType("", false, false));
                 puts("> ");
@@ -121,9 +130,9 @@ private:
         }
 
         // emit method decls
-        for (AstNode* stmtp = m_fileClassp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+        for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) {
-                emitCFuncHeader(funcp, m_fileClassp, false);
+                emitCFuncHeader(funcp, classp, false);
                 puts(";");
             }
         }
@@ -132,35 +141,27 @@ private:
 
         // emit method defs
 
-        for (AstNode* stmtp = m_fileClassp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+        for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) { EmitCFunc::visit(funcp); }
         }
-        VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
     }
 
 public:
-    explicit EmitPoplarVertex(const AstClass* classp, bool slow)
-        : m_fileClassp{classp}
-        , m_slow{slow} {
-        m_modp = classp;
-        emitClass();
-    }
-};
-
-void V3EmitPoplar::emitVertex() {
-
-    // Make parent module pointers available, enables user4
-    const EmitCParentModule emitCParentModule;
-
-    AstNetlist* netlistp = v3Global.rootp();
-    // find the classes that are derived from the V3BspModules::builtinBspCompute class
-
-    for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
-        if (const AstClass* classp = VN_CAST(nodep, Class)) {
-            if (classp->flag().isBsp()) {
-                UINFO(3, "Emitting " << classp->nameProtect() << endl);
-                { EmitPoplarVertex{classp, false /*slow*/}; }
+    explicit EmitPoplarVertex(AstNetlist* netlistp) {
+        for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
+            if (const AstClass* classp = VN_CAST(nodep, Class)) {
+                if (classp->flag().isBsp()) {
+                    UINFO(3, "Emitting " << classp->nameProtect() << endl);
+                    emitClass(classp);
+                }
             }
         }
+        if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
     }
+};
+void V3EmitPoplar::emitVertex() {
+    // Make parent module pointers available, enables user4
+    const EmitCParentModule emitCParentModule;
+    AstNetlist* netlistp = v3Global.rootp();
+    { EmitPoplarVertex{netlistp}; }
 }

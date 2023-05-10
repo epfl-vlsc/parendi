@@ -647,8 +647,11 @@ DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
     std::vector<std::unique_ptr<DepGraph>> partitionsp;
     for (const auto group : groups) {
         partitionsp.emplace_back(backwardTraverseAndCollect(graphp, group));
-        partitionsp.back()->dumpDotFilePrefixed("partition_"
-                                                + std::to_string(partitionsp.size() - 1));
+
+        if (dumpGraph() > 0) {
+            partitionsp.back()->dumpDotFilePrefixed("partition_"
+                                                    + std::to_string(partitionsp.size() - 1));
+        }
     }
 
     return partitionsp;

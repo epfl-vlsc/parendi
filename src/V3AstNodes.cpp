@@ -710,7 +710,8 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const {
     const AstNodeDType* const dtypep = this->skipRefp();
     if (const auto* const vectypep = VN_CAST(dtypep, VectorDType)) {
         const CTypeRecursed t = vectypep->basicp()->cTypeRecurse(true);
-        info.m_type = "poplar::Vector<" + t.m_type + ",poplar::VectorLayout::COMPACT_PTR, alignof(uint64_t)>";
+        info.m_type = "poplar::Vector<" + t.m_type + ",poplar::VectorLayout::COMPACT_PTR, alignof(uint64_t)" +
+             "/*" + cvtToStr(vectypep->size()) + "*/>";
     } else if (const auto* const adtypep = VN_CAST(dtypep, AssocArrayDType)) {
         const CTypeRecursed key = adtypep->keyDTypep()->cTypeRecurse(true);
         const CTypeRecursed val = adtypep->subDTypep()->cTypeRecurse(true);

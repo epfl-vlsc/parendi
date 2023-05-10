@@ -704,9 +704,9 @@ public:
             if (classp->flag().isBsp()) {
                 classp->foreach([](AstVarScope* vscp) {
                     // AstNode::dedotName()
-                    const std::string newName
-                        = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
-                    vscp->varp()->name(newName);
+                    // const std::string newName
+                    //     = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
+                    vscp->varp()->name("BSP__" + vscp->varp()->name());
                 });
             }
         });
