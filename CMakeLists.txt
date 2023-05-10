@@ -78,6 +78,8 @@ else()
     add_subdirectory(src)
 endif()
 
+add_subdirectory(include)
+
 # Configuration and Installation
 
 set(PACKAGE_NAME ${PROJECT_NAME})

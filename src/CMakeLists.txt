@@ -464,6 +464,16 @@ add_executable(${verilator}
     $<$<CONFIG:COVERAGE>:${COVERAGE_SOURCES} config_rev.h>
 )
 
+
+# copy the executable to the bin directory
+add_custom_command(
+    TARGET ${verilator}
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${verilator}> ${PROJECT_SOURCE_DIR}/bin/
+    COMMENT "Copying executable ${PROJECT_SOURCE_DIR}/bin/$<TARGET_FILE:${verilator}>"
+)
+
+
 set_target_properties(${verilator} PROPERTIES
     OUTPUT_NAME_RELEASE   verilator_bin
     OUTPUT_NAME_DEBUG     verilator_bin_dbg
