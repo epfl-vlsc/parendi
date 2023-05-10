@@ -114,7 +114,8 @@ private:
     AstScope* m_topScopep = nullptr;
     std::string m_scopePrefix;
     string freshName(AstVarScope* oldVscp) {
-        return m_modNames.get(oldVscp->scopep()->nameDotless() + "__DOT__" + oldVscp->varp()->name());
+        return m_modNames.get(oldVscp->scopep()->nameDotless() + "__DOT__"
+                              + oldVscp->varp()->name());
     }
     // compute the references to each variable
     void computeReferences() {
@@ -174,7 +175,7 @@ private:
                        V3BspModules::builtinBaseClassPkg);
         m_classWithComputep = clsAndTpe.first;
         m_classWithComputep->isVirtual(true);
-
+        m_classWithComputep->internal(true);  // prevent deletion
         m_classWithComputeDtypep = clsAndTpe.second;
 
         auto initClsAndTypep
@@ -183,6 +184,7 @@ private:
         m_classWithInitp = initClsAndTypep.first;
         m_classWithInitDTypep = initClsAndTypep.second;
         m_classWithInitp->isVirtual(true);
+        m_classWithInitp->internal(true);  // prevent deletion
     }
 
     // make a single class representing the parallel computation in each graph
@@ -204,11 +206,6 @@ private:
         auto classAndTypep = newClass(fl, m_modNames.get("vtxCls"), m_modNames.get("vtxClsPkg"));
         AstClass* classp = classAndTypep.first;
         AstClassRefDType* classTypep = classAndTypep.second;
-        AstClassExtends* extendsp = new AstClassExtends{fl, nullptr, false};
-
-        extendsp->dtypep(m_classWithComputeDtypep);
-        classp->addExtendsp(extendsp);
-        classp->isExtended(true);
 
         AstVar* classInstp = new AstVar{fl, VVarType::VAR, m_modNames.get("vtxInst"), classTypep};
         classInstp->lifetime(VLifetime::STATIC);
@@ -424,7 +421,7 @@ private:
     }
 
     // make a top level module with a single "exchange" function that emulates "AssignPost"
-    void makeCopyOperations(const std::vector<AstClass*>& computeClassesp) {
+    void makeCopyOperations() {
         // AstVarScope::user2 -> true if variable already processed
         VNUser2InUse user2InUse;
         AstNode::user2ClearTree();
@@ -506,8 +503,14 @@ private:
         // add the new topmodule (should be first, see AstNetlist::topModulesp())
         m_netlistp->addModulesp(m_topModp);
 
-        AstCFunc* computeSetp = new AstCFunc{m_netlistp->topModulep()->fileline(), "computeSet",
-                                             m_topScopep, "void"};
+
+    }
+    void makeComputeSet(const std::vector<AstClass*> computeClassesp,
+                             const std::string& funcName) {
+
+        AstCFunc* computeSetp
+            = new AstCFunc{m_netlistp->topModulep()->fileline(), funcName, m_topScopep, "void"};
+        computeSetp->dontCombine(true);
         for (AstClass* classp : computeClassesp) {
             AstVarScope* vscp = nullptr;
             for (vscp = m_topScopep->varsp(); vscp; vscp = VN_AS(vscp->nextp(), VarScope)) {
@@ -544,10 +547,6 @@ private:
             = newClass(fl, m_modNames.get("vtxClsInit"), m_modNames.get("vtxClsInitPkg"));
         AstClass* classp = classAndTypep.first;
         AstClassRefDType* classTypep = classAndTypep.second;
-        AstClassExtends* extendsp = new AstClassExtends{fl, nullptr, false};
-        extendsp->dtypep(m_classWithInitDTypep);
-        classp->addExtendsp(extendsp);
-        classp->isExtended(true);
 
         AstVar* classInstp
             = new AstVar{fl, VVarType::VAR, m_modNames.get("vtxInstInit"), classTypep};
@@ -646,7 +645,9 @@ public:
         std::vector<AstClass*> submodp = makeClasses();
         // 3. Create copy operations
         UINFO(3, "Creating copy program" << endl);
-        makeCopyOperations(submodp);
+        makeCopyOperations();
+        makeComputeSet({initClassp}, "initComputeSet");
+        makeComputeSet(submodp, "computeSet");
         // 4. add the classes
         m_netlistp->addModulesp(m_packagep);
 

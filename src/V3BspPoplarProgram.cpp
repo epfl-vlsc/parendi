@@ -507,16 +507,7 @@ private:
 
         dtypep->classOrPackagep(parentPkgp);
         m_netlistp->typeTablep()->addTypesp(dtypep);
-        AstClassRefDType* baseDTypep = nullptr;
-        m_netlistp->foreach([&baseDTypep](AstClassRefDType* clsDTypep) {
-            if (clsDTypep->classp()->name() == V3BspSched::V3BspModules::builtinBaseClass) {
-                baseDTypep = clsDTypep;
-            }
-        });
-        AstClassExtends* extendsp = new AstClassExtends{flp, nullptr, false};
-        extendsp->dtypep(baseDTypep);
-        newClsp->addExtendsp(extendsp);
-        newClsp->isExtended(true);
+
         newClsp->level(4);
         newClsp->flag(VClassFlag{}
                           .append(VClassFlag::BSP_BUILTIN)
@@ -1161,6 +1152,8 @@ public:
         patchHostHandle();
         // remove the computeSet funciton, not used
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
+        getFunc(m_netlistp->topModulep(), "initComputeSet")->unlinkFrBack()->deleteTree();
+
     }
 };
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
