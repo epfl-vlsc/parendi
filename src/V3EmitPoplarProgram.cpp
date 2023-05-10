@@ -71,24 +71,10 @@ private:
         if (v3Global.dpi()) { v3fatal("dpi not supported with poplar\n"); }
     }
 
-    // void visit(AstFinish* nodep) override {
-    //     puts("vl_finish(");
-    //     putsQuoted(protect(nodep->fileline()->filename()));
-    //     puts(", ");
-    //     puts(cvtToStr(nodep->fileline()->lineno()));
-    //     puts(", \"\");\n");
-    // }
-    // void visit(AstStop* nodep) override {
-    //     puts("vl_stop(");
-    //     putsQuoted(protect(nodep->fileline()->filename()));
-    //     puts(", ");
-    //     puts(cvtToStr(nodep->fileline()->lineno()));
-    //     puts(", \"\");\n");
-    // }
 
 public:
     explicit EmitPoplarProgram(AstNetlist* netlistp) {
-
+        // C++ header fileI
         openNextOutputFile(prefixNameProtect(netlistp->topModulep()), true);
 
         puts("class VlPoplarContext;\n");
@@ -116,19 +102,23 @@ public:
         }
         puts(prefixNameProtect(netlistp->topModulep()));
         puts("(VlPoplarContext& ctx) : " + ctxName + " (ctx) {}\n");  // hacky
-        netlistp->topModulep()->foreach([this, &netlistp](AstCFunc* cfuncp) {});
         ensureNewLine();
         puts("};\n");
         ofp()->putsEndGuard();
         VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
 
-        openNextOutputFile(prefixNameProtect(netlistp->topModulep()), false);
-        puts("#include \"");
-        puts(prefixNameProtect(netlistp->topModulep()));
-        puts(".h\"\n");
+        // C++ implementations
         m_modp = netlistp->topModulep();
-        netlistp->topModulep()->foreach(
-            [this, &netlistp](AstCFunc* cfuncp) { EmitCFunc::visit(cfuncp); });
+        netlistp->topModulep()->foreach([this, &netlistp](AstCFunc* cfuncp) {
+            if (!m_ofp || splitNeeded()) {
+                if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+                openNextOutputFile(prefixNameProtect(netlistp->topModulep()), false);
+                puts("#include \"");
+                puts(prefixNameProtect(netlistp->topModulep()));
+                puts(".h\"\n");
+            }
+            EmitCFunc::visit(cfuncp);
+        });
 
         VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
     }
@@ -157,7 +147,8 @@ public:
             listFs.close();
         }
 
-        V3OutMkFile* ofp = new V3OutMkFile{v3Global.opt.makeDir() + "/" + EmitPoplarProgram::topClassName() + ".mk" };
+        V3OutMkFile* ofp = new V3OutMkFile{v3Global.opt.makeDir() + "/"
+                                           + EmitPoplarProgram::topClassName() + ".mk"};
 
         ofp->puts("CXX ?= g++\n");
         ofp->puts("POPC ?= popc\n");
@@ -225,8 +216,8 @@ public:
         ofp->puts(EmitPoplarProgram::topClassName()
                   + ".graph.bin: " + EmitPoplarProgram::topClassName() + "_graph_compiler\n");
         ofp->puts("\t./$<\n");
-        ofp->puts(EmitPoplarProgram::topClassName()
-                  + ": $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) " + EmitPoplarProgram::topClassName() + ".graph.bin\n");
+        ofp->puts(EmitPoplarProgram::topClassName() + ": $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) "
+                  + EmitPoplarProgram::topClassName() + ".graph.bin\n");
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -o $@\n");
         ofp->puts("clean:\n");
         ofp->puts("\trm -rf *.o *.gp *.s report *.graph.bin " + EmitPoplarProgram::topClassName()
