@@ -120,6 +120,8 @@ private:
                 if (flag.hasHostRead()) { puts("HOST_READ "); }
                 if (flag.hasHostWrite()) { puts("HOST_WRITE "); }
                 if (flag.hasHostReq()) { puts("HOST_REQ "); }
+                if (flag.hasLocal()) { puts("LOCAL "); }
+                if (flag.hasOpaque()) { puts("OPAQUE "); }
                 puts("*/\n");
                 puts("poplar::InOut<");
                 puts(vrefp->dtypep()->cType("", false, false));

@@ -1238,11 +1238,12 @@ public:
     enum EFlags : int {
         MEMBER_INPUT = 1,  // Input<..>
         MEMBER_OUTPUT = 2,  // Output<..>
-        MEMBER_HOSTREAD = 4,  // host readable
-        MEMBER_HOSTWRITE = 8,  // host writeable
-        MEMBER_HOSTREQ   = 16, // is a host request
-        MEMBER_HOSTANYREQ = 32, // is any host request
-        MEMBER_OPAQUE = 64,  // an opaque storage for multiple variables
+        MEMBER_LOCAL  = 4, // InOut<...> but local
+        MEMBER_HOSTREAD = 8,  // host readable
+        MEMBER_HOSTWRITE = 16,  // host writeable
+        MEMBER_HOSTREQ   = 32, // is a host request
+        MEMBER_HOSTANYREQ = 64, // is any host request
+        MEMBER_OPAQUE = 128,  // an opaque storage for multiple variables
     };
 private:
     int m_flag = 0;
@@ -1251,12 +1252,14 @@ public:
         m_flag |= v;
         return *this;
     }
+    bool hasLocal() const { return (m_flag & MEMBER_LOCAL); }
     bool hasInput() const { return (m_flag & MEMBER_INPUT); }
     bool hasOutput() const { return (m_flag & MEMBER_OUTPUT); }
     bool hasHostRead() const { return (m_flag & MEMBER_HOSTREAD); }
     bool hasHostWrite() const { return (m_flag & MEMBER_HOSTWRITE); }
     bool hasHostReq() const { return (m_flag & MEMBER_HOSTREQ); }
     bool hasAnyHostReq() const { return (m_flag & MEMBER_HOSTANYREQ); }
+    bool hasOpaque() const { return (m_flag & MEMBER_OPAQUE); }
     bool valid() const { return hasInput() || hasOutput() || hasHostRead() ||
         hasHostWrite() || (hasHostRead() && hasHostReq()); }
 };

@@ -264,6 +264,10 @@ private:
                             // after the function goes out of scope
                             classp->addStmtsp(varp);
                             refInfo.addTargetp(std::make_pair(instVscp, varp));
+                            varp->bspFlag(VBspFlag{}
+                                              .append(VBspFlag::MEMBER_OUTPUT)
+                                              .append(VBspFlag::MEMBER_LOCAL));
+
                         } else if (refInfo.isOwned(graphp) && !refInfo.isLocal()) {
                             // variable is owed/produced here but also referenced
                             // by others
@@ -271,10 +275,12 @@ private:
                             // need to send it
                             UASSERT(!refInfo.sourcep().first, "multiple producers!");
                             refInfo.sourcep(std::make_pair(instVscp, varp));
+                            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_OUTPUT));
                         } else if (refInfo.isClocked() || refInfo.initp().first) {
                             UASSERT_OBJ(refInfo.isConsumed(graphp), vscp, "Unexpected reference!");
                             // not produced here but consumed
                             classp->addStmtsp(varp);
+                            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
                             // need to recieve it
                             refInfo.addTargetp(std::make_pair(instVscp, varp));
                         } else {
