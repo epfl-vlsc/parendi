@@ -215,8 +215,10 @@ public:
 
         m_netlistp->topModulep()->foreach([this](AstVarScope* vscp) {
             AstClassRefDType* clsRefp = VN_CAST(vscp->varp()->dtypep(), ClassRefDType);
+
+            UINFO(15, "Visiting " << vscp->prettyName() << endl);
             if (clsRefp && clsRefp->classp()->flag().isBsp()) {
-                clsRefp->classp()->user1p(vscp);
+
                 m_instp = vscp;
                 visit(clsRefp->classp());
             }

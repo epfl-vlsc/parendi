@@ -113,7 +113,9 @@ private:
     AstCell* m_packageCellp = nullptr;
     AstScope* m_topScopep = nullptr;
     std::string m_scopePrefix;
-
+    string freshName(AstVarScope* oldVscp) {
+        return m_modNames.get(oldVscp->scopep()->nameDotless() + "__DOT__" + oldVscp->varp()->name());
+    }
     // compute the references to each variable
     void computeReferences() {
         AstNode::user1ClearTree();
@@ -247,8 +249,8 @@ private:
                     // to create an input variable
                     auto& refInfo = m_vscpRefs(vscp);
                     AstVar* varp = new AstVar{vscp->varp()->fileline(), VVarType::MEMBER,
-                                              vscp->varp()->name(), vscp->varp()->dtypep()};
-
+                                              freshName(vscp), vscp->varp()->dtypep()};
+                    varp->origName(vscp->name());
                     varp->lifetime(VLifetime::AUTOMATIC);
                     AstVarScope* newVscp = new AstVarScope{vscp->fileline(), scopep, varp};
                     newVscp->trace(vscp->isTrace());
@@ -441,7 +443,7 @@ private:
         // initialization (AstInitial and AstInitialStatic) also get a similar treatment
         // since there is an individual class that performs the initial computation
         // and that needs to be copied as well.
-        m_netlistp->topModulep()->foreach([this, &copyFuncp, &initFuncp](AstVarScope* vscp) {
+        m_netlistp->foreach([this, &copyFuncp, &initFuncp](AstVarScope* vscp) {
             auto makeCopyOp = [](const std::pair<AstVarScope*, AstVar*>& sourcep,
                                  const std::pair<AstVarScope*, AstVar*>& targetp) {
                 AstVarScope* targetInstp = targetp.first;
@@ -574,7 +576,7 @@ private:
             AstVarScope* substp = VN_CAST(oldVscp->user3p(), VarScope);
             if (!substp) {
                 AstVar* varp = new AstVar{vrefp->varScopep()->varp()->fileline(), VVarType::MEMBER,
-                                          oldVscp->varp()->name(), oldVscp->varp()->dtypep()};
+                                          freshName(oldVscp), oldVscp->varp()->dtypep()};
                 substp = new AstVarScope{oldVscp->fileline(), scopep, varp};
                 substp->trace(oldVscp->isTrace());
                 scopep->addVarsp(substp);
