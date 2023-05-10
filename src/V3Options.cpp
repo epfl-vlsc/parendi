@@ -736,6 +736,12 @@ string V3Options::getenvVERILATOR_ROOT() {
     return var;
 }
 
+string V3Options::getenvVERIPOPLAR_ROOT() {
+    string var = V3Os::getenvStr("VERIPOPLAR_ROOT", "");
+    if (var == "") v3fatal("$VERIPOPLAR_ROOT needs to be in environment\n");
+    return var;
+}
+
 string V3Options::getStdPackagePath() {
     return getenvVERILATOR_ROOT() + "/include/verilated_std.sv";
 }

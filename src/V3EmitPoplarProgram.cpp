@@ -152,8 +152,7 @@ public:
 
         ofp->puts("CXX ?= g++\n");
         ofp->puts("POPC ?= popc\n");
-        // ofp->puts("VERIPOPLAR_ROOT ?= " + v3Global.opt.getenvVERILATOR_ROOT() + "\n");
-        ofp->puts("VERIPOPLAR_ROOT = /home/mayy/workspace/veripoplar\n");
+        ofp->puts("VERIPOPLAR_ROOT ?= " + v3Global.opt.getenvVERIPOPLAR_ROOT() + "\n");
         ofp->puts("INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I.\n");
         ofp->puts("LIBS = -lpoplar -lpopops -lpoputil -lpthread "
                   "-lboost_program_options\n");
