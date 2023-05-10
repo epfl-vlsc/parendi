@@ -22,6 +22,7 @@
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3BspGraph.h"
+#include "V3Stats.h"
 #include "V3UniqueNames.h"
 
 #include <algorithm>
@@ -267,7 +268,7 @@ private:
                             varp->bspFlag(VBspFlag{}
                                               .append(VBspFlag::MEMBER_OUTPUT)
                                               .append(VBspFlag::MEMBER_LOCAL));
-
+                            V3Stats::addStatSum("BspModules, local variable", 1);
                         } else if (refInfo.isOwned(graphp) && !refInfo.isLocal()) {
                             // variable is owed/produced here but also referenced
                             // by others
@@ -276,6 +277,7 @@ private:
                             UASSERT(!refInfo.sourcep().first, "multiple producers!");
                             refInfo.sourcep(std::make_pair(instVscp, varp));
                             varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_OUTPUT));
+                            V3Stats::addStatSum("BspModules, output variable", 1);
                         } else if (refInfo.isClocked() || refInfo.initp().first) {
                             UASSERT_OBJ(refInfo.isConsumed(graphp), vscp, "Unexpected reference!");
                             // not produced here but consumed
@@ -283,9 +285,11 @@ private:
                             varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
                             // need to recieve it
                             refInfo.addTargetp(std::make_pair(instVscp, varp));
+                            V3Stats::addStatSum("BspModules, input variable", 1);
                         } else {
                             // temprorary variables, lifetime limited to the scope
                             // of the enclosing function
+                            V3Stats::addStatSum("BspModules, stack variable", 1);
                             cfuncp->addStmtsp(varp);
                             varp->funcLocal(true);
                         }

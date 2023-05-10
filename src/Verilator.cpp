@@ -567,6 +567,8 @@ static void process() {
         V3EmitC::emitcConstPool();
         V3EmitPoplar::emitVertex();
         V3EmitPoplar::emitProgram();
+        // Statistics
+        reportStatsIfEnabled();
     } else {
         if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
             // emitcInlines is first, as it may set needHInlines which other emitters read

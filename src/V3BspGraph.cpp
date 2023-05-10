@@ -21,6 +21,8 @@
 
 #include "V3AstUserAllocator.h"
 #include "V3File.h"
+#include "V3Stats.h"
+
 VL_DEFINE_DEBUG_FUNCTIONS;
 namespace V3BspSched {
 
@@ -91,6 +93,7 @@ private:
         // Reset the usage
         AstNode::user2ClearTree();
         m_logicVtx = new CompVertex{m_graphp, m_scopep, nodep, m_domainp};
+        V3Stats::addStatSum("BspGraph, Computation nodes", 1);
         iterateChildren(nodep);
         m_logicVtx = nullptr;
     }
@@ -301,66 +304,6 @@ public:
     }
 };
 
-std::unique_ptr<DepGraph> collectBackwardsBfs(const std::unique_ptr<DepGraph>& graphp,
-                                              AnyVertex* const processSink) {
-    UASSERT(processSink, "require none-nullptr sink");
-    // STATE
-    // AnyVertex::userp() -> pointer to the clone
-    // AnyVertex::user()  -> vertex is visited
-    // DepEdge::user()    -> true means cloned
-    graphp->userClearEdges();
-    graphp->userClearVertices();
-    std::unique_ptr<DepGraph> builderp{new DepGraph};
-    std::queue<AnyVertex*> toVisit;
-
-    processSink->user(1);
-    toVisit.push(processSink);
-
-    // bfs
-    while (!toVisit.empty()) {
-        // pop the head of the queue
-        AnyVertex* const headp = toVisit.front();
-        toVisit.pop();
-        // add its clone to the new graph
-        AnyVertex* const clonep = headp->clone(builderp.get());
-        // keep references orig <-> clone
-        headp->userp(clonep);
-        clonep->userp(headp);
-        // follow incoming edges
-        for (auto itp = headp->inBeginp(); itp; itp = itp->inNextp()) {
-            AnyVertex* const fromp = reinterpret_cast<AnyVertex* const>(itp->fromp());
-            // fromp is a predecessor
-            if (!fromp->user() /*not visited*/) {
-                fromp->user(1);
-                toVisit.push(fromp);
-            }
-        }
-    }
-    // clone edges
-    for (V3GraphVertex* itp = builderp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        AnyVertex* origp = reinterpret_cast<AnyVertex*>(itp->userp());
-        UASSERT_OBJ(origp, itp, "expected original vertex pointer");
-        for (V3GraphEdge* eitp = origp->inBeginp(); eitp; eitp = eitp->inNextp()) {
-            if (eitp->user()) { continue; /*already processed*/ }
-            if (!eitp->fromp()->userp()) { continue; /*not part of the partition*/ }
-            auto newFromp = reinterpret_cast<AnyVertex*>(eitp->fromp()->userp());
-            auto fromCompp = dynamic_cast<CompVertex*>(newFromp);
-            auto fromConstrp = dynamic_cast<ConstrVertex*>(newFromp);
-            auto toCompp = dynamic_cast<CompVertex*>(itp);
-            auto toConstrp = dynamic_cast<ConstrVertex*>(itp);
-            if (fromCompp && toConstrp) {
-                builderp->addEdge(fromCompp, toConstrp);
-            } else if (fromConstrp && toCompp) {
-                builderp->addEdge(fromConstrp, toCompp);
-            } else {
-                // should not happen
-                UASSERT(false, "invalid pointer types!");
-            }
-            eitp->user(1);
-        }
-    }
-    return builderp;
-}
 std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGraph>& graphp,
                                                      const std::vector<AnyVertex*>& postp) {
     // STATE
@@ -386,6 +329,9 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         // add the vertex to the partition graph, but not the edges to avoid
         // double counting
         AnyVertex* const clonep = headp->clone(builderp.get());
+        if (dynamic_cast<CompVertex*>(clonep)) {
+            V3Stats::addStatSum("BspGraph, Computation nodes in processes", 1);
+        }
         // keep a reference to the original vertex to look up edges later
         headp->userp(clonep);
         clonep->userp(headp);
@@ -566,74 +512,10 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
             *logp << "}" << std::endl << std::endl;
         }
     }
-
+    V3Stats::addStat("BspGraph, Independent processes", disjointSinks.size());
     return disjointSinks;
 }
-std::vector<std::vector<CompVertex*>> groupVertices(const std::unique_ptr<DepGraph>& graphp,
-                                                    const std::vector<CompVertex*>& sinks) {
 
-    // find all ConstrDefVertex that hold an unpacked array whose corresponding
-    // ConstrCommit has a CompVertex holding an AlwaysPost.
-    DisjointSets<CompVertex*> sets{};
-    for (CompVertex* vtxp : sinks) { sets.makeSet(vtxp); }
-
-    for (CompVertex* vtxp : sinks) {
-
-        // STATE
-        //  AnyVertex::user1()    -> 1 if already visited
-        graphp->userClearVertices();
-        std::queue<V3GraphVertex*> toVisit;
-        toVisit.push(vtxp);
-        while (!toVisit.empty()) {
-            V3GraphVertex* const headp = toVisit.front();
-            toVisit.pop();
-            // UINFO(3, "Visiting " << headp << endl);
-            headp->user(1);
-            // follow ancestors
-            for (V3GraphEdge* edgep = headp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-                if (!edgep->fromp()->user()) { toVisit.push(edgep->fromp()); }
-            }
-            // follow defs to commits through the user pointer
-            if (ConstrDefVertex* defp = dynamic_cast<ConstrDefVertex*>(headp)) {
-                ConstrCommitVertex* commitp = defp->vscp()->user1u().to<ConstrCommitVertex*>();
-                if (!commitp) continue;
-                if (commitp->outEmpty()) continue;
-                // are we dealing with non-trivial types?
-                if (VN_IS(commitp->vscp()->dtypep()->skipRefp(), BasicDType)) continue;
-                UASSERT_OBJ(commitp->outSize1(), commitp,
-                            "commit with more than one successor " << commitp->vscp()->name()
-                                                                   << endl);
-                // check if the commit actually goes to an AssignPost or AlwaysPost
-                auto succp = dynamic_cast<CompVertex*>(commitp->outBeginp()->top());
-                UASSERT_OBJ(succp, commitp, "invalid type!");
-
-                UASSERT_OBJ(sets.contains(succp), succp, "not in disjoint sets!");
-                if (!succp->user() && VN_IS(succp->nodep(), AlwaysPost)) {
-                    UINFO(3, "Union " << vtxp << " and  " << succp << endl);
-                    sets.makeUnion(vtxp, succp);
-                    succp->user(1);
-                }
-            }
-        }
-    }
-    graphp->userClearVertices();
-    std::vector<std::vector<CompVertex*>> disjointSinks;
-    for (const auto& pair : sets.sets()) {
-        disjointSinks.push_back(std::vector<CompVertex*>{});
-        for (const auto& s : pair.second) { disjointSinks.back().push_back(s); }
-    }
-    if (dump() > 0) {
-        const std::string filename = v3Global.debugFilename("disjoint") + ".txt";
-        const std::unique_ptr<std::ofstream> logp{V3File::new_ofstream(filename)};
-        if (logp->fail()) v3fatal("Cannot write " << filename);
-        for (const auto& pair : sets.sets()) {
-            *logp << "{" << std::endl;
-            for (const auto& s : pair.second) { *logp << "\t\t" << s << std::endl; }
-            *logp << "}" << std::endl;
-        }
-    }
-    return disjointSinks;
-}
 };  // namespace
 std::unique_ptr<DepGraph> DepGraphBuilder::build(const V3Sched::LogicByScope& logics) {
 

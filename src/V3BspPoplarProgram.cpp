@@ -24,6 +24,7 @@
 #include "V3BspModules.h"
 #include "V3EmitCBase.h"
 #include "V3Global.h"
+#include "V3Stats.h"
 #include "V3UniqueNames.h"
 
 #include <unordered_map>
@@ -967,23 +968,47 @@ private:
         for (AstNode* nodep = cfuncp->stmtsp(); nodep;) {
             UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
             AstAssign* const assignp = VN_AS(nodep, Assign);
+
             AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
             AstVar* const fromp = VN_AS(assignp->rhsp(), MemberSel)->varp();
             // get the handles from the user1
+
+            auto getTileId = [](AstNodeExpr* np) {
+                return VN_AS(VN_AS(np, MemberSel)->fromp()->dtypep(), ClassRefDType)
+                    ->classp()
+                    ->flag()
+                    .tileId();
+            };
+            auto tileIdFrom = getTileId(assignp->rhsp());
+            auto tileIdTo = getTileId(assignp->lhsp());
+            auto totalWords = VN_AS(top->dtypep(), VectorDType)->size();
+            if (tileIdFrom == tileIdTo) {
+                V3Stats::addStatSum(std::string{"Poplar, Total on-tile word copies "}
+                                        + (isInit ? " (init) " : ""),
+                                    totalWords);
+            } else {
+                V3Stats::addStatSum(std::string{"Poplar, Total off-tile word copies "}
+                                        + (isInit ? " (init)" : ""),
+                                    totalWords);
+            }
+
             auto toHandle = m_handles(top).tensor;
             UASSERT(!toHandle.empty(), "handle not set!");
             auto fromHandle = m_handles(fromp).tensor;
             UASSERT(!fromHandle.empty(), "handle not set!");
+            // AstComment* newCommentp
+            //     = new AstComment{assignp->fileline(), cvtToStr(totalWords) + " words"};
             AstNode* newp = new AstStmtExpr{
                 nodep->fileline(),
                 mkCall(assignp->fileline(), "addCopy",
                        {new AstConst{nodep->fileline(), AstConst::String{}, fromHandle} /*source*/,
                         new AstConst{nodep->fileline(), AstConst::String{}, toHandle} /*target*/,
                         new AstConst{nodep->fileline(), AstConst::Unsized32{},
-                                     static_cast<uint32_t>(top->widthWords())} /*number of words*/,
+                                     static_cast<uint32_t>(totalWords)} /*number of words*/,
                         new AstConst{nodep->fileline(), AstConst::BitTrue{},
                                      isInit} /*is it part of init*/})};
             nodep->replaceWith(newp);
+            // newp->addHereThisAsNext(newCommentp);
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
             nodep = newp->nextp();
         }
