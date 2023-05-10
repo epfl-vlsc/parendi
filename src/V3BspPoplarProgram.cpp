@@ -358,9 +358,10 @@ private:
             UASSERT(m_ctx.m_numCalls > 0, "should not create host interface!");
             AstVar* varp = new AstVar{
                 m_ctx.m_classp->fileline(), VVarType::MEMBER, m_memberName.get("callId"),
-                m_netlistp->findBitDType(m_ctx.m_numCalls,
+                m_netlistp->findBitDType(std::max(m_ctx.m_numCalls, VL_EDATASIZE),
                                          std::max(m_ctx.m_numCalls, VL_EDATASIZE),
                                          VSigning::UNSIGNED)};
+
             varp->bspFlag(
                 VBspFlag{}.append(VBspFlag::MEMBER_HOSTREAD).append(VBspFlag::MEMBER_OUTPUT));
             AstVarScope* vscp = new AstVarScope{varp->fileline(), m_ctx.m_scopep, varp};
@@ -377,8 +378,9 @@ private:
         AstVarScope* callIdp = getInteractionId();
 
         FileLine* fl = nodep->fileline();
-        AstAssign* setTriggerp = new AstAssign{fl, new AstVarRef{fl, triggerp, VAccess::WRITE},
-                                               new AstConst{fl, AstConst::Unsized32{}, 1u}};
+        AstAssign* setTriggerp
+            = new AstAssign{fl, new AstVarRef{fl, triggerp, VAccess::WRITE},
+                            new AstConst{fl, AstConst::WidthedValue{}, triggerp->width(), 1u}};
         AstAssign* setIdp = new AstAssign{
             fl, new AstSel{fl, new AstVarRef{fl, callIdp, VAccess::WRITE}, m_ctx.m_callId, 1},
             new AstConst{fl, AstConst::WidthedValue{}, 1, 1}};
@@ -478,8 +480,7 @@ private:
     void interactionAggregate() {
         FileLine* flp = m_netlistp->fileline();
         AstClass* newClsp = new AstClass{flp, m_memberName.get("condeval")};
-        newClsp->classOrPackagep(
-            new AstClassPackage{flp, V3BspSched::V3BspModules::builtinBaseClassPkg});
+        newClsp->classOrPackagep(new AstClassPackage{flp, m_memberName.get("condeval_pkg")});
         newClsp->classOrPackagep()->classp(newClsp);
 
         AstClassRefDType* dtypep = new AstClassRefDType{flp, newClsp, nullptr};
@@ -552,8 +553,9 @@ private:
         scopep->addVarsp(tmpVscp);
         compFuncp->addStmtsp(tmpVarp);
         tmpVarp->funcLocal(true);
-        compFuncp->addStmtsp(new AstAssign{flp, new AstVarRef{flp, tmpVscp, VAccess::WRITE},
-                                           new AstConst{flp, AstConst::Unsized32{}, 0}});
+        compFuncp->addStmtsp(
+            new AstAssign{flp, new AstVarRef{flp, tmpVscp, VAccess::WRITE},
+                          new AstConst{flp, AstConst::WidthedValue{}, tmpVscp->width(), 0}});
 
         for (const auto info : m_info) {
             if (info.m_classp->flag().isBspInit()) continue;  // should not consider them here
@@ -580,7 +582,7 @@ private:
                 new AstAssign{
                     flp,
                     new AstVarRef{flp, condVscp, VAccess::WRITE},
-                    new AstConst{flp, AstConst::Unsized32{}, 0}
+                    new AstConst{flp, AstConst::WidthedValue{}, condVscp->width(), 0}
                 }
             );
             // clang-format on
@@ -615,6 +617,7 @@ private:
         scopep->addBlocksp(compFuncp);
         newClsp->addStmtsp(scopep);
         m_netlistp->addModulesp(newClsp);
+        m_netlistp->addModulesp(newClsp->classOrPackagep());
     }
 
 public:
@@ -654,7 +657,8 @@ public:
                                         new AstVarRef{m_ctx.m_classInteractionp->fileline(),
                                                       m_ctx.m_classInteractionp, VAccess::WRITE},
                                         new AstConst{m_ctx.m_classInteractionp->fileline(),
-                                                     AstConst::Unsized32{}, 0}};
+                                                     AstConst::WidthedValue{},
+                                                     m_ctx.m_classInteractionp->width(), 0}};
                     AstAssign* callIdResetp = new AstAssign{
                         m_ctx.m_classCallId->fileline(),
                         new AstVarRef{m_ctx.m_classCallId->fileline(), m_ctx.m_classCallId,
@@ -684,7 +688,8 @@ public:
                     AstIf* thisHandlep = new AstIf{
                         m_ctx.m_classp->fileline(),
                         new AstEq{m_ctx.m_classp->fileline(), selTrigp,
-                                  new AstConst{selTrigp->fileline(), AstConst::Unsized32{}, 1}},
+                                  new AstConst{selTrigp->fileline(), AstConst::WidthedValue{},
+                                               m_ctx.m_classInteractionp->width(), 1}},
                         new AstStmtExpr{callHandlep->fileline(), callHandlep}};
                     hostHandlep->addStmtsp(thisHandlep);
                 }
@@ -887,10 +892,10 @@ private:
                    m_vtxRefTypep)};
         ctorp->addStmtsp(mkVtx);
         auto setTileMapping = [this, &fl, &ctorp](AstVarScope* vscp, uint32_t tid) {
-            AstStmtExpr* tileMapp
-                = new AstStmtExpr{fl, mkCall(fl, "setTileMapping",
-                                             {new AstVarRef{fl, vscp, VAccess::READWRITE},
-                                              new AstConst{fl, AstConst::Unsized32{}, tid}})};
+            AstStmtExpr* tileMapp = new AstStmtExpr{
+                fl, mkCall(fl, "setTileMapping",
+                           {new AstVarRef{fl, vscp, VAccess::READWRITE},
+                            new AstConst{fl, AstConst::WidthedValue{}, 32, tid}})};
             ctorp->addStmtsp(tileMapp);
         };
 
@@ -899,7 +904,7 @@ private:
         AstStmtExpr* perfEstp
             = new AstStmtExpr{fl, mkCall(fl, "setPerfEstimate",
                                          {new AstVarRef{fl, vtxVscp, VAccess::READWRITE},
-                                          new AstConst{fl, AstConst::Unsized32{}, 0}})};
+                                          new AstConst{fl, AstConst::WidthedValue{}, 32, 0}})};
         ctorp->addStmtsp(perfEstp);
         // iterate through the class members and create tensors
         for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
@@ -918,7 +923,7 @@ private:
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
                 mkCall(fl, "addTensor",
-                       {new AstConst{fl, AstConst::Unsized32{}, dtp->size()},
+                       {new AstConst{fl, AstConst::WidthedValue{}, 32, dtp->size()},
                         new AstConst{fl, AstConst::String{}, tensorDeviceHandle}})};
             ctorp->addStmtsp(mkTensorp);
             setTileMapping(tensorVscp, tileId);
@@ -936,7 +941,7 @@ private:
                     fl, mkCall(fl, "createHostRead",
                                {new AstConst{fl, AstConst::String{}, hrHandle},
                                 new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                new AstConst{fl, AstConst::Unsized32{}, dtp->size()}},
+                                new AstConst{fl, AstConst::WidthedValue{}, 32, dtp->size()}},
                                nullptr)});
 
                 if (varp->bspFlag().hasHostReq()) {
@@ -955,7 +960,7 @@ private:
                     fl, mkCall(fl, "createHostWrite",
                                {new AstConst{fl, AstConst::String{}, hwHandle},
                                 new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                new AstConst{fl, AstConst::Unsized32{}, dtp->size()}},
+                                new AstConst{fl, AstConst::WidthedValue{}, 32, dtp->size()}},
                                nullptr)});
             }
         }
@@ -1003,7 +1008,7 @@ private:
                 mkCall(assignp->fileline(), "addCopy",
                        {new AstConst{nodep->fileline(), AstConst::String{}, fromHandle} /*source*/,
                         new AstConst{nodep->fileline(), AstConst::String{}, toHandle} /*target*/,
-                        new AstConst{nodep->fileline(), AstConst::Unsized32{},
+                        new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
                                      static_cast<uint32_t>(totalWords)} /*number of words*/,
                         new AstConst{nodep->fileline(), AstConst::BitTrue{},
                                      isInit} /*is it part of init*/})};

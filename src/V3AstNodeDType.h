@@ -1246,7 +1246,7 @@ public:
                && subDTypep()->skipRefp()->similarDType(asamep->subDTypep()->skipRefp());
     }
     void dumpSmall(std::ostream& str) const override;
-    AstNodeDType* getChildDTypep() const override { return m_refDTypep; }
+    AstNodeDType* getChildDTypep() const override { return nullptr; }
     // op1 = Range of variable
     AstNodeDType* subDTypep() const override { return m_refDTypep; }
     void refDTypep(AstNodeDType* nodep) {
