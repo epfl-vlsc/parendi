@@ -1248,6 +1248,12 @@ public:
 private:
     int m_flag = 0;
 public:
+    VBspFlag() = default;
+    VBspFlag(std::initializer_list<EFlags> is) {
+        for (auto f : is) {
+            append(f);
+        }
+    }
     VBspFlag& append(EFlags v) {
         m_flag |= v;
         return *this;
@@ -1260,9 +1266,24 @@ public:
     bool hasHostReq() const { return (m_flag & MEMBER_HOSTREQ); }
     bool hasAnyHostReq() const { return (m_flag & MEMBER_HOSTANYREQ); }
     bool hasOpaque() const { return (m_flag & MEMBER_OPAQUE); }
-    bool valid() const { return hasInput() || hasOutput() || hasHostRead() ||
-        hasHostWrite() || (hasHostRead() && hasHostReq()); }
+    bool valid() const { return m_flag; }
+    string ascii() const {
+        string str{""};
+        if(hasLocal()) str += "L";
+        if(hasInput()) str += "I";
+        if(hasOutput()) str += "O";
+        if(hasHostRead()) str += "R";
+        if(hasHostWrite()) str += "W";
+        if(hasHostReq()) str += "H";
+        if(hasOpaque()) str +="P";
+        return str;
+    }
 };
+
+inline std::ostream& operator<<(std::ostream& os, const VBspFlag& flag) {
+    os << flag.ascii();
+    return os;
+}
 class VClassFlag final {
 public:
     enum en : uint8_t {
