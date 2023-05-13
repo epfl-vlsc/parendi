@@ -953,7 +953,7 @@ private:
                         new AstStmtExpr{fl, mkCall(fl, "isHostRequest",
                                                    {new AstVarRef{fl, tensorVscp, VAccess::READ},
                                                     new AstConst{fl, AstConst::BitTrue{},
-                                                                 varp->bspFlag().hasAnyHostReq()}},
+                                                                 varp->bspFlag().hasHostReq()}},
                                                    nullptr)});
                 }
             }

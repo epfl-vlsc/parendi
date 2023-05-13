@@ -114,15 +114,7 @@ private:
             if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
                 UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
                 auto flag = vrefp->bspFlag();
-                puts("/*");
-                if (flag.hasInput()) { puts("INPUT "); }
-                if (flag.hasOutput()) { puts("OUTPUT "); }
-                if (flag.hasHostRead()) { puts("HOST_READ "); }
-                if (flag.hasHostWrite()) { puts("HOST_WRITE "); }
-                if (flag.hasHostReq()) { puts("HOST_REQ "); }
-                if (flag.hasLocal()) { puts("LOCAL "); }
-                if (flag.hasOpaque()) { puts("OPAQUE "); }
-                puts("*/\n");
+                puts("/* [" + flag.ascii() + "] */\n");
                 puts("poplar::InOut<");
                 puts(vrefp->dtypep()->cType("", false, false));
                 puts("> ");
@@ -135,7 +127,7 @@ private:
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) {
                 emitCFuncHeader(funcp, classp, false);
-                puts(";");
+                puts(";\n");
             }
         }
         ensureNewLine();

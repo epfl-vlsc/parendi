@@ -107,28 +107,29 @@ private:
         UASSERT_OBJ(!m_logicVtx, nodep, "AstActive under logic");
         UASSERT_OBJ(!m_inClocked && !m_domainp, nodep, "Should not nest");
 
-        if (nodep->sensesp()->forall([](AstSenItem* p) { return p->isCombo(); })) {
-            m_domainp = nullptr;
-            m_inClocked = false;
-        } else {
-            int senItemCount = 0;
-            nodep->sensesp()->foreach([&senItemCount](AstSenItem* p) { senItemCount += 1; });
-            if (senItemCount > 1) {
-                nodep->v3warn(E_UNSUPPORTED, "Multiple sensitivities not supported");
-            }
+        if (nodep->sensesp()->hasHybrid()) {
+            nodep->v3warn(
+                E_UNSUPPORTED,
+                "hybrid logic detected, poplar backend is only capable of simple clocking");
+        }
+
+        m_domainp = nullptr; // nullptr if only combinational
+        m_inClocked = false;
+
+        if (!nodep->sensesp()->hasCombo() && !nodep->sensesp()->hasHybrid()) {
             m_domainp = nodep->sensesp();
-            if (!m_domainp->sensesp()->isClocked()) {
-                nodep->v3warn(E_UNSUPPORTED, "Expected clocked block");
-            }
             m_inClocked = m_domainp->hasClocked();
+            UASSERT_OBJ(m_domainp->hasClocked(), nodep, "Unexpected sense type");
         }
 
         iterateChildren(nodep);
         m_inClocked = false;
         m_domainp = nullptr;
+
     }
 
     void visit(AstVarRef* nodep) override {
+
         UASSERT_OBJ(m_scopep, nodep, "AstVarRef requires a scope");
         UASSERT_OBJ(m_logicVtx, nodep, "CompVertex not allocated!");
         AstVarScope* const vscp = nodep->varScopep();
