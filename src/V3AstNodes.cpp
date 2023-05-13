@@ -2131,6 +2131,7 @@ void AstVar::dump(std::ostream& str) const {
     if (isDpiOpenArray()) str << " [DPIOPENA]";
     if (!attrClocker().unknown()) str << " [" << attrClocker().ascii() << "] ";
     if (!lifetime().isNone()) str << " [" << lifetime().ascii() << "] ";
+    if (bspFlag().valid())  str << " [" << bspFlag() << "] ";
     str << " " << varType();
 }
 void AstScope::dump(std::ostream& str) const {
