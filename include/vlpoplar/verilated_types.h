@@ -29,9 +29,7 @@
 #endif
 
 #include <ipu_intrinsics>
-
-
-
+#include <array>
 //===================================================================
 /// Verilog wide packed bit container.
 /// Similar to std::array<WData, N>, but lighter weight, only methods needed
@@ -142,8 +140,42 @@ private:
     }
 };
 
+//===================================================================
+// Activity trigger vector
+
+template <std::size_t T_size>  //
+class VlTriggerVec final {
+    // TODO: static assert T_size > 0, and don't generate when empty
+private:
+    // MEMBERS
+    std::array<uint32_t, T_size> m_flags;  // State of the assoc array
+
+public:
+    // CONSTRUCTOR
+    VlTriggerVec() { clear(); }
+    ~VlTriggerVec() = default;
+
+    // METHODS
+
+    // Set all elements to false
+    void clear() { m_flags.fill(false); }
 
 
+    bool at(size_t index) const { return m_flags.at(index); }
 
+    // Return true iff at least one element is set
+    bool any() const {
+        for (size_t i = 0; i < m_flags.size(); ++i)
+            if (m_flags[i]) return true;
+        return false;
+    }
+    bool empty() const { return !any(); }
+
+
+    void set(uint32_t index, bool value) {
+        m_flags[index] = value;
+    }
+
+};
 
 #endif  // Guard

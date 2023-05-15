@@ -778,6 +778,8 @@ private:
         vrefp->unlinkFrBack(&relinkHandle);
         UINFO(100, "Wrapping " << vrefp->name() << " in AstVarRefView" << endl);
         AstVarRefView* newp = new AstVarRefView{vrefp->fileline(), vrefp};
+        // change vrefp dtype to become a VectorDType
+        vrefp->dtypeFrom(vrefp->varp());
         relinkHandle.relink(newp);
     }
 
@@ -948,7 +950,7 @@ private:
                                 new AstConst{fl, AstConst::WidthedValue{}, 32, dtp->size()}},
                                nullptr)});
 
-                if (varp->bspFlag().hasHostReq()) {
+                if (varp->bspFlag().hasAnyHostReq()) {
                     ctorp->addStmtsp(
                         new AstStmtExpr{fl, mkCall(fl, "isHostRequest",
                                                    {new AstVarRef{fl, tensorVscp, VAccess::READ},

@@ -246,7 +246,7 @@ void VlPoplarContext::createHostWrite(const std::string& handle, poplar::Tensor&
 void VlPoplarContext::isHostRequest(poplar::Tensor& tensor, bool isInterruptCond) {
 #ifdef GRAPH_COMPILE
     if (interruptCond.valid() && isInterruptCond) {
-        std::cerr << "Can not have multiple interrup conditions" << std::endl;
+        std::cerr << "Can not have multiple interrupt conditions" << std::endl;
         std::exit(EXIT_FAILURE);
     } else if (isInterruptCond) {
         interruptCond = tensor;

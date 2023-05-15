@@ -69,6 +69,8 @@ private:
     }
     void setCppWidth(AstNode* nodep) {
         nodep->user2(true);  // Don't resize it again
+        // triggers don't need to be changed
+        if (nodep->dtypep()->basicp() && nodep->dtypep()->basicp()->isTriggerVec()) return;
         AstNodeDType* const old_dtypep = nodep->dtypep();
         const int width = cppWidth(nodep);  // widthMin is unchanged
         if (old_dtypep->width() != width) {
@@ -96,7 +98,8 @@ private:
                 || VN_IS(nodep->dtypep()->skipRefp(), ClassRefDType)
                 || VN_IS(nodep->dtypep()->skipRefp(), QueueDType)
                 || VN_IS(nodep->dtypep()->skipRefp(), UnpackArrayDType)
-                || VN_IS(nodep->dtypep()->skipRefp(), VoidDType)) {
+                || VN_IS(nodep->dtypep()->skipRefp(), VoidDType)
+                || VN_IS(nodep->dtypep()->skipRefp(), VectorDType)) {
             } else {
                 const AstNodeUOrStructDType* const dtypep
                     = VN_CAST(nodep->dtypep()->skipRefp(), NodeUOrStructDType);
