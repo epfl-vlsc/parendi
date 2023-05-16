@@ -312,7 +312,6 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
     //  DepEdge::user()     -> true if cloned
     //
     graphp->userClearVertices();
-    graphp->userClearEdges();
     // the graph that is built during the backward traversal which is essentially
     // the bsp partition
     std::unique_ptr<DepGraph> builderp{new DepGraph};
@@ -321,17 +320,12 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         vp->user(1);
         toVisit.push(vp);
     }
-    // bfs
+    // bfs-like, collect all reachable vertices from the postp collection
+    std::vector<AnyVertex*> visited;
     while (!toVisit.empty()) {
-
         AnyVertex* const headp = toVisit.front();
         toVisit.pop();
-        // add the vertex to the partition graph, but not the edges to avoid
-        // double counting
-        AnyVertex* const clonep = headp->clone(builderp.get());
-        // keep a reference to the original vertex to look up edges later
-        headp->userp(clonep);
-        clonep->userp(headp);
+        visited.push_back(headp);
         for (auto itp = headp->inBeginp(); itp; itp = itp->inNextp()) {
             AnyVertex* const fromp = static_cast<AnyVertex* const>(itp->fromp());
             if (!fromp->user()) {
@@ -339,9 +333,21 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
                 toVisit.push(fromp);
             }
         }
-        CompVertex* const compp = dynamic_cast<CompVertex*>(headp);
-        if (!compp) continue;
-        V3Stats::addStatSum("BspGraph, Computation nodes in processes", 1);
+    }
+
+    graphp->userClearVertices();
+    // clone vertices collected in the traversal
+    for (AnyVertex* const vtxp : visited) {
+        UASSERT(!vtxp->user(), "invalid user value, double counting a vertex?");
+        AnyVertex* const clonep = vtxp->clone(builderp.get());
+        clonep->userp(vtxp);
+        vtxp->userp(clonep);
+    }
+
+    // clone immediate successors of the collected vertices
+    for (AnyVertex* const vtxp : visited) {
+        CompVertex* const compp = dynamic_cast<CompVertex* const>(vtxp);
+        if (!compp) { continue;  /* not a CompVertex */}
         // Special handling of the ComputeVertex: make sure all successors
         // (i.e., DefConstr or CommitConstr) vertices are also added to the partition.
         // Note that the CommitConstr nodes are added from the disjoint sets but
@@ -353,19 +359,21 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         //       z = fn(x); // last use of x
         // end
         // will result in a DefConstr(x) node that is a sink and hence maynot
-        // be added to the partition.
-        for (auto itp = compp->outBeginp(); itp; itp = itp->outNextp()) {
-            UASSERT(!dynamic_cast<CompVertex*>(itp->top()), "expected bipartite graph!");
-
-            AnyVertex* const top = static_cast<AnyVertex* const>(itp->top());
-            if (!top->user()) {
-                UINFO(3, "Adding " << top << endl);
-                top->user(1);
-                toVisit.push(top);
+        // be added to the partition (i.e., has not been cloned yet)
+        for (V3GraphEdge* eitp = compp->outBeginp(); eitp; eitp = eitp->outNextp()) {
+            if (eitp->top()->userp()) {
+                // already part of the partition
+                continue;
             }
+            ConstrVertex* const oldTop = dynamic_cast<ConstrVertex* const>(eitp->top());
+            UASSERT(oldTop, "expected none-null");
+            AnyVertex* const clonep = oldTop->clone(builderp.get());
+            clonep->userp(oldTop);
+            oldTop->userp(clonep);
         }
     }
-    // clone the edges
+
+    graphp->userClearEdges();
 
     for (V3GraphVertex* itp = builderp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
         AnyVertex* origp = reinterpret_cast<AnyVertex*>(itp->userp());
@@ -383,12 +391,12 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
             } else if (fromConstrp && toCompp) {
                 builderp->addEdge(fromConstrp, toCompp);
             } else {
-                // should not happen
                 UASSERT(false, "invalid pointer types!");
             }
             eitp->user(1);
         }
     }
+
     return builderp;
 }
 
