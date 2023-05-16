@@ -113,7 +113,7 @@ private:
                 "hybrid logic detected, poplar backend is only capable of simple clocking");
         }
 
-        m_domainp = nullptr; // nullptr if only combinational
+        m_domainp = nullptr;  // nullptr if only combinational
         m_inClocked = false;
 
         if (!nodep->sensesp()->hasCombo() && !nodep->sensesp()->hasHybrid()) {
@@ -125,7 +125,6 @@ private:
         iterateChildren(nodep);
         m_inClocked = false;
         m_domainp = nullptr;
-
     }
 
     void visit(AstVarRef* nodep) override {
@@ -330,9 +329,6 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         // add the vertex to the partition graph, but not the edges to avoid
         // double counting
         AnyVertex* const clonep = headp->clone(builderp.get());
-        if (dynamic_cast<CompVertex*>(clonep)) {
-            V3Stats::addStatSum("BspGraph, Computation nodes in processes", 1);
-        }
         // keep a reference to the original vertex to look up edges later
         headp->userp(clonep);
         clonep->userp(headp);
@@ -341,6 +337,31 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
             if (!fromp->user()) {
                 fromp->user(1);
                 toVisit.push(fromp);
+            }
+        }
+        CompVertex* const compp = dynamic_cast<CompVertex*>(headp);
+        if (!compp) continue;
+        V3Stats::addStatSum("BspGraph, Computation nodes in processes", 1);
+        // Special handling of the ComputeVertex: make sure all successors
+        // (i.e., DefConstr or CommitConstr) vertices are also added to the partition.
+        // Note that the CommitConstr nodes are added from the disjoint sets but
+        // the DefConstr nodes maybe lost if we do no add them here when the
+        // lifetime of a variable is limited to the always_comb block where it
+        // is produced:
+        // always_comb begin
+        //       x = fn(y);
+        //       z = fn(x); // last use of x
+        // end
+        // will result in a DefConstr(x) node that is a sink and hence maynot
+        // be added to the partition.
+        for (auto itp = compp->outBeginp(); itp; itp = itp->outNextp()) {
+            UASSERT(!dynamic_cast<CompVertex*>(itp->top()), "expected bipartite graph!");
+
+            AnyVertex* const top = static_cast<AnyVertex* const>(itp->top());
+            if (!top->user()) {
+                UINFO(3, "Adding " << top << endl);
+                top->user(1);
+                toVisit.push(top);
             }
         }
     }

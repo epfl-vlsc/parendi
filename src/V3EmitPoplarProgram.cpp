@@ -156,6 +156,7 @@ public:
         ofp->puts("INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I.\n");
         ofp->puts("LIBS = -lpoplar -lpopops -lpoputil -lpthread "
                   "-lboost_program_options\n");
+        ofp->puts("GRAPH_FLAGS ?= \n");
         ofp->puts("HOST_DEFINES =  \\\n");
         ofp->puts("\t-DVPROGRAM=");
         ofp->putsQuoted(EmitPoplarProgram::prefixNameProtect(netlistp->topModulep()));
@@ -214,7 +215,7 @@ public:
                   "-o $@\n");
         ofp->puts(EmitPoplarProgram::topClassName()
                   + ".graph.bin: " + EmitPoplarProgram::topClassName() + "_graph_compiler\n");
-        ofp->puts("\t./$<\n");
+        ofp->puts("\t./$< $(GRAPH_FLAGS)\n");
         ofp->puts(EmitPoplarProgram::topClassName() + ": $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) "
                   + EmitPoplarProgram::topClassName() + ".graph.bin\n");
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -o $@\n");

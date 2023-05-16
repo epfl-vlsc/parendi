@@ -526,6 +526,86 @@ private:
         return {atFuncs, trigEvalFuncp};
     }
 
+    void makeClassMemberVarOrConst(AstVarScope* const vscp,
+                                   const std::unique_ptr<DepGraph>& graphp, AstScope* const scopep,
+                                   AstClass* const classp, AstVarScope* const instVscp,
+                                   AstCFunc* const nbaTopp, FileLine* const fl) {
+        if (vscp->user2()) {
+            // already processed
+            return;
+        }
+        vscp->user2(true);  // mark visited
+        // check if the variable is part of the const pool
+        if (m_netlistp->constPoolp()
+            && m_netlistp->constPoolp()->modp() == vscp->scopep()->modp()) {
+            // need not to clone it, rather keep a a reference to self
+            vscp->user3p(vscp);
+            return;
+        }
+        // add any variable reference in the partition to the local scope
+        // for any local variable that is produced by another graph we need
+        // to create an input variable
+        auto& refInfo = m_vscpRefs(vscp);
+        AstVar* const varp = new AstVar{vscp->varp()->fileline(), VVarType::MEMBER,
+                                        freshName(vscp), vscp->varp()->dtypep()};
+        varp->origName(vscp->name());
+        varp->lifetime(VLifetime::AUTOMATIC);
+        AstVarScope* const newVscp = new AstVarScope{vscp->fileline(), scopep, varp};
+        newVscp->trace(vscp->isTrace());
+        scopep->addVarsp(newVscp);
+        vscp->user3p(newVscp);
+        if (VN_IS(vscp->dtypep()->skipRefp(), BasicDType)
+            || VN_IS(vscp->dtypep()->skipRefp(), UnpackArrayDType)) {
+
+            if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
+                // the variable is produced here and does not need
+                // to be sent out, however we should create a
+                // persistent class member for it to keep it alive
+                // after the function goes out of scope
+                classp->addStmtsp(varp);
+                refInfo.addTargetp(std::make_pair(instVscp, varp));
+                varp->bspFlag(
+                    VBspFlag{}.append(VBspFlag::MEMBER_OUTPUT).append(VBspFlag::MEMBER_LOCAL));
+                V3Stats::addStatSum("BspModules, local variable", 1);
+            } else if (refInfo.isOwned(graphp) && !refInfo.isLocal()) {
+                // variable is owed/produced here but also referenced
+                // by others
+                classp->addStmtsp(varp);
+                // need to send it
+                UASSERT(!refInfo.sourcep().first, "multiple producers!");
+                refInfo.sourcep(std::make_pair(instVscp, varp));
+                varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_OUTPUT));
+                V3Stats::addStatSum("BspModules, output variable", 1);
+            } else if (refInfo.isClocked() || refInfo.initp().first) {
+                UASSERT_OBJ(refInfo.isConsumed(graphp), vscp, "Unexpected reference!");
+                // not produced here but consumed
+                classp->addStmtsp(varp);
+                varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
+                // need to recieve it
+                refInfo.addTargetp(std::make_pair(instVscp, varp));
+                V3Stats::addStatSum("BspModules, input variable", 1);
+            } else {
+                // temprorary variables, lifetime limited to the scope
+                // of the enclosing function
+                V3Stats::addStatSum("BspModules, stack variable", 1);
+                nbaTopp->addStmtsp(varp);
+                varp->funcLocal(true);
+            }
+        } else {
+            vscp->v3fatalSrc("Unknown data type" << vscp->dtypep());
+        }
+    }
+    void makeClassMemberVars(const std::unique_ptr<DepGraph>& graphp, AstScope* const scopep,
+                             AstClass* const classp, AstVarScope* const instVscp,
+                             AstCFunc* const nbaTopp, FileLine* const fl) {
+        for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+            if (ConstrVertex* constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
+                AstVarScope* vscp = constrp->vscp();
+                makeClassMemberVarOrConst(vscp, graphp, scopep, classp, instVscp, nbaTopp, fl);
+            }
+        }
+    }
+
     /// @brief create a class for the given partiton
     /// @param graphp
     /// @return
@@ -587,67 +667,10 @@ private:
 
         scopep->addBlocksp(nbaTopp);
 
-        for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-            if (ConstrVertex* constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
-                AstVarScope* vscp = constrp->vscp();
-                if (!vscp->user2()) {
-                    // add any variable reference in the partition to the local scope
-                    // for any local variable that is produced by another graph we need
-                    // to create an input variable
-                    auto& refInfo = m_vscpRefs(vscp);
-                    AstVar* varp = new AstVar{vscp->varp()->fileline(), VVarType::MEMBER,
-                                              freshName(vscp), vscp->varp()->dtypep()};
-                    varp->origName(vscp->name());
-                    varp->lifetime(VLifetime::AUTOMATIC);
-                    AstVarScope* newVscp = new AstVarScope{vscp->fileline(), scopep, varp};
-                    newVscp->trace(vscp->isTrace());
-                    scopep->addVarsp(newVscp);
-                    vscp->user3p(newVscp);
-                    vscp->user2(true);  // mark visited
-                    if (VN_IS(vscp->dtypep()->skipRefp(), BasicDType)
-                        || VN_IS(vscp->dtypep()->skipRefp(), UnpackArrayDType)) {
+        // create class member or function local variable for every variable neeeded
+        // by the graphp computations
+        makeClassMemberVars(graphp, scopep, classp, instVscp, nbaTopp, fl);
 
-                        if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
-                            // the variable is produced here and does not need
-                            // to be sent out, however we should create a
-                            // persistent class member for it to keep it alive
-                            // after the function goes out of scope
-                            classp->addStmtsp(varp);
-                            refInfo.addTargetp(std::make_pair(instVscp, varp));
-                            varp->bspFlag(VBspFlag{}
-                                              .append(VBspFlag::MEMBER_OUTPUT)
-                                              .append(VBspFlag::MEMBER_LOCAL));
-                            V3Stats::addStatSum("BspModules, local variable", 1);
-                        } else if (refInfo.isOwned(graphp) && !refInfo.isLocal()) {
-                            // variable is owed/produced here but also referenced
-                            // by others
-                            classp->addStmtsp(varp);
-                            // need to send it
-                            UASSERT(!refInfo.sourcep().first, "multiple producers!");
-                            refInfo.sourcep(std::make_pair(instVscp, varp));
-                            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_OUTPUT));
-                            V3Stats::addStatSum("BspModules, output variable", 1);
-                        } else if (refInfo.isClocked() || refInfo.initp().first) {
-                            UASSERT_OBJ(refInfo.isConsumed(graphp), vscp, "Unexpected reference!");
-                            // not produced here but consumed
-                            classp->addStmtsp(varp);
-                            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
-                            // need to recieve it
-                            refInfo.addTargetp(std::make_pair(instVscp, varp));
-                            V3Stats::addStatSum("BspModules, input variable", 1);
-                        } else {
-                            // temprorary variables, lifetime limited to the scope
-                            // of the enclosing function
-                            V3Stats::addStatSum("BspModules, stack variable", 1);
-                            nbaTopp->addStmtsp(varp);
-                            varp->funcLocal(true);
-                        }
-                    } else {
-                        vscp->v3fatalSrc("Unknown data type" << vscp->dtypep());
-                    }
-                }
-            }
-        }
         // create the trigger evaluation function
         auto triggerFunctions = makeTriggerEvalFunc(graphp, classp, scopep, instVscp);
         auto& triggerCheckGen = triggerFunctions.first;
