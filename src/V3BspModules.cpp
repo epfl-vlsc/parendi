@@ -59,8 +59,11 @@ private:
     std::pair<AstVarScope*, AstVar*> m_sourcep;
     std::vector<std::pair<AstVarScope*, AstVar*>> m_targets;
     std::pair<AstVarScope*, AstVar*> m_initp;
+    bool m_actRegion = false;
 
 public:
+    inline bool isActive() const { return m_actRegion; }
+    inline void active(bool v) { m_actRegion = v; }
     inline bool isClocked() const { return m_producer != nullptr; }
     inline bool isOwned(const std::unique_ptr<DepGraph>& graphp) const {
         return graphp.get() == m_producer;
@@ -122,6 +125,7 @@ private:
     const std::vector<std::unique_ptr<DepGraph>>& m_partitionsp;  // partitions
     const V3Sched::LogicByScope m_initials;
     const V3Sched::LogicByScope m_initialStatics;
+    const V3Sched::LogicByScope m_actives;
 
     AstModule* m_topModp = nullptr;
     AstPackage* m_packagep = nullptr;
@@ -157,7 +161,8 @@ private:
     // compute the references to each variable
     void computeReferences() {
         AstNode::user1ClearTree();
-        //  first go through the active (clocked) partitions
+        //  first go through the nba (clocked) partitions
+
         for (const auto& graphp : m_partitionsp) {
             UINFO(100, "Inspecting graph " << graphp.get() << endl);
             for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp;
@@ -177,6 +182,13 @@ private:
                             }
                         });
                     }
+                    if (compp->domainp()) {
+                        compp->domainp()->foreach([this, &graphp](const AstVarRef* vrefp) {
+                            if (vrefp->access().isReadOrRW()) {
+                                m_vscpRefs(vrefp->varScopep()).consumer(graphp);
+                            }
+                        });
+                    }
                 } else if (ConstrCommitVertex* const commitp
                            = dynamic_cast<ConstrCommitVertex*>(vtxp)) {
                     if (commitp->outEmpty()) {
@@ -192,6 +204,14 @@ private:
                 }
             }
         }
+        // now go through the active region and mark any variable produced there
+        // to ensure they are considered class members, not stack variables.
+        // This can be optimized but should not matter so much
+        m_actives.foreachLogic([this](AstNode* actp) {
+            actp->foreach([this](const AstVarRef* vrefp) {
+                if (vrefp->access().isWriteOrRW()) { m_vscpRefs(vrefp->varScopep()).active(true); }
+            });
+        });
     }
 
     void prepareClassGeneration() {
@@ -240,7 +260,8 @@ private:
                 stp->v3warn(E_UNSUPPORTED, "Hybrid logic not supported");
             } else if (stp->hasClocked() && !stp->hasCombo() && !stp->hasHybrid()) {
                 stp->foreach([this, stp](AstVarRef* vrefp) {
-                    if (vrefp->varp()->isUsedClock() && vrefp->varp()->isReadOnly()) {
+                    if (vrefp->varp()->isUsedClock() && vrefp->varp()->isReadOnly()
+                        && !stp->sensesp()->nextp() /* should be a single item*/) {
                         UASSERT_OBJ(m_triggering.autoTriggerp == vrefp->varScopep()
                                         || !m_triggering.autoTriggerp,
                                     vrefp->varScopep(), "Could not determine global clock");
@@ -252,6 +273,9 @@ private:
                 });
                 m_triggering.clockersp.push_back(stp);
             }
+        }
+        if (!m_triggering.autoTriggerp) {
+            m_netlistp->v3error("Failed to detect the clock, this is might be an internal error");
         }
         m_triggering.trigDTypep
             = new AstBasicDType{fl, VBasicDTypeKwd::TRIGGERVEC, VSigning::UNSIGNED,
@@ -412,7 +436,6 @@ private:
         trigEvalFuncp->isMethod(true);
         trigEvalFuncp->isInline(true);
         scopep->addBlocksp(trigEvalFuncp);
-
         // create the a function that sets the triggers, for this we first need
         // to gather all the different SenTrees that could cause an activation
         // within this partition.
@@ -500,12 +523,62 @@ private:
 
         // make sure the generated sentree (i.e., the top clock) exists
         processSenTree(m_triggering.autoTriggerSenTreep, nullptr, nullptr /* is not a consumer*/);
+        // we process all sentrees, irrespective whether they have been used or not
+        //
+        m_netlistp->topScopep()->foreach(
+            [&processSenTree, &graphp, instVscp](AstSenTree* senTreep) {
+                if (senTreep->hasClocked() && !senTreep->hasHybrid() && !senTreep->hasCombo())
+                    processSenTree(senTreep, graphp, instVscp /* is a consumer*/);
+            });
 
-        for (V3GraphVertex* itp = graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
-            auto vtxp = dynamic_cast<CompVertex*>(itp);
-            if (!vtxp || !vtxp->domainp()) continue;
-            processSenTree(vtxp->domainp(), graphp, instVscp /* is a consumer*/);
+        AstNode* const actp = new AstComment{classp->fileline(), "active region computation"};
+        for (const std::pair<AstScope*, AstActive*>& activePair : m_actives) {
+
+            // "act" region should be execute before setting the triggers
+            // but we only execute the actives that matter. These are the ones
+            // that set the value of one of the trigger variables which
+            // is cloned just above
+
+            activePair.second->foreach(
+                [this, scopep, classp, instVscp, &graphp](AstVarRef* vrefp) {
+                    if (vrefp->varScopep()->user2()) return; /*already cloned*/
+                    AstVarScope* const vscp = vrefp->varScopep();
+                    auto& refInfo = m_vscpRefs(vscp);
+                    vscp->user2(true);  // visited
+                    AstVar* const varp = new AstVar{vscp->varp()->fileline(), VVarType::MEMBER,
+                                                    freshName(vscp), vscp->varp()->dtypep()};
+                    varp->origName(vscp->name());
+                    varp->lifetime(VLifetime::AUTOMATIC);
+                    classp->addStmtsp(varp);
+                    AstVarScope* const newVscp = new AstVarScope{vscp->fileline(), scopep, varp};
+                    newVscp->trace(vscp->isTrace());
+                    scopep->addVarsp(newVscp);
+                    vscp->user3p(newVscp);
+                    // the variable could be produced by another partition, the init
+                    // class or the current active. In the latter case, we can keep
+                    // it on the stack as an optimizatin, but we don't do it yet.
+                    if (VN_IS(vscp->dtypep()->skipRefp(), BasicDType)
+                        || VN_IS(vscp->dtypep()->skipRefp(), UnpackArrayDType)) {
+                        UASSERT_OBJ(!refInfo.isOwned(graphp), vscp,
+                                    "Expected to be produced by another");
+                        if (refInfo.isClocked() || refInfo.initp().first) {
+                            // not produced here but consumed
+                            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
+                            // need to recieve it
+                            refInfo.addTargetp(std::make_pair(instVscp, varp));
+                            V3Stats::addStatSum("BspModules, input variable", 1);
+                        }
+                    } else {
+                        vscp->v3error("Unknown data type");
+                    }
+                });
+            AstNode* const clonep = activePair.second->stmtsp()->cloneTree(true);
+            for (AstNode* cp = clonep; cp; cp = cp->nextp()) { ReplaceOldVarRefsVisitor{cp}; }
+            actp->addNext(clonep);
         }
+
+        trigLoopp->addStmtsp(actp);
+
         trigLoopp->addStmtsp(trigSetStmtp);
         trigLoopp->addStmtsp(trigUpdateStmtp);
 
@@ -584,6 +657,11 @@ private:
                 // need to recieve it
                 refInfo.addTargetp(std::make_pair(instVscp, varp));
                 V3Stats::addStatSum("BspModules, input variable", 1);
+            } else if (refInfo.isActive()) {
+                // variable produced by the trigger function, but local otherwise
+                classp->addStmtsp(varp);
+                varp->bspFlag({VBspFlag::MEMBER_LOCAL});
+                V3Stats::addStatSum("BspModules, active variable", 1);
             } else {
                 // temprorary variables, lifetime limited to the scope
                 // of the enclosing function
@@ -846,7 +924,7 @@ private:
                 return;
             }
             vscp->user2(true);
-            UINFO(1, "Insepcting " << vscp->name() << endl);
+            UINFO(400, "Insepcting " << vscp->name() << endl);
             auto& refInfo = m_vscpRefs(vscp);
             // UASSERT_OBJ(!refInfo.hasConsumer()
             //                 || refInfo.producer() /* consumed implies produced*/,
@@ -956,13 +1034,16 @@ private:
                 substp->trace(oldVscp->isTrace());
                 scopep->addVarsp(substp);
                 oldVscp->user3p(substp);
+                auto& refInfo = m_vscpRefs(oldVscp);
                 // if the variable is consumed by any of the graph nodes, then
                 // we need to add it as a class level member, otherwise, it should
                 // be kept local to the function
-                if (vrefp->access().isWriteOrRW() && m_vscpRefs(oldVscp).hasConsumer()) {
+                if (refInfo.hasConsumer()) {
+                    UINFO(300, "Adding init member " << oldVscp->name() << endl);
                     classp->addStmtsp(varp);
                     m_vscpRefs(oldVscp).initp({instVscp, varp});
                 } else {
+                    UINFO(300, "Adding init local " << oldVscp->name() << endl);
                     cfuncp->addStmtsp(varp);
                     varp->funcLocal(true);
                 }
@@ -999,13 +1080,15 @@ public:
     explicit ModuleBuilderImpl(AstNetlist* netlistp,
                                const std::vector<std::unique_ptr<DepGraph>>& partitionsp,
                                const V3Sched::LogicByScope& initials,
-                               const V3Sched::LogicByScope& statics)
+                               const V3Sched::LogicByScope& statics,
+                               const V3Sched::LogicByScope& actives)
         : m_modNames{"__VBspCls"}
         , m_memberNames{"__VBspMember"}  // reset on partition
         , m_netlistp{netlistp}
         , m_partitionsp{partitionsp}
         , m_initials{initials}
-        , m_initialStatics{statics} {}
+        , m_initialStatics{statics}
+        , m_actives{actives} {}
     void go() {
         // do not reorder
         // 1. Determine producer and consumers
@@ -1053,10 +1136,11 @@ std::string V3BspModules::builtinBaseClassPkg = "__VbuiltinBspComputePkg";
 void V3BspModules::makeModules(AstNetlist* netlistp,
                                const std::vector<std::unique_ptr<DepGraph>>& partitionsp,
                                const V3Sched::LogicByScope& initials,
-                               const V3Sched::LogicByScope& statics) {
+                               const V3Sched::LogicByScope& statics,
+                               const V3Sched::LogicByScope& actives) {
 
     {
-        ModuleBuilderImpl builder{netlistp, partitionsp, initials, statics};
+        ModuleBuilderImpl builder{netlistp, partitionsp, initials, statics, actives};
         builder.go();
     }
     V3Global::dumpCheckGlobalTree("bspmodules", 0, dumpTree() >= 1);

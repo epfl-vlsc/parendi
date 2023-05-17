@@ -36,6 +36,7 @@ class AnyVertex;
 class DepGraph final : public V3Graph {
 private:
     AstModule* m_modp = nullptr;
+
 public:
     // METHODS
     // All edges are noncuttable, but there is never and edge between two compute vertices
@@ -94,8 +95,8 @@ public:
     }
     // LCOV_EXCL_START // Debug code
     string name() const override {
-        return (cvtToHex(m_nodep) + "\\n" + cvtToStr(m_nodep->typeName()) + "\\n"
-                + cvtToStr(m_nodep->fileline()));
+        return ((domainp() ? "@" + cvtToHex(domainp()) + "\\n" : "") + cvtToHex(m_nodep) + "\\n"
+                + cvtToStr(m_nodep->typeName()) + "\\n" + cvtToStr(m_nodep->fileline()));
     }
     string dotShape() const override { return VN_IS(m_nodep, Active) ? "doubleoctogon" : "rect"; }
     // LCOV_EXCEL_STOP

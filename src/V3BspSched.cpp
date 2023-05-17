@@ -171,13 +171,15 @@ void schedule(AstNetlist* netlistp) {
     V3Sched::LogicRegions logicRegions
         = V3Sched::partition(logicClasses.m_clocked, logicClasses.m_comb, logicClasses.m_hybrid);
 
-    if (!logicRegions.m_act.empty()) {
-        logicRegions.m_act.front().second->v3warn(
-            E_UNSUPPORTED, "Only modules with a single clock at the top is supported with BSP");
-    }
+    // if (!logicRegions.m_act.empty()) {
+    //     logicRegions.m_act.front().second->v3warn(
+    //         E_UNSUPPORTED, "Active region not supported yet! Only modules with a single clock at "
+    //                        "the top is supported with BSP");
+    // }
     if (!logicRegions.m_pre.empty()) {
         logicRegions.m_pre.front().second->v3warn(
-            E_UNSUPPORTED, "Only modules with a single clock at the top is supported with BSP");
+            E_UNSUPPORTED, "Pre-Active region not supported yet! Only modules with a single clock "
+                           "at the top is supported with BSP");
     }
 
     V3Sched::LogicByScope& nbaLogic = logicRegions.m_nba;
@@ -186,9 +188,7 @@ void schedule(AstNetlist* netlistp) {
     // of combinational logic. This graph pushes combinational logic before clocked
     // logic, in parallel with AssignPre logic.
     std::unique_ptr<DepGraph> graphp = DepGraphBuilder::build(nbaLogic);
-    if (dumpGraph() > 0) {
-        graphp->dumpDotFilePrefixed("nba_orig");
-    }
+    if (dumpGraph() > 0) { graphp->dumpDotFilePrefixed("nba_orig"); }
 
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs
@@ -204,7 +204,7 @@ void schedule(AstNetlist* netlistp) {
     // Step 9. Create a module for each DepGraph. To do this we also need to determine
     // whether a varialbe is solely referenced locally or by multiple cores.
     V3BspModules::makeModules(netlistp, splitGraphsp, logicClasses.m_initial,
-                              logicClasses.m_static);
+                              logicClasses.m_static, logicRegions.m_act);
 
     // std::exit(0);
 }

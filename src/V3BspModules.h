@@ -37,7 +37,8 @@ public:
     static void makeModules(AstNetlist* origp,
                             const std::vector<std::unique_ptr<DepGraph>>& partitionsp,
                             const V3Sched::LogicByScope& initials,
-                            const V3Sched::LogicByScope& statics);
+                            const V3Sched::LogicByScope& statics,
+                            const V3Sched::LogicByScope& actives);
     static AstClass* findBspBaseClass(AstNetlist* nodep);
     static AstClass* findBspBaseInitClass(AstNetlist* nodep);
 };
