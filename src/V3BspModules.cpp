@@ -1022,8 +1022,16 @@ private:
 
         // STATE
         //      AstVarScope::user3p  -> new var scope local to the class
-        VNUser3InUse user3Inuse;
+        //      AstVarScope::user2   -> true if ever written
+        VNUser3InUse user3InUse;
+        VNUser2InUse user2InUse;
         AstNode::user3ClearTree();
+        AstNode::user2ClearTree();
+        auto setWritten = [this](AstNode* nodep) {
+            nodep->foreach([](AstVarRef* vrefp) {
+                if (vrefp->access().isWriteOrRW()) { vrefp->varScopep()->user2(true); }
+            });
+        };
         auto replaceOldVarRef = [this, &scopep, &classp, &cfuncp, &instVscp](AstVarRef* vrefp) {
             AstVarScope* oldVscp = vrefp->varScopep();
             AstVarScope* substp = VN_CAST(oldVscp->user3p(), VarScope);
@@ -1038,7 +1046,14 @@ private:
                 // if the variable is consumed by any of the graph nodes, then
                 // we need to add it as a class level member, otherwise, it should
                 // be kept local to the function
-                if (refInfo.hasConsumer()) {
+
+                if (oldVscp->user2() /*written by the initial*/ && refInfo.hasConsumer()) {
+                    // note that checking user2 is only done to prevent promoting
+                    // a variable that is consumed by the nba regions and only read
+                    // here to the variable that is produced by the initial block and
+                    // (hence sent out after initializaiton). If we don't do this
+                    // check functionality should remain the same since we are basically
+                    // sending out and undefined variable.
                     UINFO(300, "Adding init member " << oldVscp->name() << endl);
                     classp->addStmtsp(varp);
                     m_vscpRefs(oldVscp).initp({instVscp, varp});
@@ -1066,6 +1081,8 @@ private:
                 cfuncp->addStmtsp(newp);
             }
         };
+        m_initialStatics.foreachLogic(setWritten);
+        m_initials.foreachLogic(setWritten);
 
         m_initialStatics.foreachLogic(appendLogicAndVars);
         m_initials.foreachLogic(appendLogicAndVars);
