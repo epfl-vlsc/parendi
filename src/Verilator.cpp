@@ -25,6 +25,7 @@
 #include "V3BspDly.h"
 #include "V3BspPoplarProgram.h"
 #include "V3BspSched.h"
+#include "V3BspStraggler.h"
 #include "V3CCtors.h"
 #include "V3CUse.h"
 #include "V3Case.h"
@@ -355,13 +356,17 @@ static void process() {
         V3Active::activeAll(v3Global.rootp());
 
         // Split single ALWAYS blocks into multiple blocks for better ordering chances
-        if (v3Global.opt.fSplit()) V3Split::splitAlwaysAll(v3Global.rootp());
+        if (v3Global.opt.fSplit()) {
+            for (int i = 0; i < 3; i++) {
+                V3Split::splitAlwaysAll(v3Global.rootp());
+            }
+        }
         V3SplitAs::splitAsAll(v3Global.rootp());
 
         // Make more delayed assignment to enable more parallelization oppurtunities with BSP
         // for poplar. This pass may have performance implications for single-thread mode
         // so should be optionally enabled for BSP only
-        V3BspDly::mkDlys(v3Global.rootp()); /*should be after activeAll*/
+        // V3BspDly::mkDlys(v3Global.rootp()); /*should be after activeAll*/
 
         // Create tracing sample points, before we start eliminating signals
         if (v3Global.opt.trace()) V3TraceDecl::traceDeclAll(v3Global.rootp());
@@ -568,6 +573,7 @@ static void process() {
         V3EmitPoplar::emitVertex();
         V3EmitPoplar::emitProgram();
         // Statistics
+        V3BspStraggler::report();
         reportStatsIfEnabled();
     } else {
         if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
