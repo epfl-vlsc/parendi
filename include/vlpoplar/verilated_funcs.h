@@ -496,10 +496,12 @@ static VL_ATTR_ALWINLINE WDataOutP VL_EXTENDS_WQ(int obits, int lbits, WDataOutP
 }
 static VL_ATTR_ALWINLINE WDataOutP VL_EXTENDS_WW(int obits, int lbits, WDataOutP owp,
                                       WDataInP const lwp) VL_MT_SAFE {
+    #pragma clang loop unroll(full)
     for (int i = 0; i < VL_WORDS_I(lbits) - 1; ++i) owp[i] = lwp[i];
     const int lmsw = VL_WORDS_I(lbits) - 1;
     const EData sign = VL_SIGNONES_E(lbits, lwp[lmsw]);
     owp[lmsw] = lwp[lmsw] | (sign & ~VL_MASK_E(lbits));
+    #pragma clang loop unroll(full)
     for (int i = VL_WORDS_I(lbits); i < VL_WORDS_I(obits); ++i) owp[i] = sign;
     return owp;
 }
@@ -908,10 +910,14 @@ static VL_ATTR_ALWINLINE WDataOutP VL_SUB_W(int words, WDataOutP owp, WDataInP c
 
 static VL_ATTR_ALWINLINE WDataOutP VL_MUL_W(int words, WDataOutP owp, WDataInP const lwp,
                                  WDataInP const rwp) VL_MT_SAFE {
+    // #pragma clang loop unroll(full)
     for (int i = 0; i < words; ++i) owp[i] = 0;
+    // #pragma clang loop unroll(full)
     for (int lword = 0; lword < words; ++lword) {
+        // #pragma clang loop unroll(full)
         for (int rword = 0; rword < words; ++rword) {
             QData mul = static_cast<QData>(lwp[lword]) * static_cast<QData>(rwp[rword]);
+            // #pragma clang loop unroll(full)
             for (int qword = lword + rword; qword < words; ++qword) {
                 mul += static_cast<QData>(owp[qword]);
                 owp[qword] = (mul & 0xffffffffULL);
@@ -962,6 +968,7 @@ static VL_ATTR_ALWINLINE WDataOutP VL_MULS_WWW(int lbits, WDataOutP owp, WDataIn
         lbits);  // Clean.  Note it's ok for the multiply to overflow into the sign bit
     if ((lneg ^ rneg) & 1) {  // Negate output (not using NEGATE, as owp==lwp)
         QData carry = 0;
+        // #pragma clang loop unroll(full)
         for (int i = 0; i < words; ++i) {
             carry = carry + static_cast<QData>(static_cast<IData>(~owp[i]));
             if (i == 0) ++carry;  // Negation of temp2

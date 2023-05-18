@@ -102,6 +102,7 @@ private:
 
         m_modp = classp;  // used by EmitCFunc::visit
         maybeOpenNextFile();
+        puts("// at TILE = " + cvtToStr(classp->flag().tileId()) + "   WORKER = " + cvtToStr(classp->flag().workerId()) + "\n");
         puts("\nclass ");
         puts(prefixNameProtect(classp));
         puts(" : public poplar::Vertex {\n");

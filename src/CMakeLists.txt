@@ -50,6 +50,7 @@ set(HEADERS
     V3BspModules.h
     V3BspPoplarProgram.h
     V3BspSched.h
+    V3BspStraggler.h
     V3Case.h
     V3Cast.h
     V3CCtors.h
@@ -195,6 +196,7 @@ set(COMMON_SOURCES
     V3BspModules.cpp
     V3BspPoplarProgram.cpp
     V3BspSched.cpp
+    V3BspStraggler.cpp
     V3CCtors.cpp
     V3CUse.cpp
     V3Case.cpp

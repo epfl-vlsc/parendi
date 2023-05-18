@@ -52,6 +52,7 @@ struct RuntimeConfig {
     bool emulate;
     bool showSteps;
     bool errorOnTimeout;
+    bool instrument;
 };
 
 RuntimeConfig parseArgs(int argc, char* argv[]);

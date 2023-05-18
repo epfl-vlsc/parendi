@@ -71,7 +71,6 @@ private:
         if (v3Global.dpi()) { v3fatal("dpi not supported with poplar\n"); }
     }
 
-
 public:
     explicit EmitPoplarProgram(AstNetlist* netlistp) {
         // C++ header fileI
@@ -165,6 +164,12 @@ public:
         ofp->putsQuoted("\"" + EmitPoplarProgram::prefixNameProtect(netlistp->topModulep())
                         + ".h\"");
         ofp->puts(" \\\n");
+
+        ofp->puts("\t-DROOT_NAME=");
+        ofp->putsQuoted("\"" + EmitPoplarProgram::prefixNameProtect(netlistp->topModulep())
+                        + "\"");
+        ofp->puts("\\\n");
+
         ofp->puts("\t-DCODELET_LIST=");
         ofp->putsQuoted("\"" + listFile + "\"");
         ofp->puts("\\\n");
@@ -172,7 +177,8 @@ public:
         ofp->putsQuoted("\"" + v3Global.opt.makeDir() + "\"");
         ofp->puts("\n");
         ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES)\n");
-        ofp->puts("IPU_FLAGS = -O2 $(INCLUDES)\n");
+        ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -X-funroll-loops -X-ffinite-loops "
+                  "-X-finline-functions -X-finline-hint-functions \n");
         ofp->puts("\n");
         ofp->puts("CODELETS =  \\\n");
         iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },
@@ -197,6 +203,10 @@ public:
         ofp->puts("OBJS_GP = $(CODELETS:cpp=gp)\n");
         ofp->puts("OBJS_S = $(CODELETS:cpp=s)\n");
         ofp->puts("\n");
+        ofp->puts("INSTRUMENT ?= 0\n");
+        ofp->puts("ifneq ($(INSTRUMENT), 0)\n");
+        ofp->puts("HOST_FLAGS += -DPOPLAR_INSTRUMENT\n");
+        ofp->puts("endif\n\n");
         ofp->puts("all: " + EmitPoplarProgram::topClassName() + "\n\n");
         ofp->puts("$(OBJS_GP):%.gp: %.cpp\n");
         ofp->puts("\t$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@\n");
@@ -209,21 +219,50 @@ public:
         ofp->puts("$(OBJS_HOST):%.o: %.cpp\n");
         ofp->puts("\t$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@\n");
         ofp->puts("\n");
+        string graphFile
+            = EmitPoplarProgram::prefixNameProtect(netlistp->topModulep()) + ".graph.bin";
         ofp->puts(EmitPoplarProgram::topClassName()
                   + "_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)\n");
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -DGRAPH_COMPILE "
                   "-o $@\n");
-        ofp->puts(EmitPoplarProgram::topClassName()
-                  + ".graph.bin: " + EmitPoplarProgram::topClassName() + "_graph_compiler\n");
+        ofp->puts(graphFile + ": " + EmitPoplarProgram::topClassName() + "_graph_compiler\n");
         ofp->puts("\t./$< $(GRAPH_FLAGS)\n");
         ofp->puts(EmitPoplarProgram::topClassName() + ": $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) "
-                  + EmitPoplarProgram::topClassName() + ".graph.bin\n");
+                  + graphFile + "\n");
         ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -o $@\n");
         ofp->puts("clean:\n");
         ofp->puts("\trm -rf *.o *.gp *.s report *.graph.bin " + EmitPoplarProgram::topClassName()
                   + " " + EmitPoplarProgram::topClassName() + "_graph_compiler \n");
 
         delete ofp;
+    }
+};
+class EmitPoplarOptions final {
+public:
+    explicit EmitPoplarOptions(AstNetlist* netlistp) {
+
+        const string fpPrefix = v3Global.opt.makeDir() + "/"
+                                + EmitPoplarProgram::prefixNameProtect(netlistp->topModulep());
+        V3OutCFile* ofp = new V3OutCFile{fpPrefix + "_compile_options.json"};
+        emitOptions(ofp, true);
+        delete ofp;
+        ofp = new V3OutCFile{fpPrefix + "_engine_options.json"};
+        emitOptions(ofp, false);
+        delete ofp;
+    }
+
+    void emitOptions(V3OutFile* ofp, bool compile) {
+        auto putRecord = [&](const string& k, const string& v, bool last = false) -> void {
+            ofp->puts("\"" + k + "\": " + "\"" + v + "\"" + (last ? "\n" : ",\n"));
+        };
+
+        ofp->puts("{\n");
+        putRecord("autoReport.all", "true");
+        putRecord("autoReport.streamAtEachRun", "false");
+        putRecord("autoReport.directory",
+                  string{"./"} + (compile ? "" : v3Global.opt.makeDir() + "/") + "poplar_report",
+                  true);
+        ofp->puts("}\n");
     }
 };
 // class EmitPoplarMake
@@ -238,4 +277,6 @@ void V3EmitPoplar::emitProgram() {
     { EmitPoplarProgram{netlistp}; }
     UINFO(3, "Emitting Makefile");
     { EmitPoplarMake{netlistp}; }
+    UINFO(10, "Emitting json options");
+    { EmitPoplarOptions{netlistp}; }
 }

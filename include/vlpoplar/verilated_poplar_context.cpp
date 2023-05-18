@@ -91,9 +91,23 @@ void VlPoplarContext::build() {
     if (hasInit) { initProg.add(Execute(*initializer)); }
     initProg.add(initCopies);
     OptionFlags flags{};
-    auto exec = compileGraph(*graph, {initProg, prog}, flags);
+#ifdef POPLAR_INSTRUMENT
+    {
+        std::ifstream ifs(ROOT_NAME "_compile_options.json", std::ios::in);
+        readJSON(ifs, flags);
+        ifs.close();
+    }
+#endif
+    float lastProg = 0.0;
+    auto exec = compileGraph(*graph, {initProg, prog}, flags, [&lastProg](int step, int total) {
+        float newProg = static_cast<float>(step) / static_cast<float>(total) * 100.0;
+        if (newProg - lastProg >= 10.0f) {
+            std::cout << "Graph compilation: " << static_cast<int>(newProg) << "%" << std::endl;
+            lastProg = newProg;
+        }
+    });
 
-    std::ofstream execOut("main.graph.bin", std::ios::binary);
+    std::ofstream execOut(ROOT_NAME ".graph.bin", std::ios::binary);
     exec.serialize(execOut);
 }
 
@@ -115,10 +129,21 @@ void VlPoplarContext::run() {
 
     measure(
         [this]() {
-            std::ifstream graphIn(OBJ_DIR "/main.graph.bin", std::ios::binary);
+            std::ifstream graphIn(OBJ_DIR "/" ROOT_NAME ".graph.bin", std::ios::binary);
             auto exec = poplar::Executable::deserialize(graphIn);
             graphIn.close();
             poplar::OptionFlags flags{};
+// #define OBJ_DIR "obj_dir"
+// #define VPROGRAM "Vt"
+// #define FILE_PATH OBJ_DIR "/" VPROGRAM "_engine_options.json"
+#ifdef POPLAR_INSTRUMENT
+            {
+                std::ifstream ifs(OBJ_DIR "/" ROOT_NAME "_engine_options.json", std::ios::in);
+                poplar::readJSON(ifs, flags);
+                ifs.close();
+                std::cout << flags << std::endl;
+            }
+#endif
             engine = std::make_unique<poplar::Engine>(exec, flags);
             engine->load(*device);
             vprog->plusArgs();
