@@ -112,7 +112,7 @@ void VlPoplarContext::build() {
 }
 
 void VlPoplarContext::run() {
-    std::ofstream profile("vlpoplar.log", std::ios::out);
+    std::ofstream profile(OBJ_DIR "/" ROOT_NAME "_runtime.log", std::ios::out);
     const auto simStartTime = std::chrono::high_resolution_clock::now();
     auto timed = [](auto&& lazyValue) {
         const auto t0 = std::chrono::high_resolution_clock::now();

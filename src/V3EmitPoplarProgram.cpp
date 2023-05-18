@@ -177,7 +177,7 @@ public:
         ofp->putsQuoted("\"" + v3Global.opt.makeDir() + "\"");
         ofp->puts("\n");
         ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES)\n");
-        ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -X-funroll-loops -X-ffinite-loops "
+        ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -X-funroll-loops "
                   "-X-finline-functions -X-finline-hint-functions \n");
         ofp->puts("\n");
         ofp->puts("CODELETS =  \\\n");
