@@ -1276,6 +1276,7 @@ public:
         if(hasHostWrite()) str += "W";
         if(hasHostReq()) str += "H";
         if(hasOpaque()) str +="P";
+        if(hasAnyHostReq()) str += "*";
         return str;
     }
 };

@@ -21,6 +21,7 @@
 
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
+#include "V3BspDpi.h"
 #include "V3BspModules.h"
 #include "V3EmitCBase.h"
 #include "V3Global.h"
@@ -810,6 +811,23 @@ public:
     }
 };
 
+namespace {
+
+struct TensorHandle {
+    std::string tensor;
+    std::string hostRead;
+    std::string hostWrite;
+    bool isReq;
+    TensorHandle() {
+        tensor.erase();
+        hostRead.erase();
+        hostWrite.erase();
+        isReq = false;
+    }
+};
+
+}  // namespace
+
 class PoplarComputeGraphBuilder final : public VNDeleter {
 private:
     AstNetlist* m_netlistp = nullptr;
@@ -820,18 +838,6 @@ private:
     AstVar* m_ctxVarp = nullptr;
     AstVarScope* m_ctxVscp = nullptr;
 
-    struct TensorHandle {
-        std::string tensor;
-        std::string hostRead;
-        std::string hostWrite;
-        bool isReq;
-        TensorHandle() {
-            tensor.erase();
-            hostRead.erase();
-            hostWrite.erase();
-            isReq = false;
-        }
-    };
     VNUser1InUse m_user1InUse;
     AstUser1Allocator<AstVar, TensorHandle> m_handles;
 
@@ -1050,7 +1056,8 @@ private:
         // find any other reachable function from hostp;
         std::set<AstCFunc*> reachablep;
         std::queue<AstCFunc*> toVisitp;
-        toVisitp.push(hostp);
+        toVisitp.push(getFunc(m_netlistp->topModulep(), "hostHandle"));
+        if (v3Global.dpi()) { toVisitp.push(getFunc(m_netlistp->topModulep(), "dpiHandle")); }
         int depth = 0;
         while (!toVisitp.empty()) {
             UASSERT(depth++ < 100000, "something is up");
@@ -1064,30 +1071,10 @@ private:
             reachablep.insert(toCheckp);
         }
 
-        for (AstCFunc* nodep : reachablep) {
-            // replace all the AstMemberSel with calls to appropriate members
-            // to PoplarContext
-            nodep->foreach([this](AstMemberSel* memselp) {
-                // MEMBERSEL cls.var becomes ctx.getHostData<dtype>(var, dtype{})
-                // memselp->dtypep() still has the "old" host side datatype
-                // not the vector type that PoplarViewsVisitor creates in BSP
-                // classes. Consider it a bug (since type information is broken) or a feature
-                // (since things become easier here!)
-                auto handle = m_handles(memselp->varp()).hostRead;
-                UASSERT(!handle.empty(), "empty handle!");
-                AstCMethodHard* callp
-                    = mkCall(memselp->fileline(),
-                             "getHostData", /*getHostData is a templated function, we use a empty
-                                               constant to help the C++ compiler infer the type*/
-                             {new AstConst{memselp->fileline(), AstConst::String{}, handle},
-                              new AstConst{memselp->fileline(), AstConst::DTyped{},
-                                           memselp->dtypep()} /*used to resolve template types*/},
-                             memselp->dtypep());
-                memselp->replaceWith(callp);
-                VL_DO_DANGLING(pushDeletep(memselp), memselp);
-            });
-        }
+        for (AstCFunc* nodep : reachablep) { patchHostFuncCall(nodep); }
     }
+
+    void patchHostFuncCall(AstCFunc* cfuncp);
 
     // create a vertex that ORs all the needInteraction signals. Ideally this
     // vertex should be a multivertex for better performance, but I'll leave that
@@ -1155,9 +1142,116 @@ public:
         // remove the computeSet funciton, not used
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
         getFunc(m_netlistp->topModulep(), "initComputeSet")->unlinkFrBack()->deleteTree();
-
     }
+
+    friend class PoplarHostHandleHardenVisitor;
 };
+
+/// @brief Goes through a function and hardens all the MemberSel references
+/// This is a special visitor that used by the PoplarComputeGraphBuilder.
+/// It replaces all the MemberSel references with hardened "getHostData" and
+/// "setHostData" calls to the poplar context:
+///     if (vtx1.dpiPoint == C) dpi_call(vtx1.rv1, vtx1.rv2, vtx1.lv/*by ref*/);
+/// becomes:
+///     tmp0 = ctx.getHostData("vtx1.dpiPoint");
+///     if (tmp0 == C) {
+///         tmp1 = ctx.getHostData("vtx1.rv1");
+///         tmp2 = ctx.getHostData("vtx1.rv2");
+///         tmp3;
+///         dpi_call(tmp1, tmp2, tmp3);
+///         ctx.setHostData(tmp3);
+///     }
+class PoplarHostHandleHardenVisitor : public VNVisitor {
+    friend class PoplarComputeGraphBuilder;
+
+private:
+    AstCFunc* m_cfuncp = nullptr;  // enclosing function
+    AstNodeStmt* m_stmtp = nullptr;  // enclosing statement
+    PoplarComputeGraphBuilder& m_parent;  // the parent class that uses this visitor
+
+    void visit(AstMemberSel* memselp) {
+        UASSERT_OBJ(m_stmtp, memselp, "expected to be in a statement");
+        UASSERT_OBJ(VN_IS(memselp->fromp(), VarRef), memselp,
+                    "Expected simple VarRef but got \"" << memselp->fromp()->prettyTypeName()
+                                                        << "\"" << endl);
+        AstVarRef* const vrefp = VN_AS(memselp->fromp(), VarRef);
+
+        // create a local variable
+        AstVar* const varp = new AstVar{
+            vrefp->fileline(), VVarType::BLOCKTEMP, m_parent.m_newNames.get("tmphost"),
+            memselp->dtypep() /* do not get it from vrefp because it is of VectorDType*/};
+        AstVarScope* const vscp = new AstVarScope{varp->fileline(), m_cfuncp->scopep(), varp};
+        m_cfuncp->scopep()->addVarsp(vscp);
+        m_stmtp->addHereThisAsNext(varp);
+        if (vrefp->access().isReadOrRW()) {
+            const auto handle = m_parent.m_handles(memselp->varp()).hostRead;
+            UASSERT_OBJ(!handle.empty(), vrefp, "empty read handle");
+            // MEMBERSEL cls.var becomes ctx.getHostData<dtype>(var, dtype{})
+            // memselp->dtypep() still has the "old" host side datatype
+            // not the vector type that PoplarViewsVisitor creates in BSP
+            // classes. Consider it a bug (since type information is broken) or a feature
+            // (since things become easier here!)
+            AstCMethodHard* const hostDatap = m_parent.mkCall(
+                memselp->fileline(),
+                "getHostData", /*getHostData is a templated function, we use a empty
+                                  constant to help the C++ compiler infer the type*/
+                {new AstConst{memselp->fileline(), AstConst::String{}, handle},
+                 new AstConst{memselp->fileline(), AstConst::DTyped{},
+                              memselp->dtypep()} /*used to resolve template types*/},
+                memselp->dtypep());
+
+            m_stmtp->addHereThisAsNext(
+                new AstAssign{vrefp->fileline(),
+                              new AstVarRef{vrefp->fileline(), vscp, VAccess::WRITE}, hostDatap});
+        }
+        if (vrefp->access().isWriteOrRW()) {
+            const auto handle = m_parent.m_handles(memselp->varp()).hostWrite;
+            UASSERT_OBJ(!handle.empty(), vrefp, "empty write handle");
+            AstCMethodHard* const hostSetp = m_parent.mkCall(
+                memselp->fileline(), "setHostData",
+                {
+                    new AstConst{memselp->fileline(), AstConst::String{}, handle},
+                    new AstVarRef{vrefp->fileline(), vscp, VAccess::READ},
+                });
+            m_stmtp->addNextHere(hostSetp->makeStmt());
+            // postp.push_back(hostSetp->makeStmt());
+        }
+        memselp->replaceWith(new AstVarRef{memselp->fileline(), vscp, vrefp->access()});
+        VL_DO_DANGLING(pushDeletep(memselp), memselp);
+    }
+    void visit(AstNodeStmt* nodep) override {
+        m_stmtp = nodep;
+        iterateChildren(nodep);
+    }
+    void visit(AstNode* nodep) override { iterateChildren(nodep); }
+
+private:
+    explicit PoplarHostHandleHardenVisitor(AstCFunc* cfuncp, PoplarComputeGraphBuilder& parent)
+        : m_parent(parent) {
+        m_cfuncp = cfuncp;
+        iterate(cfuncp);
+    }
+
+public:
+    friend class PoplarComputeGraphBuilder;
+};
+
+void PoplarComputeGraphBuilder::patchHostFuncCall(AstCFunc* cfuncp) {
+    // go through all the statements within this functin and replace MemberSel
+    // nodes:
+    // CFunc:
+    //    ...
+    //    Stmt(MemberSel LV, MemberSel RV) ==>
+    // becomes:
+    // CFunc:
+    //    ...
+    //    var arv = getHostData(...)
+    //    var blv
+    //    Stmt(blv, arv)
+    //    setHostData(blv)
+    PoplarHostHandleHardenVisitor{cfuncp, *this};
+}
+
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     // reoder passes only if you know what you are doing
     UINFO(3, "Creating poplar program" << endl);
@@ -1166,6 +1260,9 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     V3Global::dumpCheckGlobalTree("bspPlusArg", 0, dumpTree() >= 1);
     { PoplarHostInteractionVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarHost", 0, dumpTree() >= 1);
+
+    V3BspDpi::delegateAll(nodep);
+
     { PoplarLegalizeFieldNamesVisitor{nodep}; }
     V3Global::dumpCheckGlobalTree("bspLegal", 0, dumpTree() >= 1);
     { PoplarViewsVisitor{nodep}; }  // destroy before checking

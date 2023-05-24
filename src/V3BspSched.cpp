@@ -173,7 +173,8 @@ void schedule(AstNetlist* netlistp) {
 
     // if (!logicRegions.m_act.empty()) {
     //     logicRegions.m_act.front().second->v3warn(
-    //         E_UNSUPPORTED, "Active region not supported yet! Only modules with a single clock at "
+    //         E_UNSUPPORTED, "Active region not supported yet! Only modules with a single clock at
+    //         "
     //                        "the top is supported with BSP");
     // }
     if (!logicRegions.m_pre.empty()) {
@@ -193,9 +194,9 @@ void schedule(AstNetlist* netlistp) {
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs
     std::vector<std::unique_ptr<DepGraph>> splitGraphsp;
-    if (v3Global.opt.tiles() == 1 && v3Global.opt.workers() == 1) {
+    if (v3Global.opt.tiles() == 1 && v3Global.opt.workers() == 1 && graphp->verticesBeginp()) {
         splitGraphsp.emplace_back(std::move(graphp));
-    } else {
+    } else if (graphp->verticesBeginp()) {
         splitGraphsp = DepGraphBuilder::splitIndependent(graphp);
     }
 

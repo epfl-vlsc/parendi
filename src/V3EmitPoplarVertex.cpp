@@ -95,7 +95,7 @@ private:
         puts("#include <poplar/Vertex.hpp>\n");
         // puts("using namespace poplar;");
 
-        if (v3Global.dpi()) { v3fatal("dpi not supported with poplar\n"); }
+        // if (v3Global.dpi()) { v3warn("dpi not supported with poplar\n"); }
     }
 
     void emitClass(const AstClass* classp) {

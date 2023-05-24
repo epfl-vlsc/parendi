@@ -68,7 +68,38 @@ private:
             cfilep->codelet(false);
             v3Global.rootp()->addFilesp(cfilep);
         }
-        if (v3Global.dpi()) { v3fatal("dpi not supported with poplar\n"); }
+        // if (v3Global.dpi()) { v3fatal("dpi not supported with poplar\n"); }
+    }
+    void emitDpis(const std::vector<AstCFunc*> dpis) {
+
+        puts("\n");
+        puts("#include \"svdpi.h\"\n");
+        puts("\n");
+        puts("#ifdef __cplusplus\n");
+        puts("extern \"C\" {\n");
+        puts("#endif\n");
+        puts("\n");
+        int firstExp = 0;
+        int firstImp = 0;
+        for (AstCFunc* nodep : dpis) {
+            if (nodep->dpiExportDispatcher()) {
+                if (!firstExp++) puts("\n// DPI EXPORTS\n");
+                putsDecoration("// DPI export" + ifNoProtect(" at " + nodep->fileline()->ascii())
+                               + "\n");
+                puts("extern " + nodep->rtnTypeVoid() + " " + nodep->nameProtect() + "("
+                     + cFuncArgs(nodep) + ");\n");
+            } else if (nodep->dpiImportPrototype()) {
+                if (!firstImp++) puts("\n// DPI IMPORTS\n");
+                putsDecoration("// DPI import" + ifNoProtect(" at " + nodep->fileline()->ascii())
+                               + "\n");
+                puts("extern " + nodep->rtnTypeVoid() + " " + nodep->nameProtect() + "("
+                     + cFuncArgs(nodep) + ");\n");
+            }
+        }
+        puts("\n");
+        puts("#ifdef __cplusplus\n");
+        puts("}\n");
+        puts("#endif\n");
     }
 
 public:
@@ -84,9 +115,12 @@ public:
         ofp()->putsPrivate(false);
         // hardcoded constructor
         string ctxName;
+        std::vector<std::pair<AstCFunc*, AstNodeModule*>> extraFuncsp;
+        std::vector<AstCFunc*> dpisp;
         for (AstNode* nodep = netlistp->topModulep()->stmtsp(); nodep; nodep = nodep->nextp()) {
             if (AstVar* varp = VN_CAST(nodep, Var)) {
-                if (varp->dtypep()->basicp()->keyword() == VBasicDTypeKwd::POPLAR_CONTEXT)
+                if (varp->dtypep()->basicp()
+                    && varp->dtypep()->basicp()->keyword() == VBasicDTypeKwd::POPLAR_CONTEXT)
                     ctxName = varp->name();  // hacky
                 puts(varp->dtypep()->cType("", false, false));
                 puts(" ");
@@ -94,32 +128,59 @@ public:
                 puts(";\n");
 
             } else if (AstCFunc* cfuncp = VN_CAST(nodep, CFunc)) {
-
-                emitCFuncHeader(cfuncp, netlistp->topModulep(), false);
-                puts(";\n");
+                if (cfuncp->dpiImportPrototype()) {
+                    dpisp.push_back(cfuncp);
+                } else {
+                    emitCFuncHeader(cfuncp, netlistp->topModulep(), false);
+                    puts(";\n");
+                }
+            } else if (AstCell* const cellp = VN_CAST(nodep, Cell)) {
+                if (!cellp->modp()->inLibrary()) {
+                    // cellp->v3error("Do not know how emit node " << cellp << endl);
+                    continue;
+                }
+                for (AstNode* nodep = cellp->modp()->stmtsp(); nodep; nodep = nodep->nextp()) {
+                    if (AstCFunc* cfuncp = VN_CAST(nodep, CFunc)) {
+                        extraFuncsp.emplace_back(cfuncp, cellp->modp());
+                    }
+                }
             }
         }
         puts(prefixNameProtect(netlistp->topModulep()));
         puts("(VlPoplarContext& ctx) : " + ctxName + " (ctx) {}\n");  // hacky
         ensureNewLine();
         puts("};\n");
+        puts("\n");
+        if (!dpisp.empty()) { emitDpis(dpisp); }
+        puts("\n");
+        for (const auto& extrap : extraFuncsp) {
+            emitCFuncHeader(extrap.first, extrap.second, false);
+            puts(";\n");
+        }
+
         ofp()->putsEndGuard();
         VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
 
         // C++ implementations
-        m_modp = netlistp->topModulep();
-        netlistp->topModulep()->foreach([this, &netlistp](AstCFunc* cfuncp) {
+        auto emitFuncImpl = [this, &netlistp](AstCFunc* cfuncp) {
             if (!m_ofp || splitNeeded()) {
                 if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
-                openNextOutputFile(prefixNameProtect(netlistp->topModulep()), false);
+                openNextOutputFile(prefixNameProtect(m_modp), false);
                 puts("#include \"");
-                puts(prefixNameProtect(netlistp->topModulep()));
+                puts(prefixNameProtect(m_modp));
                 puts(".h\"\n");
             }
             EmitCFunc::visit(cfuncp);
-        });
-
+        };
+        m_modp = netlistp->topModulep();
+        netlistp->topModulep()->foreach(emitFuncImpl);
         VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+        for (const auto& extrap : extraFuncsp) {
+            if (m_modp != extrap.second) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
+            m_modp = extrap.second;
+            emitFuncImpl(extrap.first);
+        }
+        if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
     }
 };
 class EmitPoplarMake final {
@@ -152,7 +213,7 @@ public:
         ofp->puts("CXX ?= g++\n");
         ofp->puts("POPC ?= popc\n");
         ofp->puts("VERIPOPLAR_ROOT ?= " + v3Global.opt.getenvVERIPOPLAR_ROOT() + "\n");
-        ofp->puts("INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I.\n");
+        ofp->puts("INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/vltstd -I.\n");
         ofp->puts("LIBS = -lpoplar -lpopops -lpoputil -lpthread "
                   "-lboost_program_options\n");
         ofp->puts("GRAPH_FLAGS ?= \n");

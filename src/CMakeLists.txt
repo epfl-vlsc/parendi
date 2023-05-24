@@ -45,6 +45,7 @@ set(HEADERS
     V3Begin.h
     V3Branch.h
     V3Broken.h
+    V3BspDpi.h
     V3BspDly.h
     V3BspGraph.h
     V3BspModules.h
@@ -191,6 +192,7 @@ set(COMMON_SOURCES
     V3Begin.cpp
     V3Branch.cpp
     V3Broken.cpp
+    V3BspDpi.cpp
     V3BspDly.cpp
     V3BspGraph.cpp
     V3BspModules.cpp
