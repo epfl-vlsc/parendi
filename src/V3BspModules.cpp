@@ -274,7 +274,7 @@ private:
                 m_triggering.clockersp.push_back(stp);
             }
         }
-        if (!m_triggering.autoTriggerp) {
+        if (!m_triggering.autoTriggerp && m_partitionsp.size() > 0) {
             m_netlistp->v3error("Failed to detect the clock, this is might be an internal error");
         }
         m_triggering.trigDTypep
@@ -291,6 +291,7 @@ private:
         std::vector<AstClass*> vtxClassesp;
         // AstTopScope* topScopep =
         for (const auto& graphp : m_partitionsp) {
+            UASSERT(graphp->verticesBeginp(), "Expected non-empty graph");
             AstClass* modp = makeClass(graphp);
             vtxClassesp.push_back(modp);
         }
@@ -318,6 +319,7 @@ private:
         m_classWithComputep = clsAndTpe.first;
         m_classWithComputep->isVirtual(true);
         m_classWithComputep->internal(true);  // prevent deletion
+        m_classWithComputep->inLibrary(true);
         m_classWithComputeDtypep = clsAndTpe.second;
 
         auto initClsAndTypep
@@ -326,6 +328,7 @@ private:
         m_classWithInitp = initClsAndTypep.first;
         m_classWithInitDTypep = initClsAndTypep.second;
         m_classWithInitp->isVirtual(true);
+        m_classWithInitp->inLibrary(true);
         m_classWithInitp->internal(true);  // prevent deletion
     }
 
@@ -688,6 +691,7 @@ private:
     /// @param graphp
     /// @return
     AstClass* makeClass(const std::unique_ptr<DepGraph>& graphp) {
+
         m_memberNames.reset();
         UASSERT(m_packagep, "need bsp package!");
         FileLine* fl = nullptr;
@@ -701,7 +705,6 @@ private:
                 }
             }
         }
-
         // create a class for the the graph partition
         auto classAndTypep = newClass(fl, m_modNames.get("vtxCls"), m_modNames.get("vtxClsPkg"));
         AstClass* classp = classAndTypep.first;
@@ -946,17 +949,41 @@ private:
         AstTopScope* singletonTopScopep = m_netlistp->topScopep()->unlinkFrBack();
         AstSenTree* senTreep = singletonTopScopep->senTreesp()->unlinkFrBackWithNext();
         AstScope* oldScopep = singletonTopScopep->scopep();
+
+        // snatch the dpi function prototypes from the old top module
+        for (AstNode* np = oldScopep->blocksp(); np;) {
+            AstCFunc* funcp = VN_CAST(np, CFunc);
+            np = np->nextp();
+            if (!funcp) continue;
+            UASSERT_OBJ(funcp->dpiImportPrototype(), funcp, "expected function to be inlined");
+            // keep the function
+            funcp->scopep(m_topScopep);
+            UASSERT_OBJ(!funcp->stmtsp(), funcp, "DPI function should not have a body");
+            m_topScopep->addBlocksp(funcp->unlinkFrBack());
+        }
         oldScopep->replaceWith(m_topScopep);
         VL_DO_DANGLING(oldScopep->deleteTree(), oldScopep);
         VL_DO_DANGLING(senTreep->deleteTree(), senTreep);
 
         // finally put the top scope in the new top module
         m_topModp->addStmtsp(singletonTopScopep);
-        // delete any existing modules in the netlist
-        AstNodeModule* oldModsp = m_netlistp->modulesp()->unlinkFrBackWithNext();
+        // delete any existing top module in the netlist, but keep the package
+        AstNodeModule* oldModsp = m_netlistp->topModulep()->unlinkFrBack();
+        oldModsp->foreach([this](AstCell* cellp) {
+            if (!cellp->modp()->inLibrary()) return;
+            // a library package or something, keep it under the new top module,
+            // this requires replacing the scope below
+            cellp->modp()->foreach([this, cellp](AstScope* scopep) {
+                // scopep->modp()
+                scopep->modp(m_topModp);
+                scopep->aboveScopep(m_topScopep);
+            });
+            m_topModp->addStmtsp(cellp->unlinkFrBack());
+        });
+
         VL_DO_DANGLING(oldModsp->deleteTree(), oldModsp);
         // add the new topmodule (should be first, see AstNetlist::topModulesp())
-        m_netlistp->addModulesp(m_topModp);
+        m_netlistp->modulesp()->addHereThisAsNext(m_topModp);
     }
     void makeComputeSet(const std::vector<AstClass*> computeClassesp,
                         const std::string& funcName) {
