@@ -519,15 +519,41 @@ public:
         return names[m_e];
     }
     const char* dpiType() const {
-        static const char* const names[]
-            = {"%E-unk",       "svBit",         "char",          "void*",        "char",
-               "int",          "%E-integer",    "svLogic",       "long long",    "double",
-               "short",        "%E-time",       "const char*",   "%E-untyped",   "dpiScope",
-               "const char*",  "%E-mtaskstate", "%E-triggervec", "%E-dly-sched", "%E-trig-sched",
-               "%E-dyn-sched", "%E-fork",       "%E-poplar::Tensor", "%E-poplar::Vector<uint32_t>",
-               "%E-poplar::Graph", "%E-poplar::ComputeSet", "%E-poplar::VertexRef", "%E-poplar::Engine",
-               "%E-poplar::Device", "%E-poplar::Target", "%E-PoplarContext", "IData",
-               "QData",        "%E-logic-implct", " MAX"};
+        static const char* const names[] = {"%E-unk",
+                                            "svBit",
+                                            "char",
+                                            "void*",
+                                            "char",
+                                            "int",
+                                            "%E-integer",
+                                            "svLogic",
+                                            "long long",
+                                            "double",
+                                            "short",
+                                            "%E-time",
+                                            "const char*",
+                                            "%E-untyped",
+                                            "dpiScope",
+                                            "const char*",
+                                            "%E-mtaskstate",
+                                            "%E-triggervec",
+                                            "%E-dly-sched",
+                                            "%E-trig-sched",
+                                            "%E-dyn-sched",
+                                            "%E-fork",
+                                            "%E-poplar::Tensor",
+                                            "%E-poplar::Vector<uint32_t>",
+                                            "%E-poplar::Graph",
+                                            "%E-poplar::ComputeSet",
+                                            "%E-poplar::VertexRef",
+                                            "%E-poplar::Engine",
+                                            "%E-poplar::Device",
+                                            "%E-poplar::Target",
+                                            "%E-PoplarContext",
+                                            "IData",
+                                            "QData",
+                                            "%E-logic-implct",
+                                            " MAX"};
         return names[m_e];
     }
     static void selfTest() {
@@ -1236,28 +1262,32 @@ public:
 class VBspFlag final {
 public:
     enum EFlags : int {
+        MEMBER_NA = 0,  // no information
         MEMBER_INPUT = 1,  // Input<..>
         MEMBER_OUTPUT = 2,  // Output<..>
-        MEMBER_LOCAL  = 4, // InOut<...> but local
+        MEMBER_LOCAL = 4,  // InOut<...> but local
         MEMBER_HOSTREAD = 8,  // host readable
         MEMBER_HOSTWRITE = 16,  // host writeable
-        MEMBER_HOSTREQ   = 32, // is a host request
-        MEMBER_HOSTANYREQ = 64, // is any host request
+        MEMBER_HOSTREQ = 32,  // is a host request
+        MEMBER_HOSTANYREQ = 64,  // is any host request
         MEMBER_OPAQUE = 128,  // an opaque storage for multiple variables
+        __MEMBER_MASK_EN = (128 - 1)
     };
+
 private:
     int m_flag = 0;
+
 public:
     VBspFlag() = default;
     VBspFlag(std::initializer_list<EFlags> is) {
-        for (auto f : is) {
-            append(f);
-        }
+        for (auto f : is) { append(f); }
     }
     VBspFlag& append(EFlags v) {
         m_flag |= v;
+        // UASSERT(valid(), "invalid flag combination" << ascii() << endl);
         return *this;
     }
+
     bool hasLocal() const { return (m_flag & MEMBER_LOCAL); }
     bool hasInput() const { return (m_flag & MEMBER_INPUT); }
     bool hasOutput() const { return (m_flag & MEMBER_OUTPUT); }
@@ -1266,17 +1296,18 @@ public:
     bool hasHostReq() const { return (m_flag & MEMBER_HOSTREQ); }
     bool hasAnyHostReq() const { return (m_flag & MEMBER_HOSTANYREQ); }
     bool hasOpaque() const { return (m_flag & MEMBER_OPAQUE); }
+
     bool valid() const { return m_flag; }
     string ascii() const {
         string str{""};
-        if(hasLocal()) str += "L";
-        if(hasInput()) str += "I";
-        if(hasOutput()) str += "O";
-        if(hasHostRead()) str += "R";
-        if(hasHostWrite()) str += "W";
-        if(hasHostReq()) str += "H";
-        if(hasOpaque()) str +="P";
-        if(hasAnyHostReq()) str += "*";
+        if (hasLocal()) str += "L";
+        if (hasInput()) str += "I";
+        if (hasOutput()) str += "O";
+        if (hasHostRead()) str += "R";
+        if (hasHostWrite()) str += "W";
+        if (hasHostReq()) str += "H";
+        if (hasOpaque()) str += "P";
+        if (hasAnyHostReq()) str += "*";
         return str;
     }
 };
@@ -1293,11 +1324,19 @@ public:
         BSP_INIT_BUILTIN = 0x0002,
         BSP_COND_BUILTIN = 0x0004
     };
+
 private:
     uint8_t m_flag = NONE;
     uint32_t m_tileId = -1;
     uint32_t m_workerId = -1;
+
 public:
+    VClassFlag() = default;
+    VClassFlag(std::initializer_list<en> is) {
+        for (auto f : is) {
+            append(f);
+        }
+    }
     VClassFlag& append(en v) {
         m_flag |= v;
         return *this;
@@ -1315,7 +1354,6 @@ public:
     bool isBspCond() const { return (m_flag & BSP_COND_BUILTIN); }
     uint32_t tileId() const { return m_tileId; }
     uint32_t workerId() const { return m_workerId; }
-
 };
 //######################################################################
 // AstNUser - Generic base class for AST User nodes.

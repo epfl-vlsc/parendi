@@ -245,7 +245,7 @@ private:
     void visit(AstInitialStatic* nodep) override {
         nodep->v3fatalSrc("AstInitialStatic does not need a dependence graph");
     }
-    void visit(AstCCall* nodep) override { nodep->v3fatalSrc("AstCCal is not handled yet!"); }
+    void visit(AstCCall* nodep) override { iterateChildren(nodep); }
     void visit(AstInitialAutomatic* nodep) override {
         nodep->v3fatalSrc("AstInitialAutomatic is not handled yet!");
     }
@@ -347,7 +347,7 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
     // clone immediate successors of the collected vertices
     for (AnyVertex* const vtxp : visited) {
         CompVertex* const compp = dynamic_cast<CompVertex* const>(vtxp);
-        if (!compp) { continue;  /* not a CompVertex */}
+        if (!compp) { continue; /* not a CompVertex */ }
         // Special handling of the ComputeVertex: make sure all successors
         // (i.e., DefConstr or CommitConstr) vertices are also added to the partition.
         // Note that the CommitConstr nodes are added from the disjoint sets but

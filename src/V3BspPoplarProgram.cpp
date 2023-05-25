@@ -1051,13 +1051,12 @@ private:
         }
     }
     void patchHostHandle() {
-        // find the host handle top function
-        AstCFunc* hostp = getFunc(m_netlistp->topModulep(), "hostHandle");
+
         // find any other reachable function from hostp;
         std::set<AstCFunc*> reachablep;
         std::queue<AstCFunc*> toVisitp;
         toVisitp.push(getFunc(m_netlistp->topModulep(), "hostHandle"));
-        if (v3Global.dpi()) { toVisitp.push(getFunc(m_netlistp->topModulep(), "dpiHandle")); }
+
         int depth = 0;
         while (!toVisitp.empty()) {
             UASSERT(depth++ < 100000, "something is up");
@@ -1133,7 +1132,7 @@ public:
         // create a poplar program with the following structure:
         // Add the copy operations
         m_netlistp->foreach([this](AstCFunc* cfuncp) {
-            if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize") {
+            if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize" || cfuncp->name() == "dpiExchange") {
                 // create copy operations
                 addCopies(cfuncp, cfuncp->name() == "initialize");
             }
@@ -1258,9 +1257,10 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     { PoplarSetTileAndWorkerVisitor{nodep}; }
     { PoplarPlusArgsVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPlusArg", 0, dumpTree() >= 1);
-    { PoplarHostInteractionVisitor{nodep}; }  // destroy before checking
-    V3Global::dumpCheckGlobalTree("bspPoplarHost", 0, dumpTree() >= 1);
+    // { PoplarHostInteractionVisitor{nodep}; }  // destroy before checking
+    // V3Global::dumpCheckGlobalTree("bspPoplarHost", 0, dumpTree() >= 1);
 
+    // delegate all dpi calls to the host
     V3BspDpi::delegateAll(nodep);
 
     { PoplarLegalizeFieldNamesVisitor{nodep}; }
@@ -1268,5 +1268,5 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     { PoplarViewsVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarView", 0, dumpTree() >= 1);
     { PoplarComputeGraphBuilder{nodep}; }  // destroy before checking
-    V3Global::dumpCheckGlobalTree("bscPoplarProgram", 0, dumpTree() >= 1);
+    V3Global::dumpCheckGlobalTree("bspPoplarProgram", 0, dumpTree() >= 1);
 }

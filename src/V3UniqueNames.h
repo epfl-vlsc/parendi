@@ -26,7 +26,14 @@
 
 #include <string>
 #include <unordered_map>
-
+#define VL_UNIQUENAMES(p) []() {\
+        string namePrefix{__FILE__}; \
+        const auto start = namePrefix.find_last_of("/") + 1; \
+        const auto end = namePrefix.find_last_of("."); \
+        const auto len = end - start; \
+        namePrefix = namePrefix.substr(start, len); \
+        return V3UniqueNames{"__" + namePrefix + p}; \
+    }()
 class V3UniqueNames final {
     const std::string m_prefix;  // Prefix to attach to all names
 

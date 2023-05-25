@@ -438,6 +438,7 @@ private:
         // }
         trigEvalFuncp->isMethod(true);
         trigEvalFuncp->isInline(true);
+        trigEvalFuncp->dontCombine(true);
         scopep->addBlocksp(trigEvalFuncp);
         // create the a function that sets the triggers, for this we first need
         // to gather all the different SenTrees that could cause an activation
@@ -736,6 +737,7 @@ private:
         AstCFunc* nbaTopp = new AstCFunc{fl, "nbaTop", scopep, "void"};
         nbaTopp->isMethod(true);
         nbaTopp->isInline(true);
+        nbaTopp->dontCombine(true);
         // add the function arg
 
         AstVar* const trigArgp
