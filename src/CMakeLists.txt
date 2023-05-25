@@ -49,6 +49,7 @@ set(HEADERS
     V3BspDly.h
     V3BspGraph.h
     V3BspModules.h
+    V3BspPlusArgs.h
     V3BspPoplarProgram.h
     V3BspSched.h
     V3BspStraggler.h
@@ -196,6 +197,7 @@ set(COMMON_SOURCES
     V3BspDly.cpp
     V3BspGraph.cpp
     V3BspModules.cpp
+    V3BspPlusArgs.cpp
     V3BspPoplarProgram.cpp
     V3BspSched.cpp
     V3BspStraggler.cpp
