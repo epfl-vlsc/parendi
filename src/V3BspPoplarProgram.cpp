@@ -179,6 +179,21 @@ public:
     }
 };
 
+class PoplarLegalizeFieldNamesVisitor final {
+public:
+    explicit PoplarLegalizeFieldNamesVisitor(AstNetlist* netlistp) {
+        netlistp->foreach([](AstClass* classp) {
+            if (classp->flag().isBsp()) {
+                classp->foreach([](AstVarScope* vscp) {
+                    // AstNode::dedotName()
+                    // const std::string newName
+                    //     = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
+                    vscp->varp()->name("BSP__" + vscp->varp()->name());
+                });
+            }
+        });
+    }
+};
 namespace {
 
 struct TensorHandle {
@@ -315,7 +330,8 @@ private:
                             new AstVarRef{fl, tensorVscp, VAccess::READWRITE}})});
             // check whether we need to create host read/write handles
             if (varp->bspFlag().hasHostRead()) {
-                const std::string hrHandle = "hr." + tensorDeviceHandle;
+                const std::string hrHandle
+                    = varp->bspFlag().hasAnyHostReq() ? "interrupt" : ("hr." + tensorDeviceHandle);
                 m_handles(varp).hostRead = hrHandle;
                 ctorp->addStmtsp(new AstStmtExpr{
                     fl, mkCall(fl, "createHostRead",
