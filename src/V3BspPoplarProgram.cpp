@@ -367,6 +367,7 @@ private:
 
     void addCopies(AstCFunc* cfuncp, const string& kind) {
 
+        std::vector<AstNode*> nodesp;
         for (AstNode* nodep = cfuncp->stmtsp(); nodep;) {
             UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
             AstAssign* const assignp = VN_AS(nodep, Assign);
@@ -408,10 +409,30 @@ private:
                                      static_cast<uint32_t>(totalWords)} /*number of words*/,
                         new AstConst{nodep->fileline(), AstConst::String{},
                                      kind} /*is it part of init*/})};
-            nodep->replaceWith(newp);
+            AstNode* const nextp = nodep->nextp();
+            nodesp.push_back(newp);
             // newp->addHereThisAsNext(newCommentp);
-            VL_DO_DANGLING(nodep->deleteTree(), nodep);
-            nodep = newp->nextp();
+            VL_DO_DANGLING(nodep->unlinkFrBack()->deleteTree(), nodep);
+            nodep = nextp;
+        }
+
+        AstCFunc* splitFuncp = nullptr;
+        const uint32_t maxFuncStmts = v3Global.opt.outputSplit();
+        uint32_t funcSize = 0;
+        for (AstNode* const nodep : nodesp) {
+            if (!splitFuncp || (funcSize >= maxFuncStmts)) {
+                splitFuncp = new AstCFunc{cfuncp->fileline(), m_newNames.get("cpsplit"),
+                                          cfuncp->scopep(), "void"};
+                splitFuncp->isInline(false);
+                splitFuncp->isMethod(true);
+                splitFuncp->dontCombine(true);
+                cfuncp->scopep()->addBlocksp(splitFuncp);
+                AstCCall* const callp = new AstCCall{cfuncp->fileline(), splitFuncp};
+                callp->dtypeSetVoid();
+                cfuncp->addStmtsp(callp->makeStmt());
+            }
+            funcSize++;
+            splitFuncp->addStmtsp(nodep);
         }
     }
 
