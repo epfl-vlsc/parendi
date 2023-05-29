@@ -417,10 +417,11 @@ private:
         }
 
         AstCFunc* splitFuncp = nullptr;
-        const uint32_t maxFuncStmts = v3Global.opt.outputSplit();
+        const uint32_t maxFuncStmts = 10000;
         uint32_t funcSize = 0;
         for (AstNode* const nodep : nodesp) {
             if (!splitFuncp || (funcSize >= maxFuncStmts)) {
+                funcSize = 0;
                 splitFuncp = new AstCFunc{cfuncp->fileline(), m_newNames.get("cpsplit"),
                                           cfuncp->scopep(), "void"};
                 splitFuncp->isInline(false);
