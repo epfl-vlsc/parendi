@@ -262,9 +262,9 @@ public:
         ofp->puts("\t-DOBJ_DIR=");
         ofp->putsQuoted("\"" + v3Global.opt.makeDir() + "\"");
         ofp->puts("\n");
-        ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES)\n");
+        ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) -Wno-parentheses-equality \n");
         ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -X-funroll-loops "
-                  "-X-finline-functions -X-finline-hint-functions \n");
+                  "-X-finline-functions -X-finline-hint-functions -Wno-parentheses-equality\n");
         ofp->puts("\n");
         ofp->puts("CODELETS =  \\\n");
         iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },

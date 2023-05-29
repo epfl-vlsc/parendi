@@ -110,15 +110,15 @@ private:
         ofp()->putsPrivate(false);  // public
 
         // emit the members
-
+        ofp()->puts("using Vec = poplar::InOut<poplar::Vector<IData, poplar::VectorLayout::COMPACT_PTR, alignof(QData)>>;\n\n");
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
                 UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
                 auto flag = vrefp->bspFlag();
                 puts("/* [" + flag.ascii() + "] */\n");
-                puts("poplar::InOut<");
-                puts(vrefp->dtypep()->cType("", false, false));
-                puts("> ");
+                puts("Vec ");
+                // puts(vrefp->dtypep()->cType("", false, false));
+                // puts("> ");
                 puts(vrefp->nameProtect());
                 puts(";\n");
             }

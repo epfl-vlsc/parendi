@@ -148,7 +148,7 @@ private:
         UINFO(100, "Wrapping " << vrefp->name() << " in AstVarRefView" << endl);
         AstVarRefView* newp = new AstVarRefView{vrefp->fileline(), vrefp};
         // change vrefp dtype to become a VectorDType
-        vrefp->dtypeFrom(vrefp->varp());
+        // vrefp->dtypeFrom(vrefp->varp());
         relinkHandle.relink(newp);
     }
 
@@ -161,8 +161,8 @@ private:
             for (AstNode* stmtp = nodep->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
                 if (AstVar* varp = VN_CAST(stmtp, Var)) {
                     varp->user1(true);
-                    members.push_back(varp);
-                    varp->dtypep(vectorTypep(varp->dtypep()));
+                    // members.push_back(varp);
+                    // varp->dtypep(vectorTypep(varp->dtypep()));
                 }
             }
             // change all member dtypes to POPLAR_VECTOR_UINT32
@@ -310,9 +310,10 @@ private:
         for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
             AstVar* varp = VN_CAST(nodep, Var);
             if (!varp) continue;
-            AstVectorDType* dtp = VN_CAST(varp->dtypep(), VectorDType);
-            UASSERT_OBJ(dtp, varp, "expected VectorDType, need to create AstVarRefViews first!");
-            UASSERT_OBJ(dtp->basicp()->keyword() == VBasicDTypeKwd::UINT32, dtp, "expeced UINT32");
+            // AstVectorDType* dtp = VN_CAST(varp->dtypep(), VectorDType);
+            // UASSERT_OBJ(dtp, varp, "expected VectorDType, need to create AstVarRefViews
+            // first!"); UASSERT_OBJ(dtp->basicp()->keyword() == VBasicDTypeKwd::UINT32, dtp,
+            // "expeced UINT32");
             UASSERT_OBJ(varp->isClassMember(), varp, "Expected class member");
             // create a tensor for this variable
             AstVarScope* tensorVscp
@@ -320,10 +321,13 @@ private:
             std::string tensorDeviceHandle = className + "." + varp->nameProtect();
             m_handles(varp).tensor
                 = tensorDeviceHandle;  // need this to be able to later look up the tensor
+            AstNodeDType* const dtp = varp->dtypep();
+            const uint32_t vectorSize
+                = dtp->skipRefp()->widthWords() * dtp->arrayUnpackedElements();
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
                 mkCall(fl, "addTensor",
-                       {new AstConst{fl, AstConst::WidthedValue{}, 32, dtp->size()},
+                       {new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize},
                         new AstConst{fl, AstConst::String{}, tensorDeviceHandle}})};
             ctorp->addStmtsp(mkTensorp);
             setTileMapping(tensorVscp, tileId);
@@ -342,7 +346,7 @@ private:
                     fl, mkCall(fl, "createHostRead",
                                {new AstConst{fl, AstConst::String{}, hrHandle},
                                 new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                new AstConst{fl, AstConst::WidthedValue{}, 32, dtp->size()}},
+                                new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize}},
                                nullptr)});
 
                 if (varp->bspFlag().hasAnyHostReq()) {
@@ -361,7 +365,7 @@ private:
                     fl, mkCall(fl, "createHostWrite",
                                {new AstConst{fl, AstConst::String{}, hwHandle},
                                 new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                new AstConst{fl, AstConst::WidthedValue{}, 32, dtp->size()}},
+                                new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize}},
                                nullptr)});
             }
         }
@@ -388,7 +392,8 @@ private:
             };
             auto tileIdFrom = getTileId(assignp->rhsp());
             auto tileIdTo = getTileId(assignp->lhsp());
-            auto totalWords = VN_AS(top->dtypep(), VectorDType)->size();
+            const auto totalWords = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
+            // auto totalWords = VN_AS(top->dtypep(), VectorDType)->size();
 
             if (tileIdFrom == tileIdTo) {
                 V3Stats::addStatSum(

@@ -1211,7 +1211,7 @@ public:
         // VN_IS won't work, need dynamic_cast to check.
         UASSERT_OBJ(dynamic_cast<AstVarRef*>(nodep->vrefp()), nodep, "expected VarRef as op1!");
         puts("VL_VIEW<");
-        puts(nodep->dtypep()->cType("", false, false));
+        puts(nodep->vrefp()->dtypep()->cType("", false, false));
         puts(">(");
         iterateChildren(nodep);
         puts(")");
