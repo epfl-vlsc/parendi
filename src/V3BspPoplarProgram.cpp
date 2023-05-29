@@ -184,11 +184,15 @@ public:
     explicit PoplarLegalizeFieldNamesVisitor(AstNetlist* netlistp) {
         netlistp->foreach([](AstClass* classp) {
             if (classp->flag().isBsp()) {
-                classp->foreach([](AstVarScope* vscp) {
+                int nameId = 0;
+                classp->foreach([&nameId](AstVarScope* vscp) {
                     // AstNode::dedotName()
                     // const std::string newName
                     //     = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
-                    vscp->varp()->name("BSP__" + vscp->varp()->name());
+                    if (vscp->varp()->origName().empty()) {
+                        vscp->varp()->origName(vscp->varp()->name());
+                    }
+                    vscp->varp()->name("field_" + cvtToStr(nameId++));
                 });
             }
         });
@@ -417,7 +421,7 @@ private:
         }
 
         AstCFunc* splitFuncp = nullptr;
-        const uint32_t maxFuncStmts = 10000;
+        const uint32_t maxFuncStmts = 2000;
         uint32_t funcSize = 0;
         for (AstNode* const nodep : nodesp) {
             if (!splitFuncp || (funcSize >= maxFuncStmts)) {
