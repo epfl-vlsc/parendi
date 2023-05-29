@@ -194,6 +194,7 @@ public:
         });
     }
 };
+
 namespace {
 
 struct TensorHandle {
@@ -364,7 +365,7 @@ private:
         return ctorp;
     }
 
-    void addCopies(AstCFunc* cfuncp, const bool isInit) {
+    void addCopies(AstCFunc* cfuncp, const string& kind) {
 
         for (AstNode* nodep = cfuncp->stmtsp(); nodep;) {
             UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
@@ -383,14 +384,13 @@ private:
             auto tileIdFrom = getTileId(assignp->rhsp());
             auto tileIdTo = getTileId(assignp->lhsp());
             auto totalWords = VN_AS(top->dtypep(), VectorDType)->size();
+
             if (tileIdFrom == tileIdTo) {
-                V3Stats::addStatSum(std::string{"Poplar, Total on-tile word copies "}
-                                        + (isInit ? " (init) " : ""),
-                                    totalWords);
+                V3Stats::addStatSum(
+                    string{"Poplar, Total on-tile word copies "} + "(" + kind + ")", totalWords);
             } else {
-                V3Stats::addStatSum(std::string{"Poplar, Total off-tile word copies "}
-                                        + (isInit ? " (init)" : ""),
-                                    totalWords);
+                V3Stats::addStatSum(
+                    string{"Poplar, Total off-tile word copies "} + " (" + kind + ")", totalWords);
             }
 
             auto toHandle = m_handles(top).tensor;
@@ -406,8 +406,8 @@ private:
                         new AstConst{nodep->fileline(), AstConst::String{}, toHandle} /*target*/,
                         new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
                                      static_cast<uint32_t>(totalWords)} /*number of words*/,
-                        new AstConst{nodep->fileline(), AstConst::BitTrue{},
-                                     isInit} /*is it part of init*/})};
+                        new AstConst{nodep->fileline(), AstConst::String{},
+                                     kind} /*is it part of init*/})};
             nodep->replaceWith(newp);
             // newp->addHereThisAsNext(newCommentp);
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
@@ -517,9 +517,9 @@ public:
         // Add the copy operations
         m_netlistp->foreach([this](AstCFunc* cfuncp) {
             if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize"
-                || cfuncp->name() == "dpiExchange") {
+                || cfuncp->name() == "dpiExchange" || cfuncp->name() == "dpiBroadcast") {
                 // create copy operations
-                addCopies(cfuncp, cfuncp->name() == "initialize");
+                addCopies(cfuncp, cfuncp->name());
             }
         });
         patchHostHandle();

@@ -27,7 +27,6 @@
 #include "V3UniqueNames.h"
 VL_DEFINE_DEBUG_FUNCTIONS;
 
-
 class BspDpiDelegationVisitor;
 class BspDpiClosureVisitor;
 
@@ -673,7 +672,6 @@ private:
         AstVarScope* const tmpVscp
             = makeVar(m_freshNames.get("tmp"), dpiCondVscp->dtypep(), true, {});
 
-
         /// generate the following:
         //      tmp = 0;
         //      for (p : dpiPoints) tmp |= (p[0:0]);
@@ -683,18 +681,44 @@ private:
                           new AstConst{flp, AstConst::WidthedValue{}, tmpVscp->width(), 0}});
 
         // create an exchange which should come before the compute in the execution
-        AstCFunc* exchangeFuncp
-            = new AstCFunc{flp, "dpiExchange", m_netlistp->topScopep()->scopep(), "void"};
-        exchangeFuncp->isInline(true);
-        exchangeFuncp->dontCombine(true);
-        exchangeFuncp->isMethod(true);
-        m_netlistp->topScopep()->scopep()->addBlocksp(exchangeFuncp);
+        auto mkModFunc = [this](const string& name) -> AstCFunc* {
+            AstCFunc* modFuncp = new AstCFunc{m_netlistp->fileline(), name,
+                                              m_netlistp->topScopep()->scopep(), "void"};
+            modFuncp->isInline(false);
+            modFuncp->dontCombine(true);
+            modFuncp->isMethod(true);
+            m_netlistp->topScopep()->scopep()->addBlocksp(modFuncp);
+            return modFuncp;
+        };
+        auto mkMemSel = [](AstVarScope* const varVscp, AstVarScope* const memberVscp,
+                           VAccess const access) -> AstMemberSel* {
+            FileLine* fl = varVscp->fileline();
+            AstMemberSel* const memselp
+                = new AstMemberSel{fl, new AstVarRef{fl, varVscp, access}, VFlagChildDType{},
+                                   memberVscp->varp()->name()};
+            memselp->varp(memberVscp->varp());
+            memselp->dtypeFrom(memberVscp->varp());
+            return memselp;
+        };
 
+        AstCFunc* const exchangeFuncp = mkModFunc(
+            "dpiExchange");  // incast all the vertex dpi vectors to the condeval vertex
+        AstCFunc* const broadcastFuncp
+            = mkModFunc("dpiBroadcast");  // broadcast the result back to "reEntry" variables
         for (const auto& pair : m_records.classes) {
 
             AstClass* const classp = pair.first;
             UASSERT(classp, "classp should be non-null" << endl);
             AstVarScope* const dpiPointp = pair.second.dpiPointp;
+            AstVarScope* const reEntryp = pair.second.reEntryp;
+            UASSERT_OBJ(reEntryp, classp, "expected re-entry variable");
+            AstVarScope* const sourceInstVscp = m_records.instances[classp];
+            UASSERT_OBJ(instVscp, classp, "not instance found for class: " << classp << endl);
+
+            broadcastFuncp->addStmtsp(
+                new AstAssign{flp, mkMemSel(sourceInstVscp, reEntryp, VAccess::WRITE),
+                              mkMemSel(instVscp, dpiCondVscp, VAccess::READ)});
+
             if (!dpiPointp) continue;  // not participating
             AstVarScope* dpiPartVscp = makeVar(m_freshNames.get("vec"), dpiPointp->dtypep(), false,
                                                {VBspFlag::MEMBER_INPUT});
@@ -705,8 +729,9 @@ private:
                 = new AstAssign{flp, new AstVarRef{flp, tmpVscp, VAccess::WRITE}, orp};
             compFuncp->addStmtsp(assignp);
 
-            AstVarScope* const sourceInstVscp = m_records.instances[classp];
-            UASSERT_OBJ(instVscp, classp, "not instance found for class: " << classp << endl);
+            exchangeFuncp->addStmtsp(
+                new AstAssign{flp, mkMemSel(instVscp, dpiPartVscp, VAccess::WRITE),
+                              mkMemSel(sourceInstVscp, dpiPointp, VAccess::READ)});
 
             AstMemberSel* const sourceSelp
                 = new AstMemberSel{flp, new AstVarRef{flp, sourceInstVscp, VAccess::READ},

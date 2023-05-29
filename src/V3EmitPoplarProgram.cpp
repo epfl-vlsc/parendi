@@ -39,7 +39,8 @@ class EmitPoplarProgram final : public EmitCFunc {
 private:
     // MEMBERS
     V3UniqueNames m_uniqueNames;
-
+    AstNetlist* m_netlistp = nullptr;
+    std::vector<string> m_headers;
     void openNextOutputFile(const string& suggestion, bool header) {
         UASSERT(!m_ofp, "Output file already open");
 
@@ -47,6 +48,7 @@ private:
         m_lazyDecls.reset();  // Need to emit new lazy declarations
         string filename;
         if (header) {
+            m_headers.emplace_back(suggestion + ".h");
             filename = v3Global.opt.makeDir() + "/" + suggestion + ".h";
         } else {
             filename = v3Global.opt.makeDir() + "/" + m_uniqueNames.get(suggestion) + ".cpp";
@@ -60,7 +62,10 @@ private:
         puts("#include <verilated.h>\n");
 
         // puts("using namespace poplar;");
-        if (!header) { puts("#include <vlpoplar/verilated_poplar_context.h>\n"); }
+        if (!header) {
+            puts("#include <vlpoplar/verilated_poplar_context.h>\n");
+            for (const auto& hdr : m_headers) { puts("#include \"" + hdr + "\"\n"); }
+        }
         if (!header) {
             AstCFile* const cfilep = new AstCFile{v3Global.rootp()->fileline(), filename};
             cfilep->slow(false);
@@ -68,10 +73,18 @@ private:
             cfilep->codelet(false);
             v3Global.rootp()->addFilesp(cfilep);
         }
+
         // if (v3Global.dpi()) { v3fatal("dpi not supported with poplar\n"); }
+    }
+
+    void closeFile(bool header) {
+        m_ofp->putsEndGuard();
+        VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
     }
     void emitDpis(const std::vector<AstCFunc*> dpis) {
 
+        UASSERT(!m_ofp, "file not closed");
+        openNextOutputFile(topClassName() + "__Dpi", true);
         puts("\n");
         puts("#include \"svdpi.h\"\n");
         puts("\n");
@@ -100,24 +113,21 @@ private:
         puts("#ifdef __cplusplus\n");
         puts("}\n");
         puts("#endif\n");
+        closeFile(true);
     }
 
-public:
-    explicit EmitPoplarProgram(AstNetlist* netlistp) {
-        // C++ header fileI
-        openNextOutputFile(prefixNameProtect(netlistp->topModulep()), true);
-
+    std::vector<AstCFunc*> emitModule(AstNodeModule* modp) {
+        openNextOutputFile(prefixNameProtect(modp), true);
         puts("class VlPoplarContext;\n");
         puts("class ");
-        puts(prefixNameProtect(netlistp->topModulep()));
+        puts(prefixNameProtect(modp));
         puts(" final {\n");
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);
         // hardcoded constructor
         string ctxName;
-        std::vector<std::pair<AstCFunc*, AstNodeModule*>> extraFuncsp;
         std::vector<AstCFunc*> dpisp;
-        for (AstNode* nodep = netlistp->topModulep()->stmtsp(); nodep; nodep = nodep->nextp()) {
+        for (AstNode* nodep = modp->stmtsp(); nodep; nodep = nodep->nextp()) {
             if (AstVar* varp = VN_CAST(nodep, Var)) {
                 if (varp->dtypep()->basicp()
                     && varp->dtypep()->basicp()->keyword() == VBasicDTypeKwd::POPLAR_CONTEXT)
@@ -131,56 +141,70 @@ public:
                 if (cfuncp->dpiImportPrototype()) {
                     dpisp.push_back(cfuncp);
                 } else {
-                    emitCFuncHeader(cfuncp, netlistp->topModulep(), false);
+                    emitCFuncHeader(cfuncp, modp, false);
                     puts(";\n");
-                }
-            } else if (AstCell* const cellp = VN_CAST(nodep, Cell)) {
-                if (!cellp->modp()->inLibrary()) {
-                    // cellp->v3error("Do not know how emit node " << cellp << endl);
-                    continue;
-                }
-                for (AstNode* nodep = cellp->modp()->stmtsp(); nodep; nodep = nodep->nextp()) {
-                    if (AstCFunc* cfuncp = VN_CAST(nodep, CFunc)) {
-                        extraFuncsp.emplace_back(cfuncp, cellp->modp());
-                    }
                 }
             }
         }
-        puts(prefixNameProtect(netlistp->topModulep()));
+        puts(prefixNameProtect(modp));
         puts("(VlPoplarContext& ctx) : " + ctxName + " (ctx) {}\n");  // hacky
         ensureNewLine();
         puts("};\n");
         puts("\n");
-        if (!dpisp.empty()) { emitDpis(dpisp); }
         puts("\n");
-        for (const auto& extrap : extraFuncsp) {
-            emitCFuncHeader(extrap.first, extrap.second, false);
-            puts(";\n");
-        }
+        closeFile(true);
+        return dpisp;
+    }
 
-        ofp()->putsEndGuard();
-        VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+    void emitPackageDollarUnitHeader() {
+        if (AstPackage* pkgp = m_netlistp->dollarUnitPkgp()) {
+            openNextOutputFile(prefixNameProtect(pkgp), true);
+            pkgp->foreach([this, pkgp](AstCFunc* cfuncp) {
+                emitCFuncHeader(cfuncp, pkgp, false);
+                puts(";\n");
+            });
+            closeFile(true);
+        }
+    }
+    void emitCFuncImpl(AstCFunc* cfuncp) {
+        if (cfuncp->dpiImportPrototype()) return;
+        if (!m_ofp || splitNeeded()) {
+            if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+            openNextOutputFile(prefixNameProtect(m_modp), false);
+
+        }
+        EmitCFunc::visit(cfuncp);
+    }
+
+    void emitModuleImpl(AstNodeModule* modp) {
+        m_modp = modp;
+        modp->foreach([this](AstCFunc* cfuncp) { emitCFuncImpl(cfuncp); });
+        m_modp = nullptr;
+    }
+
+    void emitDollarPackageImpl() {
+
+        if (AstPackage* pkgp = m_netlistp->dollarUnitPkgp()) {
+            m_modp = pkgp;
+            pkgp->foreach([this](AstCFunc* cfuncp) { emitCFuncImpl(cfuncp); });
+            m_modp = nullptr;
+        }
+    }
+
+public:
+    explicit EmitPoplarProgram(AstNetlist* netlistp) {
+        // C++ header files
+        m_netlistp = netlistp;
+        auto dpisp = emitModule(netlistp->topModulep());
+        if (!dpisp.empty()) { emitDpis(dpisp); }
+        emitPackageDollarUnitHeader();
 
         // C++ implementations
-        auto emitFuncImpl = [this, &netlistp](AstCFunc* cfuncp) {
-            if (!m_ofp || splitNeeded()) {
-                if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
-                openNextOutputFile(prefixNameProtect(m_modp), false);
-                puts("#include \"");
-                puts(prefixNameProtect(m_modp));
-                puts(".h\"\n");
-            }
-            EmitCFunc::visit(cfuncp);
-        };
-        m_modp = netlistp->topModulep();
-        netlistp->topModulep()->foreach(emitFuncImpl);
-        VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
-        for (const auto& extrap : extraFuncsp) {
-            if (m_modp != extrap.second) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
-            m_modp = extrap.second;
-            emitFuncImpl(extrap.first);
-        }
-        if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
+        emitModuleImpl(netlistp->topModulep());
+        if (m_ofp) closeFile(false);
+
+        emitDollarPackageImpl();
+        if (m_ofp) closeFile(false);
     }
 };
 class EmitPoplarMake final {
@@ -213,7 +237,8 @@ public:
         ofp->puts("CXX ?= g++\n");
         ofp->puts("POPC ?= popc\n");
         ofp->puts("VERIPOPLAR_ROOT ?= " + v3Global.opt.getenvVERIPOPLAR_ROOT() + "\n");
-        ofp->puts("INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/vltstd -I.\n");
+        ofp->puts(
+            "INCLUDES = -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/include/vltstd -I.\n");
         ofp->puts("LIBS = -lpoplar -lpopops -lpoputil -lpthread "
                   "-lboost_program_options\n");
         ofp->puts("GRAPH_FLAGS ?= \n");
@@ -260,6 +285,10 @@ public:
         ofp->puts("\t$(VERIPOPLAR_ROOT)/include/verilated_threads.cpp \\\n");
         ofp->puts("\t$(VERIPOPLAR_ROOT)/include/vlpoplar/verilated_poplar_context.cpp\n");
         ofp->puts("\n");
+        ofp->puts("USER_CPP = \\\n");
+        for (const auto& cpp : v3Global.opt.cppFiles()) { ofp->puts("\t" + cpp + "\\\n"); }
+        ofp->puts("\n");
+        ofp->puts("HOST_SOURCES += $(USER_CPP)\n");
         ofp->puts("OBJS_HOST = $(HOST_SOURCES:cpp=o)\n");
         ofp->puts("OBJS_GP = $(CODELETS:cpp=gp)\n");
         ofp->puts("OBJS_S = $(CODELETS:cpp=s)\n");

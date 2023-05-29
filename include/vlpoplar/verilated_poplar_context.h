@@ -63,6 +63,54 @@ class VPROGRAM;
 #endif
 // forward decl
 
+///
+/// VlPoplarContext is responsbile for create a poplar CDFG, currently we treat
+/// computation in two distict phases: initial and nba.
+/// The initial phase runs before nba to completion and the nba is a loop.
+/// There is a special host request variable, let's call it hasDpi that can
+/// break the flow of execution. The initial phase has the following structure:
+///
+///     init cache for $plusargs and maybe $readmem
+///     copy cache to device
+///     hasDpi = 0;
+///     forall dpiVec: dpiVec = 0;
+///     on the host:
+///             do:
+///                IPU| Execute(initComputeSet);
+///                IPU| dpiExchange;
+///                IPU| dpiEval;
+///                IPU| dpiBroadcast;
+///                hostHandle();
+///             while hasDpi
+///             IPU| initExchage;
+///
+///
+/// The nba phase is slightly more complicated:
+///
+///     on the host:
+///         clear hasDpi; clear dpiVec
+///         let simLoop be:
+///         IPU|    dpiBroadcast (broadcast zero)
+///         IPU|    Execute(nba)
+///         IPU|    while !hasDpi:
+///         IPU|        (pre) dpiExchange
+///         IPU|        (pre) dpiEval
+///         IPU|        nbaExchange
+///         IPU|        Execute(nba)
+///
+///         while !finished:
+///             IPU| dpiEval
+///             IPU| dpiBroadcast
+///             IPU| if hasDpi:
+///             IPU|    Execute(nba)
+///             IPU|    dpiExchange
+///             IPU|    dpiEval
+///             IPU|    if !hasDpi:
+///             IPU|        nbaExchange
+///             IPU| if !hasDpi:
+///             IPU|        simLoop
+///             hostHandle();
+
 class VlPoplarContext final {
 private:
     struct HostBuffer {
@@ -71,6 +119,7 @@ private:
         HostBuffer(uint32_t elems)
             : buff(elems){};
     };
+    enum EProgramId : uint32_t { E_RESET = 0, E_INIT = 1, E_INITCOPY = 2, E_NBA = 3, _E_NUM_PROG };
     static constexpr int INIT_PROGRAM = 0;
     static constexpr int EVAL_PROGRAM = 1;
     RuntimeConfig cfg;
@@ -89,6 +138,8 @@ private:
     poplar::program::Sequence initCopies;
     poplar::program::Sequence constInitCopies;
     poplar::program::Sequence exchangeCopies;
+    poplar::program::Sequence dpiCopies;
+    poplar::program::Sequence dpiBroadcastCopies;
     bool hasCompute = false, hasInit = false, hasCond = false;
 
     // std::chrono::time_point<std::chrono::high_resolution_clock> m_startTime;
@@ -105,8 +156,10 @@ private:
 public:
     void init(int argc, char* argv[]);
     void build();
+    void buildReEntrant();
     void run();
-    void addCopy(const std::string& from, const std::string& to, uint32_t size, bool isInit);
+    void runReEntrant();
+    void addCopy(const std::string& from, const std::string& to, uint32_t size, const std::string& kind);
     template <std::size_t T_Words>
     void addInitConstCopy(const VlWide<T_Words>& value, const std::string& to) {
 #ifdef GRAPH_COMPILE
@@ -148,12 +201,11 @@ public:
             // hacky stuff to handle padded uint32_t values
             std::array<uint32_t, 2> v;
             engine->readTensor(handle, v.data(), v.data() + 2);
-            it->second->buff[0] = v;
+            it->second->buff[0] = v[0];
 
         } else {
             engine->readTensor(handle, it->second->buff.data(),
                                it->second->buff.data() + it->second->buff.size());
-
         }
         return (*reinterpret_cast<T*>(it->second->buff.data()));
     }

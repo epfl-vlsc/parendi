@@ -44,6 +44,164 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     vprog->constructAll();
     vprog->initialize();
     vprog->exchange();
+    vprog->dpiExchange();
+    vprog->dpiBroadcast();
+}
+
+void VlPoplarContext::buildReEntrant() {
+    using namespace poplar;
+    using namespace poplar::program;
+
+    if (!interruptCond.valid()) {
+        std::cerr << "Program has no host interface/stop condition!" << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    Sequence resetProg;
+    auto zeroValue = graph->addConstant(UNSIGNED_INT, {1}, false, "false value");
+    graph->setTileMapping(zeroValue, 0);
+    resetProg.add(Copy(zeroValue, interruptCond[0]));  // need to clear the lo
+    for (auto hreq : hostRequest) { resetProg.add(Copy(zeroValue, hreq[0])); }
+
+    Sequence initProg;
+    if (hasInit) {
+        initProg.add(Execute(*initializer));
+        initProg.add(dpiCopies);
+        initProg.add(Execute{*condeval});
+        initProg.add(dpiBroadcastCopies);
+    }
+    // clang-format off
+    Sequence simLoop {
+        dpiBroadcastCopies,
+        Execute{*workload},
+        RepeatWhileFalse{
+            Sequence{
+                dpiCopies,
+                Execute{*condeval}
+            },
+            interruptCond[0],
+            Sequence{
+                exchangeCopies,
+                Execute{*workload}
+            }
+        }
+    };
+    Sequence nbaProg {
+        Execute{*condeval},
+        dpiBroadcastCopies,
+        If{
+            interruptCond[0],
+            Sequence{
+                Execute{*workload},
+                dpiCopies,
+                Execute{*condeval},
+                If {
+                    interruptCond[0],
+                    Sequence{},
+                    exchangeCopies,
+                }
+            },
+            Sequence{}
+        },
+        If{
+            interruptCond[0],
+            Sequence{},
+            simLoop
+        }
+    };
+
+    std::vector<Program> programs {
+        resetProg,
+        initProg,
+        initCopies,
+        nbaProg
+    };
+    // clang-format on
+    OptionFlags flags{};
+#ifdef POPLAR_INSTRUMENT
+    {
+        std::ifstream ifs(ROOT_NAME "_compile_options.json", std::ios::in);
+        readJSON(ifs, flags);
+        ifs.close();
+    }
+#endif
+    float lastProg = 0.0;
+    auto exec = compileGraph(*graph, programs, flags, [&lastProg](int step, int total) {
+        float newProg = static_cast<float>(step) / static_cast<float>(total) * 100.0;
+        if (newProg - lastProg >= 10.0f) {
+            std::cout << "Graph compilation: " << static_cast<int>(newProg) << "%" << std::endl;
+            lastProg = newProg;
+        }
+    });
+    std::ofstream execOut(ROOT_NAME ".graph.bin", std::ios::binary);
+    exec.serialize(execOut);
+}
+
+void VlPoplarContext::runReEntrant() {
+    std::ofstream profile(OBJ_DIR "/" ROOT_NAME "_runtime.log", std::ios::out);
+    const auto simStartTime = std::chrono::high_resolution_clock::now();
+    auto timed = [](auto&& lazyValue) {
+        const auto t0 = std::chrono::high_resolution_clock::now();
+        lazyValue();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double>(t1 - t0).count();
+    };
+
+    auto measure = [&timed, &profile](auto&& lazyValue, const std::string& n) {
+        const auto t = timed(std::forward<decltype(lazyValue)>(lazyValue));
+        profile << n << ": " << std::fixed << std::setw(15) << std::setprecision(6) << t << "s"
+                << std::endl;
+    };
+    // build the engined and copy cached values of arguments and files to the device
+    measure(
+        [this]() {
+            std::ifstream graphIn(OBJ_DIR "/" ROOT_NAME ".graph.bin", std::ios::binary);
+            auto exec = poplar::Executable::deserialize(graphIn);
+            graphIn.close();
+            poplar::OptionFlags flags{};
+#ifdef POPLAR_INSTRUMENT
+            {
+                std::ifstream ifs(OBJ_DIR "/" ROOT_NAME "_engine_options.json", std::ios::in);
+                poplar::readJSON(ifs, flags);
+                ifs.close();
+                std::cout << flags << std::endl;
+            }
+#endif
+            engine = std::make_unique<poplar::Engine>(exec, flags);
+            engine->load(*device);
+            vprog->plusArgs();
+            vprog->plusArgsCopy();
+            vprog->readMem();
+            vprog->readMemCopy();
+            engine->run(E_RESET);
+        },
+        "load");
+    // the initializings is performed in a loop, because the there may be DPI
+    // call in the init program
+    int invIndex = 0;
+    uint32_t interrupt = 0;
+    do {
+        profile << "init " << invIndex << std::endl;
+        engine->run(E_INIT);
+        vprog->hostHandle();
+        interrupt = getHostData("interrupt", uint32_t{});
+    } while (interrupt);
+    engine->run(E_INITCOPY);
+
+    // starting the main simulation loop
+    auto simLoopStart = std::chrono::high_resolution_clock::now();
+    while (!Verilated::gotFinish()) {
+        profile << "run " << invIndex++ << std::endl;
+        measure([this]() { engine->run(E_NBA); }, "\twall");
+        vprog->hostHandle();
+    }
+
+    auto simEnd = std::chrono::high_resolution_clock::now();
+    profile << "sim: " << std::chrono::duration<double>(simEnd - simLoopStart).count() << "s"
+            << std::endl;
+    profile << "all: " << std::chrono::duration<double>(simEnd - simStartTime).count() << "s"
+            << std::endl;
+    profile.close();
 }
 
 void VlPoplarContext::build() {
@@ -133,9 +291,6 @@ void VlPoplarContext::run() {
             auto exec = poplar::Executable::deserialize(graphIn);
             graphIn.close();
             poplar::OptionFlags flags{};
-// #define OBJ_DIR "obj_dir"
-// #define VPROGRAM "Vt"
-// #define FILE_PATH OBJ_DIR "/" VPROGRAM "_engine_options.json"
 #ifdef POPLAR_INSTRUMENT
             {
                 std::ifstream ifs(OBJ_DIR "/" ROOT_NAME "_engine_options.json", std::ios::in);
@@ -188,15 +343,22 @@ void VlPoplarContext::run() {
 }
 
 void VlPoplarContext::addCopy(const std::string& from, const std::string& to, uint32_t size,
-                              bool isInit) {
+                              const std::string& kind) {
 #ifdef GRAPH_COMPILE
     poplar::Tensor fromTensor = getTensor(from);
     poplar::Tensor toTensor = getTensor(to);
     poplar::program::Copy cp{fromTensor, toTensor, false, from + " ==> " + to};
-    if (isInit) {
+    if (kind == "initialize") {
         initCopies.add(cp);
-    } else {
+    } else if (kind == "exchange") {
         exchangeCopies.add(cp);
+    } else if (kind == "dpiExchange") {
+        dpiCopies.add(cp);
+    } else if (kind == "dpiBroadcast") {
+        dpiBroadcastCopies.add(cp);
+    } else {
+        std::cerr << "invalid copy operation \"" << kind << "\"\n";
+        std::exit(EXIT_FAILURE);
     }
 #endif
 }
@@ -338,9 +500,9 @@ int main(int argc, char* argv[]) {
     VlPoplarContext ctx;
     ctx.init(argc, argv);
 #ifdef GRAPH_COMPILE
-    ctx.build();
+    ctx.buildReEntrant();
 #else
-    ctx.run();
+    ctx.runReEntrant();
 #endif
     return EXIT_SUCCESS;
 }
