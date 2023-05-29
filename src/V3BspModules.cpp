@@ -985,7 +985,12 @@ private:
 
         VL_DO_DANGLING(oldModsp->deleteTree(), oldModsp);
         // add the new topmodule (should be first, see AstNetlist::topModulesp())
-        m_netlistp->modulesp()->addHereThisAsNext(m_topModp);
+        if (m_netlistp->modulesp()) {
+            m_netlistp->modulesp()->addHereThisAsNext(m_topModp);
+        } else {
+            m_netlistp->addModulesp(m_topModp);
+        }
+
     }
     void makeComputeSet(const std::vector<AstClass*> computeClassesp,
                         const std::string& funcName) {

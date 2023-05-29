@@ -313,18 +313,17 @@ private:
             // already a variable, so no need to create another one
             // but we need to add extra flags to it
             VBspFlag flag = argVRefp->varp()->bspFlag();
-            if (flag.hasLocal())
-                if (argVRefp->access().isWriteOnly()) {
-                    flag.append(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_HOSTWRITE);
-                } else if (argVRefp->access().isWriteOrRW()) {
-                    if (flag.hasLocal()) flag = {VBspFlag::MEMBER_NA};
-                    flag.append(VBspFlag::MEMBER_INPUT)
-                        .append(VBspFlag::MEMBER_OUTPUT)
-                        .append(VBspFlag::MEMBER_HOSTREAD)
-                        .append(VBspFlag::MEMBER_HOSTWRITE);
-                } else {
-                    flag.append(VBspFlag::MEMBER_OUTPUT).append(VBspFlag::MEMBER_HOSTREAD);
-                }
+            if (argVRefp->access().isWriteOnly()) {
+                flag.append(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_HOSTWRITE);
+            } else if (argVRefp->access().isWriteOrRW()) {
+                if (flag.hasLocal()) flag = {VBspFlag::MEMBER_NA};
+                flag.append(VBspFlag::MEMBER_INPUT)
+                    .append(VBspFlag::MEMBER_OUTPUT)
+                    .append(VBspFlag::MEMBER_HOSTREAD)
+                    .append(VBspFlag::MEMBER_HOSTWRITE);
+            } else {
+                flag.append(VBspFlag::MEMBER_OUTPUT).append(VBspFlag::MEMBER_HOSTREAD);
+            }
             argVRefp->varp()->bspFlag(flag);
             argVscp = argVRefp->varScopep();
         } else if (!VN_IS(argp, Const)) {
@@ -773,9 +772,6 @@ void V3BspDpi::delegateAll(AstNetlist* nodep) {
 
     UINFO(3, "Analyzing DPI calls" << endl);
     auto records = BspDpiAnalysisVisitor::analyze(nodep);
-    if (records.netlist.semantics == DPI_NONE) {
-        return;  // no dpi calls inside
-    }
 
     UINFO(3, "Making DPI closures" << endl);
     { BspDpiClosureVisitor{nodep, m_newNames}; }
