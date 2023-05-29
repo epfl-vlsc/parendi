@@ -39,11 +39,12 @@ protected:
     void visit(AstNodeModule* modp) override { iterateChildren(modp); }
 
     void visit(AstClass* classp) override {
-        VL_RESTORER(m_classp);
+
         if (classp->flag().isBsp()) {
             m_classp = classp;
             iterateChildren(classp);
         }
+        m_classp = nullptr;
     }
     void visit(AstScope* scopep) override {
         VL_RESTORER(m_scopep);
@@ -79,14 +80,50 @@ struct DpiInfo {
     }
 };
 struct DpiRecord {
+private:
     using ClassDpiInfo = std::unordered_map<AstClass*, DpiInfo>;
     ClassDpiInfo classes;
     std::unordered_map<AstClass*, AstVarScope*> instances;
     DpiInfo netlist;
+
+public:
     DpiRecord() {
         classes.clear();
         instances.clear();
     }
+    void append(AstClass* const classp, DpiSemantics const s) {
+        UASSERT(classp, "expected non-null classp");
+        classes[classp].append(s);
+        netlist.append(s);
+    }
+    void setInst(AstClass* const classp, AstVarScope* const vscp) {
+        UASSERT(classp && vscp, "expected non-null arguments");
+        instances[classp] = vscp;
+    }
+
+    DpiInfo getInfo(AstClass* const classp) {
+        UASSERT(classp, "expected non-null");
+        // UASSERT(classes.count(classp), "Class not analyzed!");
+        return classes[classp];
+    }
+    void setDpi(AstClass* const classp, AstVarScope* const vscp) {
+        UASSERT(classp, "expected non-null");
+        UASSERT(classes.count(classp), "not analayzed!");
+        classes[classp].dpiPointp = vscp;
+    }
+    void setReEntry(AstClass* const classp, AstVarScope* const vscp) {
+        UASSERT(classp, "expected non-null");
+        UASSERT(classes.count(classp), "not analayzed!");
+        classes[classp].reEntryp = vscp;
+    }
+
+    AstVarScope* getInst(AstClass* const classp) const {
+        UASSERT(classp, "expected non-null");
+        UASSERT(instances.count(classp), "no class instance");
+        return (*instances.find(classp)).second;
+    }
+
+    auto& getClasses() { return classes; }
 };
 };  // namespace
 class BspDpiAnalysisVisitor final : public BspBaseDpiVisitor {
@@ -94,10 +131,8 @@ private:
     DpiRecord m_record;
 
 private:
-    void append(DpiSemantics s) {
-        m_record.classes[m_classp].append(s);
-        m_record.netlist.append(s);
-    }
+    inline void append(DpiSemantics s) { m_record.append(m_classp, s); }
+
     void visit(AstCCall* callp) {
         if (!m_classp) { return; }
         if (callp->funcp()->dpiContext() || callp->funcp()->dpiExportDispatcher()
@@ -111,11 +146,11 @@ private:
     void visit(AstDisplay* nodep) override { append(DPI_BUFFERED); }
     void visit(AstFinish* nodep) override { append(DPI_BUFFERED); }
     void visit(AstStop* nodep) override { append(DPI_BUFFERED); }
-    void visit(AstNodeReadWriteMem* nodep) override { append(DPI_STRICT); }
+    // void visit(AstNodeReadWriteMem* nodep) override { append(DPI_STRICT); }
     void visit(AstVarScope* vscp) {
         auto const dtypep = VN_CAST(vscp->dtypep(), ClassRefDType);
         if (dtypep && dtypep->classp()->flag().isBsp()) {
-            m_record.instances[dtypep->classp()] = vscp;
+            m_record.setInst(dtypep->classp(), vscp);
         }
     }
     explicit BspDpiAnalysisVisitor(AstNetlist* netlistp) { iterate(netlistp); }
@@ -131,6 +166,8 @@ class BspDpiClosureVisitor final : public BspBaseDpiVisitor {
 private:
     AstCFunc* m_cfuncp = nullptr;
     bool m_inArgs = false;
+
+    DpiRecord& m_records;
     V3UniqueNames& m_closureNames;
 
     VNUser1InUse m_user1InUse;
@@ -175,6 +212,9 @@ private:
 
     void visit(AstVar* varp) override {
         if (!m_cfuncp || varp->user1()) { return; /* not func local */ }
+        if (m_records.getInfo(m_classp).semantics == DPI_NONE) {
+            return; /*class never calls a dpi function*/
+        }
         UASSERT_OBJ(varp->isFuncLocal(), varp, "Expected function local variable");
         if (m_inArgs) {
             replaceFuncArg(varp);
@@ -209,8 +249,9 @@ private:
         }
     }
 
-    explicit BspDpiClosureVisitor(AstNetlist* netlistp, V3UniqueNames& unames)
-        : m_closureNames{unames} {
+    explicit BspDpiClosureVisitor(AstNetlist* netlistp, DpiRecord& records, V3UniqueNames& unames)
+        : m_records(records)
+        , m_closureNames{unames} {
         iterate(netlistp);
     }
 
@@ -245,7 +286,7 @@ private:
     void initKit() {
         if (m_dpiKit) return;
         UASSERT(m_scopep && m_classp, "expected scope and class");
-        DpiInfo& info = m_records.classes[m_classp];
+        const DpiInfo info = m_records.getInfo(m_classp);
         AstVar* const reEntryVarp = new AstVar{m_classp->fileline(), VVarType::MEMBER,
                                                m_dpiNames.get("reEntry"), VFlagBitPacked{}, 1};
         reEntryVarp->bspFlag({VBspFlag::MEMBER_INPUT});
@@ -254,7 +295,7 @@ private:
             = new AstVarScope{m_classp->fileline(), m_scopep, reEntryVarp};
         m_scopep->addVarsp(reEntryVscp);
         m_dpiKit.reEntryp = reEntryVscp;
-        info.reEntryp = reEntryVscp;  // used by the  BspDpiCondVisitor
+        m_records.setReEntry(m_classp, reEntryVscp);  // used by the  BspDpiCondVisitor
         if (info.numCalls > 0) {
             AstVar* const dpiPointVarp
                 = new AstVar{m_classp->fileline(), VVarType::MEMBER, m_dpiNames.get("dpiPoint"),
@@ -268,7 +309,7 @@ private:
             m_scopep->addVarsp(dpiPointVscp);
             m_dpiKit.dpiPoint = dpiPointVscp;
 
-            info.dpiPointp = dpiPointVscp;  // used by the BspDpiCondVisitr
+            m_records.setDpi(m_classp, dpiPointVscp);  // used by the BspDpiCondVisitr
         }
     }
 
@@ -306,7 +347,7 @@ private:
 
         AstNodeExpr* const nextArgp = VN_AS(argp->nextp(), NodeExpr);
         AstVarRef* const argVRefp = VN_CAST(argp, VarRef);
-        AstVarScope* const instVscp = m_records.instances[m_classp];
+        AstVarScope* const instVscp = m_records.getInst(m_classp);
         UASSERT_OBJ(instVscp, m_classp, "expected instance");
         AstVarScope* argVscp = nullptr;
         if (argVRefp) {
@@ -376,7 +417,7 @@ private:
         UASSERT_OBJ(m_scopep, cfuncp, "expected scope");
         UINFO(3,
               "Injecting reentry point in " << m_classp->name() << "::" << cfuncp->name() << endl);
-        DpiInfo& info = m_records.classes[m_classp];
+        const DpiInfo info = m_records.getInfo(m_classp);
         if (info.semantics == DPI_NONE) {
             // simple case, guard the whole function body with the reEntry variable
             AstIf* const guardp
@@ -407,7 +448,7 @@ private:
         AstIf* lastIfp = jumpControlp;
         int dpiIndex = 0;
         AstJumpBlock* lastJBlockp = jblockStartp;
-        AstVarScope* instVscp = m_records.instances[m_classp];
+        AstVarScope* instVscp = m_records.getInst(m_classp);
         UASSERT_OBJ(instVscp, m_classp, "Could not find instance!");
         for (const auto& dpiCallp : m_dpiKit.callsp) {
             AstNodeStmt* const stmtp = dpiCallp.first;
@@ -704,14 +745,13 @@ private:
             "dpiExchange");  // incast all the vertex dpi vectors to the condeval vertex
         AstCFunc* const broadcastFuncp
             = mkModFunc("dpiBroadcast");  // broadcast the result back to "reEntry" variables
-        for (const auto& pair : m_records.classes) {
-
+        for (const auto& pair : m_records.getClasses()) {
             AstClass* const classp = pair.first;
             UASSERT(classp, "classp should be non-null" << endl);
             AstVarScope* const dpiPointp = pair.second.dpiPointp;
             AstVarScope* const reEntryp = pair.second.reEntryp;
             UASSERT_OBJ(reEntryp, classp, "expected re-entry variable");
-            AstVarScope* const sourceInstVscp = m_records.instances[classp];
+            AstVarScope* const sourceInstVscp = m_records.getInst(classp);
             UASSERT_OBJ(instVscp, classp, "not instance found for class: " << classp << endl);
 
             broadcastFuncp->addStmtsp(
@@ -774,7 +814,7 @@ void V3BspDpi::delegateAll(AstNetlist* nodep) {
     auto records = BspDpiAnalysisVisitor::analyze(nodep);
 
     UINFO(3, "Making DPI closures" << endl);
-    { BspDpiClosureVisitor{nodep, m_newNames}; }
+    { BspDpiClosureVisitor{nodep, records, m_newNames}; }
     V3Global::dumpCheckGlobalTree("bspDpiClosure", 0, dumpTree() >= 1);
 
     UINFO(3, "Delegating DPI calls" << endl);
