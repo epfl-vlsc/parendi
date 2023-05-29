@@ -14,7 +14,8 @@ scenarios(
 );
 
 compile(
-    verilator_flags2 => ["--poplar -O3 -Wno-WIDTH"]
+    verilator_flags2 => ["--poplar -O3 -Wno-WIDTH"],
+    make_main => 0
 );
 
 execute(

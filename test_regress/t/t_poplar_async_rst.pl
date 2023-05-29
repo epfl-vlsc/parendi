@@ -14,7 +14,8 @@ scenarios(
 );
 
 compile(
-    verilator_flags2 => ["--poplar"]
+    verilator_flags2 => ["--poplar"],
+    make_main => 0
 );
 
 execute(

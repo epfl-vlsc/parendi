@@ -38,8 +38,10 @@ module Main #(parameter LOOP_LOG2 = 0, DIFFICULTY = 15,
    reg [31:0] counter = 0;
    wire clk = clock;
    reg [31:0] timeout;
+   reg noCheck;
    initial begin
        if(!$value$plusargs("TIMEOUT=%d", timeout)) timeout = 100000000;
+	   noCheck = $test$plusargs("NOCHECK");
    end
    fpgaminer_top
         #(.LOOP_LOG2(LOOP_LOG2), .DIFFICULTY(DIFFICULTY))
@@ -51,15 +53,15 @@ module Main #(parameter LOOP_LOG2 = 0, DIFFICULTY = 15,
 		// 	$display("+VERBOSE: @ %d %h %h", counter, golden_nonce, nonce);
 		// end
        if (golden_nonce) begin
-		   if (golden_nonce != EXPECTED_GOLDEN_NONCE) begin
+	       $display("@ %d %h %h", counter, golden_nonce, nonce);
+		   if (!noCheck && (golden_nonce != EXPECTED_GOLDEN_NONCE)) begin
 			$display("Invalid golden nonce %h", golden_nonce);
 			$stop;
 		   end
-		   if (nonce != EXPECTED_NONCE) begin
+		   if (!noCheck && (nonce != EXPECTED_NONCE)) begin
 			$display("Invalid nonce %h", nonce);
 			$stop;
 		   end
-	       $display("@ %d %h %h", counter, golden_nonce, nonce);
 		   $display("*-* All Finished *-*");
            $finish;
        end else if (timeout == counter) begin
