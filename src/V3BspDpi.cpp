@@ -378,7 +378,7 @@ private:
             m_scopep->addVarsp(newVscp);
             argVscp = newVscp;
             AstAssign* const assignp = new AstAssign{
-                argp->fileline(), new AstVarRef{argp->fileline(), newVscp, VAccess::READ},
+                argp->fileline(), new AstVarRef{argp->fileline(), newVscp, VAccess::WRITE},
                 argp->cloneTree(false)};
             stmtp->addHereThisAsNext(assignp);
         }

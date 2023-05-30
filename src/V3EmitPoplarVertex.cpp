@@ -51,9 +51,9 @@ private:
         if (!viewp || !hviewp) { nodep->v3error(nodep->verilogKwd() << " expected VarRefView"); }
         AstVarRef* const vrefp = viewp->vrefp();
         AstVarRef* const hvrefp = hviewp->vrefp();
-        AstVectorDType* const dtypep = VN_CAST(vrefp->varp()->dtypeSkipRefp(), VectorDType);
-        if (!dtypep) { nodep->v3error(nodep->verilogKwd() << "unsupported data type"); }
-        puts(cvtToStr(dtypep->size()));
+        uint32_t const numWords = vrefp->varp()->dtypeSkipRefp()->widthWords()
+                                  * vrefp->varp()->dtypep()->arrayUnpackedElements();
+        puts(cvtToStr(numWords));
         puts(", ");
         iterateAndNextNull(nodep->filenamep());
         puts(", ");
@@ -102,7 +102,8 @@ private:
 
         m_modp = classp;  // used by EmitCFunc::visit
         maybeOpenNextFile();
-        puts("// at TILE = " + cvtToStr(classp->flag().tileId()) + "   WORKER = " + cvtToStr(classp->flag().workerId()) + "\n");
+        puts("// at TILE = " + cvtToStr(classp->flag().tileId())
+             + "   WORKER = " + cvtToStr(classp->flag().workerId()) + "\n");
         puts("\nclass ");
         puts(prefixNameProtect(classp));
         puts(" : public poplar::Vertex {\n");
@@ -110,7 +111,8 @@ private:
         ofp()->putsPrivate(false);  // public
 
         // emit the members
-        ofp()->puts("using Vec = poplar::InOut<poplar::Vector<IData, poplar::VectorLayout::COMPACT_PTR, alignof(QData)>>;\n\n");
+        ofp()->puts("using Vec = poplar::InOut<poplar::Vector<IData, "
+                    "poplar::VectorLayout::COMPACT_PTR, alignof(QData)>>;\n\n");
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
                 UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
@@ -120,7 +122,7 @@ private:
                 // puts(vrefp->dtypep()->cType("", false, false));
                 // puts("> ");
                 puts(vrefp->nameProtect());
-                puts(";\n");
+                puts("; /* " + vrefp->origName() + " : " + vrefp->fileline()->ascii() + " */\n");
             }
         }
 
