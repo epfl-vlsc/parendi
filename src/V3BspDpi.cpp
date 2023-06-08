@@ -406,6 +406,7 @@ private:
         }),
                 "did not expect op2 on AstFormatF " << fmtp << endl);
         for (AstNodeExpr* argp = fmtp->exprsp(); argp; argp = delegateArg(displayp, argp)) {}
+        // now create an empty stub
     }
 
     inline void delegateDpi(AstCCall* callp, AstNodeStmt* stmtp) {
@@ -453,6 +454,8 @@ private:
         for (const auto& dpiCallp : m_dpiKit.callsp) {
             AstNodeStmt* const stmtp = dpiCallp.first;
             AstCCall* const callp = dpiCallp.second;
+            UASSERT(stmtp, "expected statement");
+            AstNodeStmt* const stmtClonep = stmtp->cloneTree(false);
             UINFO(3, "Replacing call " << callp->name() << endl);
             bool needReEntry = true;
             if (stmtp && callp) {
@@ -468,7 +471,8 @@ private:
             } else if (auto const dispp = VN_CAST(stmtp, Display)) {
                 delegateDisplay(dispp);
             } else {
-                // error
+                // error?
+                UASSERT_OBJ(false, stmtp, "Can not handle delegation");
             }
             V3Number dpiPoint{stmtp->fileline(), m_dpiKit.dpiPoint->width(), 0};
             // dpiPoint is bit vector whose LSB signifies that there is a DPI
@@ -485,8 +489,7 @@ private:
             stmtp->replaceWith(dpiSetp);
             AstJumpGo* const goExitp = new AstJumpGo{stmtp->fileline(), exitLabelp};
             dpiSetp->addNextHere(goExitp);
-            dpiSetp->addHereThisAsNext(
-                new AstComment{goExitp->fileline(), "call from: " + stmtp->fileline()->ascii()});
+            dpiSetp->addHereThisAsNext(new AstDelegate(stmtp->fileline(), stmtClonep));
             // link the stmtp to the host function
             AstMemberSel* const dpiSelp = new AstMemberSel{
                 stmtp->fileline(), new AstVarRef{stmtp->fileline(), instVscp, VAccess::READ},

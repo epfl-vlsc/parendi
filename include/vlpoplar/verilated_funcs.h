@@ -2149,6 +2149,8 @@ VL_ATTR_ALWINLINE IData VL_VALUEPLUSARGSPROXY_IQ(int obits, IData en, QData val,
     if (got) out = VL_SET_QW(outp);
     return got;
 }
+
+#define VL_DELEGATE(stmtp)
 // =============================================================================
 // $readmem(h/b)
 // =============================================================================
@@ -2168,5 +2170,7 @@ VL_INLINE_OPT T& VL_VIEW(V& vec) {
     T& r = (*reinterpret_cast<T*>(vec.data()));
     return r;
 }
+
+
 
 #endif  // Guard

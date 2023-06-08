@@ -546,6 +546,14 @@ public:
         if (nodep->addNewline()) text += "\n";
         displayNode(nodep, nodep->fmtp()->scopeNamep(), text, nodep->fmtp()->exprsp(), false);
     }
+    void visit(AstDelegate* nodep) override {
+        UASSERT(v3Global.opt.poplar(), "Invalid node type " << nodep << endl);
+        puts("VL_DELEGATE(");
+        puts("{");
+        iterateChildren(nodep);
+        puts("}");
+        puts(");\n");
+    }
     void visit(AstDumpCtl* nodep) override {
         switch (nodep->ctlType()) {
         case VDumpCtlType::FILE:
@@ -1214,6 +1222,9 @@ public:
         puts(nodep->vrefp()->dtypep()->cType("", false, false));
         puts(">(");
         iterateChildren(nodep);
+        puts("/*");
+        puts(nodep->vrefp()->varp()->origName());
+        puts("*/");
         puts(")");
     }
     void visit(AstAddrOfCFunc* nodep) override {

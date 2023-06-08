@@ -290,9 +290,12 @@ private:
         // now go though all partitions and create a class and an instance of it
         std::vector<AstClass*> vtxClassesp;
         // AstTopScope* topScopep =
+        int index = 0;
         for (const auto& graphp : m_partitionsp) {
             UASSERT(graphp->verticesBeginp(), "Expected non-empty graph");
             AstClass* modp = makeClass(graphp);
+            if (dumpGraph() > 0) { graphp->dumpDotFilePrefixed("ordered_" + cvtToStr(index++)); }
+
             vtxClassesp.push_back(modp);
         }
 
@@ -990,7 +993,6 @@ private:
         } else {
             m_netlistp->addModulesp(m_topModp);
         }
-
     }
     void makeComputeSet(const std::vector<AstClass*> computeClassesp,
                         const std::string& funcName) {

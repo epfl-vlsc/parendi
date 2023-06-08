@@ -118,7 +118,7 @@ public:
     string dotShape() const override final { return "ellipse"; }
     virtual string nameSuffix() const = 0;
     string name() const override final {
-        return cvtToHex(m_vscp) + " " + nameSuffix() + "\\n " + m_vscp->name();
+        return cvtToHex(m_vscp) + " " + nameSuffix() + "\\n " + m_vscp->name() + "\\n";
     }
     // LCOV_EXCL_STOP
 };
@@ -165,6 +165,21 @@ public:
     // LCOV_EXCL_START // Debug code
     string nameSuffix() const override { return "COMMIT"; }
     string dotColor() const override { return "red"; }
+    // LCOV_EXCL_STOP
+};
+
+class ConstrPostVertex final : public ConstrVertex {
+public:
+    // CONSTRUCTOR
+    ConstrPostVertex(DepGraph* graphp, AstVarScope* vscp)
+        : ConstrVertex{graphp, vscp} {}
+    ~ConstrPostVertex() override = default;
+    ConstrPostVertex* clone(DepGraph* graphp) const override {
+        return new ConstrPostVertex{graphp, vscp()};
+    }
+    // LCOV_EXCL_START // Debug code
+    string nameSuffix() const override { return "POST"; }
+    string dotColor() const override { return "grey"; }
     // LCOV_EXCL_STOP
 };
 
