@@ -53,16 +53,19 @@ public:
 class AnyVertex VL_NOT_FINAL : public V3GraphVertex {
 private:
     AstSenTree* m_domainp = nullptr;
-
+    V3Hash m_hash;
 protected:
     // CONSTRUCTOR
     AnyVertex(DepGraph* graphp, AstSenTree* domainp)
         : V3GraphVertex{graphp}
-        , m_domainp{domainp} {}
+        , m_domainp{domainp}
+        , m_hash{} {}
     ~AnyVertex() override = default;
 
 public:
     // METHODS
+    V3Hash hash() const { return m_hash; }
+    void hash(const V3Hash h) { m_hash = h; }
     bool isClocked() const { return m_domainp != nullptr; }
     AstSenTree* domainp() const { return m_domainp; }
     void domainp(AstSenTree* domainp) {
@@ -209,5 +212,12 @@ public:
     static std::vector<std::unique_ptr<DepGraph>>
     splitIndependent(const std::unique_ptr<DepGraph>& graphp);
 };
+
 };  // namespace V3BspSched
+template <>
+struct std::hash<V3BspSched::AnyVertex*> {
+    std::size_t operator()(V3BspSched::AnyVertex* const vtxp) const noexcept {
+        return vtxp->hash().value();
+    }
+};
 #endif

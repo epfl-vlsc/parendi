@@ -21,6 +21,7 @@
 
 #include "V3AstUserAllocator.h"
 #include "V3File.h"
+#include "V3Hasher.h"
 #include "V3Stats.h"
 
 VL_DEFINE_DEBUG_FUNCTIONS;
@@ -338,7 +339,7 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         toVisit.pop();
         visited.push_back(headp);
         if (dynamic_cast<ConstrPostVertex* const>(headp)) {
-            continue; // do not follow
+            continue;  // do not follow
         }
         for (auto itp = headp->inBeginp(); itp; itp = itp->inNextp()) {
             AnyVertex* const fromp = static_cast<AnyVertex* const>(itp->fromp());
@@ -489,6 +490,24 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
     // always_ff @(posedge clock) $display("value of t is %d", t);
     // These nodes also should not and cannot be replicated.
 
+    // hash all the vertices, needed to have stable results between runs
+    V3Hasher nodeHasher;
+    for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+        V3Hash hash;
+        if (auto compp = dynamic_cast<CompVertex* const>(vtxp)) {
+            hash += "COMP";
+            hash += nodeHasher(compp->nodep());
+            if (compp->domainp()) { hash += nodeHasher(compp->domainp()); }
+            compp->hash(hash);
+        } else if (auto constrp = dynamic_cast<ConstrVertex* const>(vtxp)) {
+            hash += constrp->nameSuffix();
+            hash += nodeHasher(constrp->vscp());
+            constrp->hash(hash);
+        } else {
+            UASSERT(false, "invalid vertex type");
+        }
+    }
+
     DisjointSets<AnyVertex*> sets{};
     std::vector<ConstrCommitVertex*> allCommitsp;
     for (auto* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
@@ -499,21 +518,20 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
             if (VN_IS(compp->nodep(), Always)) {
                 bool hasNoDataDef = true;
                 for (V3GraphEdge* outp = compp->outBeginp(); outp; outp = outp->outNextp()) {
-                    UASSERT(!dynamic_cast<ConstrInitVertex*>(outp->top()), "INIT nodes not expected!");
-                    if (dynamic_cast<ConstrCommitVertex*>(outp->top()) || dynamic_cast<ConstrDefVertex*>(outp->top())) {
+                    UASSERT(!dynamic_cast<ConstrInitVertex*>(outp->top()),
+                            "INIT nodes not expected!");
+                    if (dynamic_cast<ConstrCommitVertex*>(outp->top())
+                        || dynamic_cast<ConstrDefVertex*>(outp->top())) {
                         hasNoDataDef = false;
                         break;
                     }
                 }
-                // this always block does not define anything (either sequential or combinationally)
-                // hence may contain DPI/PLI side-effects and can not be replicated.
-                // All successor of this node are in fact simple ConstrPostVertex nodes
+                // this always block does not define anything (either sequential or
+                // combinationally) hence may contain DPI/PLI side-effects and can not be
+                // replicated. All successor of this node are in fact simple ConstrPostVertex nodes
                 // that only enforce ordering.
-                if (hasNoDataDef) {
-                    sets.makeSet(compp);
-                }
+                if (hasNoDataDef) { sets.makeSet(compp); }
             }
-
         }
     }
 
