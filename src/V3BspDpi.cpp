@@ -824,7 +824,7 @@ void V3BspDpi::delegateAll(AstNetlist* nodep) {
     { BspDpiDelegateVisitor{nodep, m_newNames, records}; }
     V3Global::dumpCheckGlobalTree("bspDpiDelegate", 0, dumpTree() >= 1);
 
-    UINFO(3, "Creaging dpi condition" << endl);
+    UINFO(3, "Creating dpi condition" << endl);
     { BspDpiCondVisitor{nodep, records, m_newNames}; }
     V3Global::dumpCheckGlobalTree("bspDpiCond", 0, dumpTree() >= 1);
 }

@@ -496,18 +496,24 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
             sets.makeSet(commitp);
             allCommitsp.push_back(commitp);
         } else if (auto compp = dynamic_cast<CompVertex*>(vtxp)) {
-            if (compp
-                && (VN_IS(compp->nodep(), Always) && compp->outEmpty()
-                    /*
-                        An always block without a successor is certainly clocked and with
-                       side-effects. However, an always block with a successor is not necessary
-                       clocked, since the successor could be DEF node. Therefore we should
-                       consider them something that can be replicated, hence they are not
-                       added to the disjoint sets
-
-                    */)) {
-                sets.makeSet(compp);
+            if (VN_IS(compp->nodep(), Always)) {
+                bool hasNoDataDef = true;
+                for (V3GraphEdge* outp = compp->outBeginp(); outp; outp = outp->outNextp()) {
+                    UASSERT(!dynamic_cast<ConstrInitVertex*>(outp->top()), "INIT nodes not expected!");
+                    if (dynamic_cast<ConstrCommitVertex*>(outp->top()) || dynamic_cast<ConstrDefVertex*>(outp->top())) {
+                        hasNoDataDef = false;
+                        break;
+                    }
+                }
+                // this always block does not define anything (either sequential or combinationally)
+                // hence may contain DPI/PLI side-effects and can not be replicated.
+                // All successor of this node are in fact simple ConstrPostVertex nodes
+                // that only enforce ordering.
+                if (hasNoDataDef) {
+                    sets.makeSet(compp);
+                }
             }
+
         }
     }
 
