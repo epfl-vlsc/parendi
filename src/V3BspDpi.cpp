@@ -787,7 +787,6 @@ private:
             targetSelp->varp(dpiPartVscp->varp());
             targetSelp->dtypeFrom(dpiPartVscp->varp());
 
-            exchangeFuncp->addStmtsp(new AstAssign{flp, targetSelp, sourceSelp});
         }
         compFuncp->addStmtsp(new AstAssign{flp, new AstVarRef{flp, dpiCondVscp, VAccess::WRITE},
                                            new AstVarRef{flp, tmpVscp, VAccess::WRITE}});
