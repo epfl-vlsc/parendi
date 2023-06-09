@@ -90,7 +90,7 @@ class VPROGRAM;
 ///     on the host:
 ///         clear hasDpi; clear dpiVec
 ///         let simLoop be:
-///         IPU|    dpiBroadcast (broadcast zero)
+///         IPU|    dpiBroadcast 
 ///         IPU|    Execute(nba)
 ///         IPU|    while !hasDpi:
 ///         IPU|        (pre) dpiExchange

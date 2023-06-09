@@ -347,7 +347,7 @@ void VlPoplarContext::addCopy(const std::string& from, const std::string& to, ui
 #ifdef GRAPH_COMPILE
     poplar::Tensor fromTensor = getTensor(from);
     poplar::Tensor toTensor = getTensor(to);
-    poplar::program::Copy cp{fromTensor, toTensor, false, from + " ==> " + to};
+    poplar::program::Copy cp{fromTensor, toTensor, true, from + " ==> " + to};
     if (kind == "initialize") {
         initCopies.add(cp);
     } else if (kind == "exchange") {

@@ -524,10 +524,11 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
     std::vector<ConstrCommitVertex*> allCommitsp;
 
     auto isSinkComp = [](CompVertex* const compp) -> bool {
-        if (!VN_IS(compp->nodep(), Always)) { return false; }
+        if (!VN_IS(compp->nodep(), Always) || !compp->domainp()) { return false; }
         bool hasNoDataDef = true;
         for (V3GraphEdge* outp = compp->outBeginp(); outp; outp = outp->outNextp()) {
-            UASSERT(!dynamic_cast<ConstrInitVertex*>(outp->top()), "INIT node not expected!");
+            auto initp = dynamic_cast<ConstrInitVertex*>(outp->top());
+            UASSERT(!initp, "INIT node not expected!");
             if (dynamic_cast<ConstrCommitVertex*>(outp->top())
                 || dynamic_cast<ConstrDefVertex*>(outp->top())) {
                 hasNoDataDef = false;

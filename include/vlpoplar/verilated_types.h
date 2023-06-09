@@ -28,8 +28,8 @@
 #error "verilated_types.h should only be included by verilated.h"
 #endif
 
-#include <ipu_intrinsics>
 #include <array>
+#include <ipu_intrinsics>
 //===================================================================
 /// Verilog wide packed bit container.
 /// Similar to std::array<WData, N>, but lighter weight, only methods needed
@@ -160,7 +160,6 @@ public:
     // Set all elements to false
     void clear() { m_flags.fill(false); }
 
-
     bool at(size_t index) const { return m_flags.at(index); }
 
     // Return true iff at least one element is set
@@ -171,11 +170,31 @@ public:
     }
     bool empty() const { return !any(); }
 
+    void set(uint32_t index, bool value) { m_flags[index] = value; }
+};
 
-    void set(uint32_t index, bool value) {
-        m_flags[index] = value;
+struct VlIPUCycle {
+    volatile uint32_t l, u;
+    VlIPUCycle(){}
+    inline void time() {
+        u = -1;
+        while (__builtin_ipu_get_scount_u() < u) {
+            u = __builtin_ipu_get_scount_u();
+            l = __builtin_ipu_get_scount_l();
+        }
     }
+    inline uint64_t get() const { return static_cast<uint64_t>(l) | (static_cast<uint64_t>(u) << 32ull); }
 
 };
 
+struct VlIPUDuration {
+    VlIPUCycle m_start, m_end;
+    inline void start() {
+        m_start.time();
+    }
+    inline void end() {
+        m_end.time();
+    }
+    inline uint64_t get() { return m_end.get() - m_start.get(); }
+};
 #endif  // Guard
