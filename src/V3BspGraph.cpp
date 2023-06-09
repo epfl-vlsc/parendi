@@ -507,31 +507,46 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
             UASSERT(false, "invalid vertex type");
         }
     }
+    // STATE
+    // AstVarScope::user1p()  -> pointer to ConstrDefVertex
+    VNUser1InUse m_user1InUse;
+    for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+        if (auto defp = dynamic_cast<ConstrDefVertex*>(vtxp)) {
+            if (VN_IS(defp->vscp()->varp()->dtypep(), UnpackArrayDType)) {
+
+                UINFO(3, "visited unpack variable " << defp->vscp()->name() << endl);
+                defp->vscp()->user1u(VNUser{defp});
+            }
+        }
+    }
 
     DisjointSets<AnyVertex*> sets{};
     std::vector<ConstrCommitVertex*> allCommitsp;
+
+    auto isSinkComp = [](CompVertex* const compp) -> bool {
+        if (!VN_IS(compp->nodep(), Always)) { return false; }
+        bool hasNoDataDef = true;
+        for (V3GraphEdge* outp = compp->outBeginp(); outp; outp = outp->outNextp()) {
+            UASSERT(!dynamic_cast<ConstrInitVertex*>(outp->top()), "INIT node not expected!");
+            if (dynamic_cast<ConstrCommitVertex*>(outp->top())
+                || dynamic_cast<ConstrDefVertex*>(outp->top())) {
+                hasNoDataDef = false;
+                break;
+            }
+        }
+        // if condition is still true then:
+        // This always block does not define anything (either sequential or
+        // combinationally) hence may contain DPI/PLI side-effects and can not be
+        // replicated. All successor of this node are in fact simple ConstrPostVertex nodes
+        // that only enforce ordering.
+        return hasNoDataDef;
+    };
     for (auto* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
         if (auto commitp = dynamic_cast<ConstrCommitVertex*>(vtxp)) {
             sets.makeSet(commitp);
             allCommitsp.push_back(commitp);
         } else if (auto compp = dynamic_cast<CompVertex*>(vtxp)) {
-            if (VN_IS(compp->nodep(), Always)) {
-                bool hasNoDataDef = true;
-                for (V3GraphEdge* outp = compp->outBeginp(); outp; outp = outp->outNextp()) {
-                    UASSERT(!dynamic_cast<ConstrInitVertex*>(outp->top()),
-                            "INIT nodes not expected!");
-                    if (dynamic_cast<ConstrCommitVertex*>(outp->top())
-                        || dynamic_cast<ConstrDefVertex*>(outp->top())) {
-                        hasNoDataDef = false;
-                        break;
-                    }
-                }
-                // this always block does not define anything (either sequential or
-                // combinationally) hence may contain DPI/PLI side-effects and can not be
-                // replicated. All successor of this node are in fact simple ConstrPostVertex nodes
-                // that only enforce ordering.
-                if (hasNoDataDef) { sets.makeSet(compp); }
-            }
+            if (isSinkComp(compp)) { sets.makeSet(compp); }
         }
     }
 
@@ -556,12 +571,44 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
             }
         }
     };
-
+    // if a commit vertex has an underlying UnpackArrayDType, then we should also
+    // find any commit or compute sink node that is reachable from the the upack variable's
+    // ConstrDefNode
+    auto visitReachableFromCorrespondingDef
+        = [&sets, &isSinkComp, &graphp](ConstrCommitVertex* const commitp) {
+              if (!VN_IS(commitp->vscp()->varp()->dtypep(), UnpackArrayDType)) { return; }
+              auto defp = dynamic_cast<ConstrDefVertex*>(commitp->vscp()->user1u().toGraphVertex());
+              UASSERT_OBJ(defp, commitp->vscp(), "not all unpack variables are visited?" << commitp->vscp()->user1p() << endl);
+              graphp->userClearVertices();
+              std::queue<AnyVertex*> toVisit;
+              toVisit.push(defp);
+              defp->user(1);  // mark
+              while (!toVisit.empty()) {
+                  AnyVertex* const headp = toVisit.front();
+                  toVisit.pop();
+                  if (ConstrCommitVertex* const otherp
+                      = dynamic_cast<ConstrCommitVertex* const>(headp)) {
+                      sets.makeUnion(commitp, otherp);
+                  } else if (CompVertex* const compp = dynamic_cast<CompVertex* const>(headp)) {
+                      if (isSinkComp(compp)) { sets.makeUnion(commitp, compp); }
+                  }
+                  // follow forward
+                  for (V3GraphEdge* edgep = headp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+                      if (!edgep->top()->user()) {
+                          AnyVertex* const top = dynamic_cast<AnyVertex* const>(edgep->top());
+                          UASSERT(top, "invalid vertex type?");
+                          toVisit.push(top);
+                          top->user(1);
+                      }
+                  }
+              }
+          };
     for (ConstrCommitVertex* commitp : allCommitsp) {
 
         auto forward = GraphWay{GraphWay::FORWARD};
         visitNeighbors(commitp, forward);
         visitNeighbors(commitp, forward.invert());
+        visitReachableFromCorrespondingDef(commitp);
     }
 
     std::vector<std::vector<AnyVertex*>> disjointSinks;
