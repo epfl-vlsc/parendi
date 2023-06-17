@@ -356,11 +356,8 @@ static void process() {
         V3Active::activeAll(v3Global.rootp());
 
         // Split single ALWAYS blocks into multiple blocks for better ordering chances
-        if (v3Global.opt.fSplit()) {
-            for (int i = 0; i < 3; i++) {
-                V3Split::splitAlwaysAll(v3Global.rootp());
-            }
-        }
+        V3Split::splitAlwaysAll(v3Global.rootp());
+
         V3SplitAs::splitAsAll(v3Global.rootp());
 
         // Make more delayed assignment to enable more parallelization oppurtunities with BSP

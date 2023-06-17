@@ -885,18 +885,55 @@ protected:
         }
     }
 
+    void pruneDepsOnNba() {
+        // Remove all RV edges to variables that are followed by a SplitPostEdge
+        // this will increase the number of split blocks:
+        // always
+        //  s1: x1 <= x1 + 5;
+        //  s2: x2 <= x1 + x2;
+        //  s3: x3 <= x2 + 10;
+        // can become three independent always blocks due the NBA nature of assignments
+        // but note that
+        // always
+        //  s1: x1 <= x1 + 5;
+        //  s2: x2 = x1 + x2;
+        //  s3: x3 <= x2 + 10;
+        // should become two always blocks: {s1}, and {s2, s3}.
+        for (V3GraphVertex* vertexp = m_graph.verticesBeginp(); vertexp;
+                vertexp = vertexp->verticesNextp()) {
+            const SplitVarPostVertex* const postp = dynamic_cast<SplitVarPostVertex*>(vertexp);
+            if (!postp) continue;
+            UASSERT(postp->inSize1(), "expected a single predecessor in SplitVarPostVertex " << postp << endl);
+            // get back to the SplitVarStdVertex and setIgnore all incoming RV edges
+            const SplitVarStdVertex* const stdp = dynamic_cast<SplitVarStdVertex*>(postp->inBeginp()->fromp());
+            for (V3GraphEdge* edgep = stdp->inBeginp(); edgep; edgep = edgep->inNextp()) {
+                SplitRVEdge* const rvEdgep = dynamic_cast<SplitRVEdge*>(edgep);
+                UASSERT(rvEdgep, "expected SplitRVEdge " << edgep << endl);
+                rvEdgep->setIgnoreThisStep();
+            }
+        }
+    }
+    
     void colorAlwaysGraph() {
         // Color the graph to indicate subsets, each of which
         // we can split into its own always block.
         m_graph.removeRedundantEdges(&V3GraphEdge::followAlwaysTrue);
+
+        SplitEdge::incrementStep();
+        if (dumpGraph() >= 9) m_graph.dumpDotFilePrefixed("splitg_nodup", false);
 
         // Some vars are primary inputs to the always block; prune
         // edges on those vars. Reasoning: if two statements both depend
         // on primary input A, it's ok to split these statements. Whereas
         // if they both depend on locally-generated variable B, the statements
         // must be kept together.
-        SplitEdge::incrementStep();
         pruneDepsOnInputs();
+
+        // Vars that are LV of an AssignDly are also like inputs to the  block
+        // since the value produced internally or externally creates to RV dependency
+        // in the active clock cycle, i.e., their values are only visible after wards.
+        pruneDepsOnNba();
+        if (dumpGraph() >= 9) m_graph.dumpDotFilePrefixed("splitg_nonba", false);
 
         // For any 'if' node whose deps have all been pruned
         // (meaning, its conditional expression only looks at primary
@@ -940,7 +977,7 @@ protected:
             }
         }
 
-        if (dumpGraph() >= 9) m_graph.dumpDotFilePrefixed("splitg_nodup", false);
+
 
         // Weak coloring to determine what needs to remain grouped
         // in a single always. This follows all edges excluding:
