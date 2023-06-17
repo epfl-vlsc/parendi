@@ -419,6 +419,7 @@ private:
         UINFO(3,
               "Injecting reentry point in " << m_classp->name() << "::" << cfuncp->name() << endl);
         const DpiInfo info = m_records.getInfo(m_classp);
+        if (!cfuncp->stmtsp()) { return; }
         if (info.semantics == DPI_NONE) {
             // simple case, guard the whole function body with the reEntry variable
             AstIf* const guardp
