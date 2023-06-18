@@ -654,6 +654,7 @@ private:
                 // need to send it
                 UASSERT(!refInfo.sourcep().first, "multiple producers!");
                 refInfo.sourcep(std::make_pair(instVscp, varp));
+                refInfo.addTargetp({instVscp, varp});
                 varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_OUTPUT));
                 V3Stats::addStatSum("BspModules, output variable", 1);
             } else if (refInfo.isClocked() || refInfo.initp().first) {
@@ -938,8 +939,8 @@ private:
             //                 || refInfo.producer() /* consumed implies produced*/,
             //             vscp, "consumed but not produced!");
             for (const auto& pair : refInfo.targetsp()) {
-                if (refInfo.sourcep().first) {
-                    UASSERT(refInfo.sourcep() != pair, "Self message not allowed!");
+                if (refInfo.sourcep().first && refInfo.sourcep() != pair /*no need to send to self*/) {
+                    // UASSERT(refInfo.sourcep() != pair, "Self message not allowed!");
                     copyFuncp->addStmtsp(makeCopyOp(refInfo.sourcep(), pair));
                 }
                 if (refInfo.initp().first) {
@@ -1083,7 +1084,13 @@ private:
                 // we need to add it as a class level member, otherwise, it should
                 // be kept local to the function
 
-                if (oldVscp->user2() /*written by the initial*/ && refInfo.hasConsumer()) {
+                if (oldVscp->user2() /*written by the initial*/
+                    && (refInfo.hasConsumer() || refInfo.producer()
+                        /* even if the producer does not consumed the variable, we need to
+                        propagate the initialized value. Subword assignment is wrongly
+                        considered as only production, but is in fact a read-modify-write
+                        operations*/
+                        )) {
                     // note that checking user2 is only done to prevent promoting
                     // a variable that is consumed by the nba regions and only read
                     // here to the variable that is produced by the initial block and
