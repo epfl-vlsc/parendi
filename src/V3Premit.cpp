@@ -128,7 +128,8 @@ private:
         const bool useConstPool = constp  // Is a constant
                                   && (constp->width() >= STATIC_CONST_MIN_WIDTH)  // Large enough
                                   && !constp->num().isFourState()  // Not four state
-                                  && !constp->num().isString();  // Not a string
+                                  && !constp->num().isString()
+                                  && !v3Global.opt.poplar();  // Not a string
         if (useConstPool) {
             // Extract into constant pool.
             const bool merge = v3Global.opt.fMergeConstPool();

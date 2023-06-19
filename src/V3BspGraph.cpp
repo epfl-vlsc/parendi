@@ -575,41 +575,45 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
     // if a commit vertex has an underlying UnpackArrayDType, then we should also
     // find any commit or compute sink node that is reachable from the the unpack variable's
     // ConstrDefNode
-    auto visitReachableFromCorrespondingDef
-        = [&sets, &isSinkComp, &graphp](ConstrCommitVertex* const commitp) {
-              if (!VN_IS(commitp->vscp()->varp()->dtypep(), UnpackArrayDType)) { return; }
-              auto defp = dynamic_cast<ConstrDefVertex*>(commitp->vscp()->user1u().toGraphVertex());
-              UASSERT_OBJ(defp, commitp->vscp(), "not all unpack variables are visited?" << commitp->vscp()->user1p() << endl);
-              graphp->userClearVertices();
-              std::queue<AnyVertex*> toVisit;
-              toVisit.push(defp);
-              defp->user(1);  // mark
-              while (!toVisit.empty()) {
-                  AnyVertex* const headp = toVisit.front();
-                  toVisit.pop();
-                  if (ConstrCommitVertex* const otherp
-                      = dynamic_cast<ConstrCommitVertex* const>(headp)) {
-                      sets.makeUnion(commitp, otherp);
-                  } else if (CompVertex* const compp = dynamic_cast<CompVertex* const>(headp)) {
-                      if (isSinkComp(compp)) { sets.makeUnion(commitp, compp); }
-                  }
-                  // follow forward
-                  for (V3GraphEdge* edgep = headp->outBeginp(); edgep; edgep = edgep->outNextp()) {
-                      if (!edgep->top()->user()) {
-                          AnyVertex* const top = dynamic_cast<AnyVertex* const>(edgep->top());
-                          UASSERT(top, "invalid vertex type?");
-                          toVisit.push(top);
-                          top->user(1);
-                      }
-                  }
-              }
-          };
+    auto visitReachableFromCorrespondingDef = [&sets, &isSinkComp,
+                                               &graphp](ConstrCommitVertex* const commitp) {
+        AstUnpackArrayDType* const dtypep
+            = VN_CAST(commitp->vscp()->varp()->dtypep(), UnpackArrayDType);
+        if (!dtypep || dtypep->arrayUnpackedElements() * dtypep->widthWords() < 64) { return; }
+
+        auto defp = dynamic_cast<ConstrDefVertex*>(commitp->vscp()->user1u().toGraphVertex());
+        UASSERT_OBJ(defp, commitp->vscp(),
+                    "not all unpack variables are visited?" << commitp->vscp()->user1p() << endl);
+        graphp->userClearVertices();
+        std::queue<AnyVertex*> toVisit;
+        toVisit.push(defp);
+        defp->user(1);  // mark
+        while (!toVisit.empty()) {
+            AnyVertex* const headp = toVisit.front();
+            toVisit.pop();
+            if (ConstrCommitVertex* const otherp
+                = dynamic_cast<ConstrCommitVertex* const>(headp)) {
+                sets.makeUnion(commitp, otherp);
+            } else if (CompVertex* const compp = dynamic_cast<CompVertex* const>(headp)) {
+                if (isSinkComp(compp)) { sets.makeUnion(commitp, compp); }
+            }
+            // follow forward
+            for (V3GraphEdge* edgep = headp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+                if (!edgep->top()->user()) {
+                    AnyVertex* const top = dynamic_cast<AnyVertex* const>(edgep->top());
+                    UASSERT(top, "invalid vertex type?");
+                    toVisit.push(top);
+                    top->user(1);
+                }
+            }
+        }
+    };
     for (ConstrCommitVertex* commitp : allCommitsp) {
 
         auto forward = GraphWay{GraphWay::FORWARD};
         visitNeighbors(commitp, forward);
         visitNeighbors(commitp, forward.invert());
-        // visitReachableFromCorrespondingDef(commitp);
+        visitReachableFromCorrespondingDef(commitp);
     }
 
     std::vector<std::vector<AnyVertex*>> disjointSinks;

@@ -549,10 +549,15 @@ public:
     void visit(AstDelegate* nodep) override {
         UASSERT(v3Global.opt.poplar(), "Invalid node type " << nodep << endl);
         puts("VL_DELEGATE(");
-        puts("{");
-        iterateChildren(nodep);
-        puts("}");
-        puts(");\n");
+        puts(nodep->delegateName());
+        puts("(");
+        for (AstNode* exprp = nodep->argsp(); exprp; exprp = exprp->nextp()) {
+            iterate(exprp);
+            if (exprp->nextp()) {
+                puts(", ");
+            }
+        }
+        puts("));\n");
     }
     void visit(AstDumpCtl* nodep) override {
         switch (nodep->ctlType()) {

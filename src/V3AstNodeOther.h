@@ -2598,18 +2598,20 @@ public:
 class AstDelegate final : public AstNodeStmt {
     // Delegate the execution of statments to the host, effectively a non-op
     // Kept in the original place to prevent removal of used code
-    // @astgen op1 := stmtsp : List[AstNode] // statemens delegated
+    // @astgen op1 := argsp : List[AstNodeExpr] // statement delegated
+    const string m_delegateName;
 public:
-    AstDelegate(FileLine* fl, AstNode* stmtp)
-        : ASTGEN_SUPER_Delegate(fl) {
-            this->addStmtsp(stmtp);
+    AstDelegate(FileLine* fl, const string& delegateName, AstNodeExpr* argsp = nullptr)
+        : ASTGEN_SUPER_Delegate(fl)
+        , m_delegateName(delegateName) {
+            this->addArgsp(argsp);
         }
     ASTGEN_MEMBERS_AstDelegate;
 
     bool isGateOptimizable() const override { return false; }
     bool isGateDedupable() const override { return true; }
     bool same(const AstNode* /*samep*/) const override { return false; }
-
+    string delegateName() const { return m_delegateName; }
 };
 class AstDisable final : public AstNodeStmt {
     string m_name;  // Name of block

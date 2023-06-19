@@ -146,6 +146,7 @@ private:
     void visit(AstDisplay* nodep) override { append(DPI_BUFFERED); }
     void visit(AstFinish* nodep) override { append(DPI_BUFFERED); }
     void visit(AstStop* nodep) override { append(DPI_BUFFERED); }
+    void visit(AstNodeReadWriteMem* nodep) override { append(DPI_STRICT); }
     // void visit(AstNodeReadWriteMem* nodep) override { append(DPI_STRICT); }
     void visit(AstVarScope* vscp) {
         auto const dtypep = VN_CAST(vscp->dtypep(), ClassRefDType);
@@ -458,32 +459,46 @@ private:
             AstNodeStmt* const stmtp = dpiCallp.first;
             AstCCall* const callp = dpiCallp.second;
             UASSERT(stmtp, "expected statement");
-            AstNodeStmt* const stmtClonep = stmtp->cloneTree(false);
+
             UINFO(3, "Replacing call " << callp->name() << endl);
             bool needReEntry = true;
+            AstDelegate* delegatep = nullptr;
             if (stmtp && callp) {
                 // DPI call
                 UASSERT_OBJ(VN_IS(stmtp, StmtExpr), stmtp,
                             "Expected AstStmtExpr around DPI wrapper");
                 UASSERT_OBJ(VN_AS(stmtp, StmtExpr)->exprp() == callp, stmtp,
                             "Expected AstCCall child");
+                delegatep = new AstDelegate{stmtp->fileline(), callp->funcp()->name(),
+                                            callp->argsp()->cloneTree(true)};
                 delegateDpi(callp, stmtp);
             } else if (VN_IS(stmtp, Stop) || VN_IS(stmtp, Finish)) {
                 // delegateTermination(stmtp, dpiPoint, exitLabelp);
+                delegatep = new AstDelegate{stmtp->fileline(), stmtp->prettyTypeName()};
                 needReEntry = false;
             } else if (auto const dispp = VN_CAST(stmtp, Display)) {
+                delegatep = new AstDelegate{stmtp->fileline(),
+                                            "$display(\"" + dispp->fmtp()->text() + "\")",
+                                            dispp->fmtp()->exprsp()->cloneTree(true)};
                 delegateDisplay(dispp);
             } else if (auto const readWriteMemp = VN_CAST(stmtp, NodeReadWriteMem)) {
-                // error?
+                delegatep = new AstDelegate{stmtp->fileline(), readWriteMemp->prettyTypeName()};
+                delegatep->addArgsp(readWriteMemp->filenamep()->cloneTree(false));
+                delegatep->addArgsp(readWriteMemp->memp()->cloneTree(false));
+
                 delegateExpr(readWriteMemp, readWriteMemp->filenamep());
                 delegateExpr(readWriteMemp, readWriteMemp->memp());
+
                 if (readWriteMemp->lsbp()) {
+                    delegatep->addArgsp(readWriteMemp->lsbp()->cloneTree(false));
                     delegateExpr(readWriteMemp, readWriteMemp->lsbp());
                 }
                 if (readWriteMemp->lsbp()) {
+                    delegatep->addArgsp(readWriteMemp->msbp()->cloneTree(false));
                     delegateExpr(readWriteMemp, readWriteMemp->msbp());
                 }
             } else {
+                // error?
                 UASSERT_OBJ(false, stmtp,
                             "Can not handle delegation of node " << stmtp->prettyTypeName()
                                                                  << endl);
@@ -503,7 +518,7 @@ private:
             stmtp->replaceWith(dpiSetp);
             AstJumpGo* const goExitp = new AstJumpGo{stmtp->fileline(), exitLabelp};
             dpiSetp->addNextHere(goExitp);
-            dpiSetp->addHereThisAsNext(new AstDelegate(stmtp->fileline(), stmtClonep));
+            dpiSetp->addHereThisAsNext(delegatep);
             // link the stmtp to the host function
             AstMemberSel* const dpiSelp = new AstMemberSel{
                 stmtp->fileline(), new AstVarRef{stmtp->fileline(), instVscp, VAccess::READ},
