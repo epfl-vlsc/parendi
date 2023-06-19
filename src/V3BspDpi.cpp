@@ -343,9 +343,7 @@ private:
         }
     }
 
-    AstNodeExpr* delegateArg(AstNodeStmt* const stmtp, AstNodeExpr* argp) {
-
-        AstNodeExpr* const nextArgp = VN_AS(argp->nextp(), NodeExpr);
+    void delegateExpr(AstNodeStmt* const stmtp, AstNodeExpr* argp) {
         AstVarRef* const argVRefp = VN_CAST(argp, VarRef);
         AstVarScope* const instVscp = m_records.getInst(m_classp);
         UASSERT_OBJ(instVscp, m_classp, "expected instance");
@@ -396,6 +394,10 @@ private:
             UASSERT_OBJ(VN_IS(argp, Const), argp,
                         "expected to be Const but got " << argp->prettyTypeName() << endl);
         }
+    }
+    AstNodeExpr* delegateArg(AstNodeStmt* const stmtp, AstNodeExpr* argp) {
+        AstNodeExpr* const nextArgp = VN_AS(argp->nextp(), NodeExpr);
+        delegateExpr(stmtp, argp);
         return nextArgp;
     }
 
@@ -471,9 +473,20 @@ private:
                 needReEntry = false;
             } else if (auto const dispp = VN_CAST(stmtp, Display)) {
                 delegateDisplay(dispp);
-            } else {
+            } else if (auto const readWriteMemp = VN_CAST(stmtp, NodeReadWriteMem)) {
                 // error?
-                UASSERT_OBJ(false, stmtp, "Can not handle delegation");
+                delegateExpr(readWriteMemp, readWriteMemp->filenamep());
+                delegateExpr(readWriteMemp, readWriteMemp->memp());
+                if (readWriteMemp->lsbp()) {
+                    delegateExpr(readWriteMemp, readWriteMemp->lsbp());
+                }
+                if (readWriteMemp->lsbp()) {
+                    delegateExpr(readWriteMemp, readWriteMemp->msbp());
+                }
+            } else {
+                UASSERT_OBJ(false, stmtp,
+                            "Can not handle delegation of node " << stmtp->prettyTypeName()
+                                                                 << endl);
             }
             V3Number dpiPoint{stmtp->fileline(), m_dpiKit.dpiPoint->width(), 0};
             // dpiPoint is bit vector whose LSB signifies that there is a DPI
@@ -592,6 +605,9 @@ private:
     void visit(AstFinish* finishp) override { m_dpiKit.callsp.emplace_back(finishp, nullptr); }
     void visit(AstStop* stopp) override { m_dpiKit.callsp.emplace_back(stopp, nullptr); }
 
+    void visit(AstReadMemProxy* memp) override {
+        // skip
+    }
     void visit(AstNodeReadWriteMem* rwMemp) override {
         m_dpiKit.callsp.emplace_back(rwMemp, nullptr);
     }
@@ -787,7 +803,6 @@ private:
                                    VFlagChildDType{}, dpiPartVscp->varp()->name()};
             targetSelp->varp(dpiPartVscp->varp());
             targetSelp->dtypeFrom(dpiPartVscp->varp());
-
         }
         compFuncp->addStmtsp(new AstAssign{flp, new AstVarRef{flp, dpiCondVscp, VAccess::WRITE},
                                            new AstVarRef{flp, tmpVscp, VAccess::WRITE}});

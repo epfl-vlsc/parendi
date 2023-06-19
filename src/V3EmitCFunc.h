@@ -696,7 +696,15 @@ public:
         puts(cvtToStr(nodep->memp()->dtypep()->subDTypep()->widthMin()));
         uint32_t array_lo = 0;
         {
-            const AstVarRef* const varrefp = VN_CAST(nodep->memp(), VarRef);
+
+
+            const AstVarRef* const varrefp = [](AstNodeExpr* memp) {
+                if (auto viewp = VN_CAST(memp, VarRefView))
+                    return viewp->vrefp(); // should be under AstDelegate, need to check?
+                else
+                    return VN_CAST(memp, VarRef);
+            }(nodep->memp());
+
             if (!varrefp) {
                 nodep->v3error(nodep->verilogKwd() << " loading non-variable");
             } else if (VN_IS(varrefp->varp()->dtypeSkipRefp(), AssocArrayDType)) {

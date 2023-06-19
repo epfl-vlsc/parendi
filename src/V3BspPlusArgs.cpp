@@ -117,39 +117,6 @@ private:
         nodep->replaceWith(proxyp);
     }
 
-    void visit(AstReadMem* nodep) {
-        UINFO(3, "replacing " << nodep << endl);
-        if (nodep->lsbp() || nodep->msbp()) {
-            nodep->v3warn(E_UNSUPPORTED, "can not have start and end address");
-        }
-        // $read/writememh/b(filename, memvar, start, end);
-        // becomes
-        // ## IPU : for (i = start to end) memvar[i] = hostMemVar[i - start];
-        // ## HOST: $read/writememh/b(filename, hostMemVar, start, end);
-        //          copyToDevice(hostMemVar);
-
-        // note that this transformation may introduce false warnings in case
-        // the file does not exist and is never also read. It also breaks if
-        // the memory is too large, since we now need to keep two copies of the
-        // same array on the same vertex
-        FileLine* flp = nodep->fileline();
-        AstVar* varp
-            = new AstVar{flp, VVarType::MEMBER, m_varNames.get("rmrepl"), nodep->memp()->dtypep()};
-        varp->bspFlag(
-            VBspFlag{}.append(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_HOSTWRITE));
-        AstVarScope* vscp = new AstVarScope{flp, m_scopep, varp};
-        m_classp->stmtsp()->addHereThisAsNext(varp);
-        m_scopep->addVarsp(vscp);
-        // replace the current node with
-        AstReadMemProxy* proxyp
-            = new AstReadMemProxy{nodep->fileline(), nodep->isHex(),
-                                  new AstVarRef{flp, vscp, VAccess::READ} /*filenamep, abused?*/,
-                                  nodep->memp()->cloneTree(false)};
-        m_rmems.emplace_back(nodep, varp, m_instp);
-
-        proxyp->dtypep(nodep->dtypep());
-        nodep->replaceWith(proxyp);
-    }
     void visit(AstNode* nodep) { iterateChildren(nodep); }
 
 public:

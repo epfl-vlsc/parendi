@@ -11,14 +11,14 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
-// #include <boost/filesystem.hpp>
-// #include <boost/program_options.hpp>
+
+#define VL_NUM_IPUS 1
 
 void VlPoplarContext::init(int argc, char* argv[]) {
 
     cfg = parseArgs(argc, argv);
     auto manager = poplar::DeviceManager::createDeviceManager();
-    auto devices = manager.getDevices();
+    auto devices = manager.getDevices(poplar::TargetType::IPU, VL_NUM_IPUS);
     // get the first available device
     auto devIt = std::find_if(devices.begin(), devices.end(),
                               [](poplar::Device& dev) { return dev.attach(); });
@@ -185,7 +185,7 @@ void VlPoplarContext::runReEntrant() {
         engine->run(E_INIT);
         vprog->hostHandle();
         interrupt = getHostData("interrupt", uint32_t{});
-    } while (interrupt);
+    } while (interrupt && !Verilated::gotFinish());
     engine->run(E_INITCOPY);
 
     // starting the main simulation loop
