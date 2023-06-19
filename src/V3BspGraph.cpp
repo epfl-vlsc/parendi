@@ -573,7 +573,7 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
         }
     };
     // if a commit vertex has an underlying UnpackArrayDType, then we should also
-    // find any commit or compute sink node that is reachable from the the upack variable's
+    // find any commit or compute sink node that is reachable from the the unpack variable's
     // ConstrDefNode
     auto visitReachableFromCorrespondingDef
         = [&sets, &isSinkComp, &graphp](ConstrCommitVertex* const commitp) {
@@ -609,7 +609,7 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
         auto forward = GraphWay{GraphWay::FORWARD};
         visitNeighbors(commitp, forward);
         visitNeighbors(commitp, forward.invert());
-        visitReachableFromCorrespondingDef(commitp);
+        // visitReachableFromCorrespondingDef(commitp);
     }
 
     std::vector<std::vector<AnyVertex*>> disjointSinks;
