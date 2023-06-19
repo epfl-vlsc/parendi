@@ -384,10 +384,12 @@ void EmitCFunc::displayNode(AstNode* nodep, AstScopeName* scopenamep, const stri
                 const string suffix = scopenamep->scopePrettySymName();
                 if (suffix == "") {
                     m_emitDispState.pushFormat("%S");
-                } else {
+                } else if (!v3Global.opt.poplar()) {
                     m_emitDispState.pushFormat("%N");  // Add a . when needed
                 }
-                m_emitDispState.pushArg(' ', nullptr, "vlSymsp->name()");
+                if (!v3Global.opt.poplar()) {
+                    m_emitDispState.pushArg(' ', nullptr, "vlSymsp->name()");
+                }
                 m_emitDispState.pushFormat(suffix);
                 break;
             }
