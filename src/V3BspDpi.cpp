@@ -477,9 +477,9 @@ private:
                 delegatep = new AstDelegate{stmtp->fileline(), stmtp->prettyTypeName()};
                 needReEntry = false;
             } else if (auto const dispp = VN_CAST(stmtp, Display)) {
-                delegatep = new AstDelegate{stmtp->fileline(),
-                                            "$display(\"" + dispp->fmtp()->text() + "\")",
-                                            dispp->fmtp()->exprsp()->cloneTree(true)};
+                delegatep = new AstDelegate{
+                    stmtp->fileline(), "$display(\"" + dispp->fmtp()->text() + "\")",
+                    dispp->fmtp()->exprsp() ? dispp->fmtp()->exprsp()->cloneTree(true) : nullptr};
                 delegateDisplay(dispp);
             } else if (auto const readWriteMemp = VN_CAST(stmtp, NodeReadWriteMem)) {
                 delegatep = new AstDelegate{stmtp->fileline(), readWriteMemp->prettyTypeName()};
