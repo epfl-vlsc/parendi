@@ -124,16 +124,7 @@ private:
         }
     }
     // VISITORS
-    AstVectorDType* vectorTypep(AstNodeDType* fromp) {
 
-        uint32_t size = calcSize(fromp);
-        UINFO(8, "compute size of " << fromp << " is " << size << endl);
-        AstVectorDType* dtp
-            = new AstVectorDType(fromp->fileline(), size,
-                                 VN_AS(m_netlistp->typeTablep()->findUInt32DType(), BasicDType));
-        m_netlistp->typeTablep()->addTypesp(dtp);
-        return dtp;
-    }
     void visit(AstVarRef* vrefp) override {
 
         if (!m_classp) { return; }
@@ -273,7 +264,17 @@ private:
         }
         return callp;
     };
-
+    uint32_t getVectorSize(AstNodeDType* const dtypep) {
+        const AstBasicDType* const basicp = VN_CAST(dtypep->skipRefp(), BasicDType);
+        if (basicp && basicp->isTriggerVec()) {
+            // trigger vec is internally considered a bit vector, but the implementation
+            // uses a std::array<uint32_t, WIDTH>, hence we need to allocate not just one
+            // word, but WIDTH words!
+            return basicp->width();
+        } else {
+            return dtypep->widthWords() * dtypep->arrayUnpackedElements();
+        }
+    }
     AstCFunc* createVertexCons(AstClass* classp, uint32_t tileId) {
         FileLine* fl = classp->fileline();
         AstCFunc* ctorp = new AstCFunc{classp->fileline(), "ctor_" + classp->name(),
@@ -321,9 +322,9 @@ private:
             std::string tensorDeviceHandle = className + "." + varp->nameProtect();
             m_handles(varp).tensor
                 = tensorDeviceHandle;  // need this to be able to later look up the tensor
-            AstNodeDType* const dtp = varp->dtypep();
-            const uint32_t vectorSize
-                = dtp->skipRefp()->widthWords() * dtp->arrayUnpackedElements();
+
+            const uint32_t vectorSize = getVectorSize(varp->dtypep());
+
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
                 mkCall(fl, "addTensor",
@@ -392,7 +393,8 @@ private:
             };
             auto tileIdFrom = getTileId(assignp->rhsp());
             auto tileIdTo = getTileId(assignp->lhsp());
-            const auto totalWords = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
+            const auto totalWords
+                = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
             // auto totalWords = VN_AS(top->dtypep(), VectorDType)->size();
 
             if (tileIdFrom == tileIdTo) {

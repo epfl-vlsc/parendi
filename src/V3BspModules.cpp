@@ -279,8 +279,8 @@ private:
         }
         m_triggering.trigDTypep
             = new AstBasicDType{fl, VBasicDTypeKwd::TRIGGERVEC, VSigning::UNSIGNED,
-                                static_cast<int>(m_triggering.clockersp.size() * 32),
-                                static_cast<int>(m_triggering.clockersp.size() * 32)};
+                                static_cast<int>(m_triggering.clockersp.size()),
+                                static_cast<int>(m_triggering.clockersp.size())};
         m_netlistp->typeTablep()->addTypesp(m_triggering.trigDTypep);
     }
 
