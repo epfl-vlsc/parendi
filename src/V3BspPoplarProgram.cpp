@@ -22,6 +22,7 @@
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3BspDpi.h"
+#include "V3BspIpuProfile.h"
 #include "V3BspModules.h"
 #include "V3BspPlusArgs.h"
 #include "V3EmitCBase.h"
@@ -490,6 +491,10 @@ private:
         for (AstCFunc* nodep : reachablep) { patchHostFuncCall(nodep); }
     }
 
+    void pathProfileTace() {
+        patchHostFuncCall(getFunc(m_netlistp->topModulep(), "profileTrace"));
+        patchHostFuncCall(getFunc(m_netlistp->topModulep(), "profileInit"));
+    }
     void patchHostFuncCall(AstCFunc* cfuncp);
 
     // create a vertex that ORs all the needInteraction signals. Ideally this
@@ -556,6 +561,7 @@ public:
             }
         });
         patchHostHandle();
+        pathProfileTace();
         // remove the computeSet funciton, not used
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
         getFunc(m_netlistp->topModulep(), "initComputeSet")->unlinkFrBack()->deleteTree();
@@ -610,11 +616,8 @@ private:
             // (since things become easier here!)
             AstCMethodHard* const hostDatap = m_parent.mkCall(
                 memselp->fileline(),
-                "getHostData", /*getHostData is a templated function, we use a empty
-                                  constant to help the C++ compiler infer the type*/
-                {new AstConst{memselp->fileline(), AstConst::String{}, handle},
-                 new AstConst{memselp->fileline(), AstConst::DTyped{},
-                              memselp->dtypep()} /*used to resolve template types*/},
+                "getHostData<" + memselp->dtypep()->cType("", false, false) + ">",
+                {new AstConst{memselp->fileline(), AstConst::String{}, handle}},
                 memselp->dtypep());
 
             m_stmtp->addHereThisAsNext(
@@ -676,12 +679,11 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
 
     V3BspPlusArgs::makeCache(nodep);
 
-    V3Global::dumpCheckGlobalTree("bspPlusArg", 0, dumpTree() >= 1);
-    // { PoplarHostInteractionVisitor{nodep}; }  // destroy before checking
-    // V3Global::dumpCheckGlobalTree("bspPoplarHost", 0, dumpTree() >= 1);
-
     // delegate all dpi calls to the host
     V3BspDpi::delegateAll(nodep);
+
+    // optionally instrument the top compute function
+    V3BspIpuProfile::instrument(nodep);
 
     { PoplarLegalizeFieldNamesVisitor{nodep}; }
     V3Global::dumpCheckGlobalTree("bspLegal", 0, dumpTree() >= 1);

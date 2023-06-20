@@ -35,7 +35,7 @@ void V3BspStraggler::report() {
         if (!classp->flag().isBsp()) { return; }
         classp->foreach([&estimatedCost, classp](AstCFunc* cfuncp) {
             if (cfuncp->name() == "compute") {
-                uint32_t count = V3InstrCount::count(cfuncp, false);
+                uint32_t count = V3InstrCount::count(cfuncp, true);
                 estimatedCost.emplace_back(classp, count);
             }
         });

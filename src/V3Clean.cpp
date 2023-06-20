@@ -71,6 +71,9 @@ private:
         nodep->user2(true);  // Don't resize it again
         // triggers don't need to be changed
         if (nodep->dtypep()->basicp() && nodep->dtypep()->basicp()->isTriggerVec()) return;
+        if (nodep->dtypep()->basicp() && nodep->dtypep()->basicp()->isIpuProfileTrace()) return;
+        if (nodep->dtypep()->basicp() && nodep->dtypep()->basicp()->isIpuProfileVec()) return;
+
         AstNodeDType* const old_dtypep = nodep->dtypep();
         const int width = cppWidth(nodep);  // widthMin is unchanged
         if (old_dtypep->width() != width) {

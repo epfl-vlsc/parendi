@@ -756,6 +756,12 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const {
             info.m_type = "VlPoplarContext&";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::POPLAR_VERTEXREF) {
             info.m_type = "::poplar::VertexRef";
+        } else if (bdtypep->keyword() == VBasicDTypeKwd::IPU_CYCLE) {
+            info.m_type = "VlIpuCycle";
+        } else if (bdtypep->keyword() == VBasicDTypeKwd::IPU_PROFILE_TRACE) {
+            info.m_type = "VlIpuProfileTrace<" + cvtToStr(dtypep->width() / VL_EDATASIZE) + ">";
+        } else if (bdtypep->keyword() == VBasicDTypeKwd::IPU_PROFILE_TRACE_VEC) {
+            info.m_type = "VlIpuProfileTraceVec";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::CHARPTR) {
             info.m_type = "const char*";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::SCOPEPTR) {

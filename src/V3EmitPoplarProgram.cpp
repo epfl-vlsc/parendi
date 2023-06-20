@@ -299,7 +299,7 @@ public:
         ofp->puts("ifneq ($(INSTRUMENT), 0)\n");
         ofp->puts("HOST_FLAGS += -DPOPLAR_INSTRUMENT\n");
         ofp->puts("endif\n\n");
-        ofp->puts("GRAPH_COMPLE_FLAGS = -DGRAPH_COMPILE\n");
+        ofp->puts("GRAPH_COMPILE_FLAGS = -DGRAPH_COMPILE\n");
         ofp->puts("GRAPH_RUN_FLAGS = -DGRAPH_RUN\n");
         ofp->puts("GRAPH_BINARY_DEP = " + graphFile + "\n");
         ofp->puts("PRECOMPILE ?= 1\n");

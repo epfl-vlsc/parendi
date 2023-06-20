@@ -309,6 +309,7 @@ private:
     int         m_threads = 1;      // main switch: --threads
     int         m_tiles = 1472;     // main poplar switch: --tiles
     int         m_workers = 6;      // main poplar switch: --workers
+    int         m_ipu_profile = 0;    // main poplar switch: --ipu-profile
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
     VTimescale  m_timeDefaultUnit;  // main switch: --timescale
@@ -533,6 +534,7 @@ public:
     bool mtasks() const { return (m_threads > 1); }
     int tiles() const VL_MT_SAFE { return m_tiles; }
     int workers() const VL_MT_SAFE { return m_workers; }
+    int ipuProfile() const VL_MT_SAFE { return m_ipu_profile; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }
     VTimescale timeOverridePrec() const { return m_timeOverridePrec; }

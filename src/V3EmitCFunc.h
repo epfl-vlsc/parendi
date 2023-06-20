@@ -359,7 +359,9 @@ public:
             // Wide functions assign into the array directly, don't need separate assign statement
             m_wideTempRefp = VN_AS(nodep->lhsp(), VarRef);
             paren = false;
-        } else if (nodep->isWide() && !VN_IS(nodep->dtypep()->skipRefp(), UnpackArrayDType)) {
+        } else if (nodep->isWide() &&
+            !VN_IS(nodep->dtypep()->skipRefp(), UnpackArrayDType) &&
+            !(nodep->dtypep()->basicp() && nodep->dtypep()->basicp()->isIpuProfileTrace())) {
             putbs("VL_ASSIGN_W(");
             puts(cvtToStr(nodep->widthMin()) + ",");
             iterateAndNextNull(nodep->lhsp());

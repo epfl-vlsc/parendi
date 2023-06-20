@@ -30,6 +30,11 @@
 
 #include <array>
 #include <ipu_intrinsics>
+
+// extra types
+#include "vlpoplar/verilated_ipu_types.h"
+
+
 //===================================================================
 /// Verilog wide packed bit container.
 /// Similar to std::array<WData, N>, but lighter weight, only methods needed
@@ -173,39 +178,7 @@ public:
     void set(uint32_t index, bool value) { m_flags[index] = value; }
 };
 
-struct VlIpuCycle {
-    volatile uint32_t l, u;
-    VlIpuCycle() {}
-    inline void time() {
-        u = -1;
-        while (__builtin_ipu_get_scount_u() < u) {
-            u = __builtin_ipu_get_scount_u();
-            l = __builtin_ipu_get_scount_l();
-        }
-    }
-    inline uint64_t get() const {
-        return static_cast<uint64_t>(l) | (static_cast<uint64_t>(u) << 32ull);
-    }
-};
 
-template <int SIZE>
-struct VlIpuProfileTrace {
-    static_assert(sizeof(VlIpuProfileTrace<SIZE>)
-                      == SIZE * sizeof(uint32_t) + 4 * sizeof(uint32_t),
-                  "invalid size");
-    std::array<uint32_t, SIZE> m_elapsed;
-    uint64_t m_total = 0;
-    uint32_t m_count = 0;
-    uint32_t m_head = 0;
 
-    void push(uint32_t d) {
-        m_total += static_cast<uint64_t>(d);
-        m_count += 1;
-        m_elapsed[m_head] = d;
-        if (m_head == SIZE - 1)
-            m_head = 0;
-        else
-            m_head = m_head + 1;
-    }
-};
+
 #endif  // Guard

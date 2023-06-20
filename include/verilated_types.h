@@ -72,6 +72,10 @@ extern std::string VL_TO_STRING_W(int words, const WDataInP obj);
 #define VL_OUT64(name, msb, lsb) QData name  ///< Declare output signal, 33-64bits
 #define VL_OUT(name, msb, lsb) IData name  ///< Declare output signal, 17-32 bits
 #define VL_OUTW(name, msb, lsb, words) VlWide<words> name  ///< Declare output signal, 65+ bits
+//========================================================================
+// IPU specific
+
+#include "vlpoplar/verilated_ipu_types.h"
 
 //===================================================================
 // Activity trigger vector

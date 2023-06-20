@@ -48,6 +48,7 @@ set(HEADERS
     V3BspDpi.h
     V3BspDly.h
     V3BspGraph.h
+    V3BspIpuProfile.h
     V3BspModules.h
     V3BspPlusArgs.h
     V3BspPoplarProgram.h
@@ -196,6 +197,7 @@ set(COMMON_SOURCES
     V3BspDpi.cpp
     V3BspDly.cpp
     V3BspGraph.cpp
+    V3BspIpuProfile.cpp
     V3BspModules.cpp
     V3BspPlusArgs.cpp
     V3BspPoplarProgram.cpp

@@ -2031,6 +2031,12 @@ static inline WDataOutP VL_COND_WIWW(int obits, WDataOutP owp, int cond, WDataIn
     return o
 
 // clang-format off
+template<int ALLOC_SIZE>
+static inline VlIpuProfileTrace<ALLOC_SIZE>& VL_CONST_W_1X(int obits,
+        VlIpuProfileTrace<ALLOC_SIZE>& o, EData d0) VL_MT_SAFE {
+    VL_CONST_W_1X(obits, o, d0);
+    return o;
+};
 static inline WDataOutP VL_CONST_W_1X(int obits, WDataOutP o, EData d0) VL_MT_SAFE {
     o[0] = d0;
     VL_C_END_(obits, 1);

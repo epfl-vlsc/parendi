@@ -153,7 +153,7 @@ private:
         }
         return it->second;
     }
-
+    void dumpCycleTrace(std::ostream& os);
 public:
     void init(int argc, char* argv[]);
     void build();
@@ -189,7 +189,7 @@ public:
     poplar::Tensor addTensor(uint32_t size, const std::string& name);
 
     template <typename T>
-    inline T getHostData(const std::string& handle, const T& /*unused*/) {
+    inline T getHostData(const std::string& handle) {
         static_assert(std::is_trivially_copy_assignable<T>());
         static_assert(std::is_trivially_copy_constructible<T>());
         // find the host buffer

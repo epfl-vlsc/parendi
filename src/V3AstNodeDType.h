@@ -439,6 +439,8 @@ public:
     bool isDouble() const VL_MT_SAFE { return keyword().isDouble(); }
     bool isEvent() const VL_MT_SAFE { return keyword() == VBasicDTypeKwd::EVENT; }
     bool isTriggerVec() const VL_MT_SAFE { return keyword() == VBasicDTypeKwd::TRIGGERVEC; }
+    bool isIpuProfileVec() const VL_MT_SAFE { return keyword() == VBasicDTypeKwd::IPU_PROFILE_TRACE_VEC; }
+    bool isIpuProfileTrace() const VL_MT_SAFE { return keyword() == VBasicDTypeKwd::IPU_PROFILE_TRACE; }
     bool isForkSync() const VL_MT_SAFE { return keyword() == VBasicDTypeKwd::FORK_SYNC; }
     bool isDelayScheduler() const VL_MT_SAFE {
         return keyword() == VBasicDTypeKwd::DELAY_SCHEDULER;
