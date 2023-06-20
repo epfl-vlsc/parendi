@@ -34,10 +34,18 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     initializer = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("initializer"));
     condeval = std::make_unique<poplar::ComputeSet>(graph->addComputeSet("condeval"));
 #ifdef GRAPH_COMPILE
+#ifdef GRAPH_RUN
+    std::ifstream fs{OBJ_DIR "/" CODELET_LIST /*defined by the Makefile*/, std::ios::in};
+#else
     std::ifstream fs{CODELET_LIST /*defined by the Makefile*/, std::ios::in};
+#endif
     for (std::string ln; std::getline(fs, ln);) {
         std::cout << "adding codelet " << ln << std::endl;
+#ifdef GRAPH_RUN
+        graph->addCodelets(std::string{OBJ_DIR "/"} + ln);
+#else
         graph->addCodelets(ln);
+#endif
     }
 #endif
     // std::cout << "initializing simulation context " << std::endl;
@@ -120,21 +128,30 @@ void VlPoplarContext::buildReEntrant() {
     OptionFlags flags{};
 #ifdef POPLAR_INSTRUMENT
     {
+#ifdef GRAPH_RUN
+        std::ifstream ifs(OBJ_DIR "/" ROOT_NAME "_engine_options.json", std::ios::in);
+#else
         std::ifstream ifs(ROOT_NAME "_compile_options.json", std::ios::in);
-        readJSON(ifs, flags);
+#endif
+        poplar::readJSON(ifs, flags);
         ifs.close();
+        std::cout << flags << std::endl;
     }
 #endif
     float lastProg = 0.0;
-    auto exec = compileGraph(*graph, programs, flags, [&lastProg](int step, int total) {
-        float newProg = static_cast<float>(step) / static_cast<float>(total) * 100.0;
-        if (newProg - lastProg >= 10.0f) {
-            std::cout << "Graph compilation: " << static_cast<int>(newProg) << "%" << std::endl;
-            lastProg = newProg;
-        }
-    });
+    exec = std::make_unique<Executable>(
+        compileGraph(*graph, programs, flags, [&lastProg](int step, int total) {
+            float newProg = static_cast<float>(step) / static_cast<float>(total) * 100.0;
+            if (newProg - lastProg >= 10.0f) {
+                std::cout << "Graph compilation: " << static_cast<int>(newProg) << "%"
+                          << std::endl;
+                lastProg = newProg;
+            }
+        }));
+#ifndef GRAPH_RUN
     std::ofstream execOut(ROOT_NAME ".graph.bin", std::ios::binary);
-    exec.serialize(execOut);
+    exec->serialize(execOut);
+#endif
 }
 
 void VlPoplarContext::runReEntrant() {
@@ -155,9 +172,11 @@ void VlPoplarContext::runReEntrant() {
     // build the engined and copy cached values of arguments and files to the device
     measure(
         [this]() {
+#ifndef GRAPH_COMPILE
             std::ifstream graphIn(OBJ_DIR "/" ROOT_NAME ".graph.bin", std::ios::binary);
-            auto exec = poplar::Executable::deserialize(graphIn);
+            exec = std::make_unique<poplar::Executable>(poplar::Executable::deserialize(graphIn));
             graphIn.close();
+#endif
             poplar::OptionFlags flags{};
 #ifdef POPLAR_INSTRUMENT
             {
@@ -167,7 +186,7 @@ void VlPoplarContext::runReEntrant() {
                 std::cout << flags << std::endl;
             }
 #endif
-            engine = std::make_unique<poplar::Engine>(exec, flags);
+            engine = std::make_unique<poplar::Engine>(*exec, flags);
             engine->load(*device);
             vprog->plusArgs();
             vprog->plusArgsCopy();
@@ -489,7 +508,8 @@ RuntimeConfig parseArgs(int argc, char* argv[]) {
         std::exit(-1);
     }
     opts::notify(vm);
-#else
+#endif
+#ifdef GRAPH_RUN
     // for +args
     Verilated::commandArgs(argc, argv);
 #endif
@@ -501,7 +521,8 @@ int main(int argc, char* argv[]) {
     ctx.init(argc, argv);
 #ifdef GRAPH_COMPILE
     ctx.buildReEntrant();
-#else
+#endif
+#ifdef GRAPH_RUN
     ctx.runReEntrant();
 #endif
     return EXIT_SUCCESS;

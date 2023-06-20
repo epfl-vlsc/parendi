@@ -90,7 +90,7 @@ class VPROGRAM;
 ///     on the host:
 ///         clear hasDpi; clear dpiVec
 ///         let simLoop be:
-///         IPU|    dpiBroadcast 
+///         IPU|    dpiBroadcast
 ///         IPU|    Execute(nba)
 ///         IPU|    while !hasDpi:
 ///         IPU|        (pre) dpiExchange
@@ -127,6 +127,7 @@ private:
     std::unique_ptr<poplar::Device> device;
     std::unique_ptr<poplar::Graph> graph;
     std::unique_ptr<poplar::Engine> engine;
+    std::unique_ptr<poplar::Executable> exec;
     std::unique_ptr<poplar::ComputeSet> workload;
     std::unique_ptr<poplar::ComputeSet> condeval;
     std::unique_ptr<poplar::ComputeSet> initializer;

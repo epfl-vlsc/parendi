@@ -1,6 +1,5 @@
 // -*- mode: C++; c-file-style: "cc-mode" -*-
-//*************************************************************************
-// DESCRIPTION: Verilator BSP: handle BSP class with DPI calls
+//*************************************************************************// DESCRIPTION: Verilator BSP: handle BSP class with DPI calls
 //
 // Code available from: https://verilator.org
 //
@@ -478,7 +477,7 @@ private:
                 needReEntry = false;
             } else if (auto const dispp = VN_CAST(stmtp, Display)) {
                 delegatep = new AstDelegate{
-                    stmtp->fileline(), "$display(\"" + dispp->fmtp()->text() + "\")",
+                    stmtp->fileline(), "DISPLAY(\"" + dispp->fmtp()->text() + "\")",
                     dispp->fmtp()->exprsp() ? dispp->fmtp()->exprsp()->cloneTree(true) : nullptr};
                 delegateDisplay(dispp);
             } else if (auto const readWriteMemp = VN_CAST(stmtp, NodeReadWriteMem)) {

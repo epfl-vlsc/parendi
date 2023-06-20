@@ -171,7 +171,6 @@ private:
         if (!m_ofp || splitNeeded()) {
             if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
             openNextOutputFile(prefixNameProtect(m_modp), false);
-
         }
         EmitCFunc::visit(cfuncp);
     }
@@ -262,7 +261,8 @@ public:
         ofp->puts("\t-DOBJ_DIR=");
         ofp->putsQuoted("\"" + v3Global.opt.makeDir() + "\"");
         ofp->puts("\n");
-        ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) -Wno-parentheses-equality \n");
+        ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) "
+                  "-Wno-parentheses-equality \n");
         ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -X-funroll-loops "
                   "-X-finline-functions -X-finline-hint-functions -Wno-parentheses-equality\n");
         ofp->puts("\n");
@@ -287,6 +287,8 @@ public:
         ofp->puts("\n");
         ofp->puts("USER_CPP = \\\n");
         for (const auto& cpp : v3Global.opt.cppFiles()) { ofp->puts("\t" + cpp + "\\\n"); }
+        string graphFile
+            = EmitPoplarProgram::prefixNameProtect(netlistp->topModulep()) + ".graph.bin";
         ofp->puts("\n");
         ofp->puts("HOST_SOURCES += $(USER_CPP)\n");
         ofp->puts("OBJS_HOST = $(HOST_SOURCES:cpp=o)\n");
@@ -296,6 +298,14 @@ public:
         ofp->puts("INSTRUMENT ?= 0\n");
         ofp->puts("ifneq ($(INSTRUMENT), 0)\n");
         ofp->puts("HOST_FLAGS += -DPOPLAR_INSTRUMENT\n");
+        ofp->puts("endif\n\n");
+        ofp->puts("GRAPH_COMPLE_FLAGS = -DGRAPH_COMPILE\n");
+        ofp->puts("GRAPH_RUN_FLAGS = -DGRAPH_RUN\n");
+        ofp->puts("GRAPH_BINARY_DEP = " + graphFile + "\n");
+        ofp->puts("PRECOMPILE ?= 1\n");
+        ofp->puts("ifeq ($(PRECOMPILE), 0)\n");
+        ofp->puts("GRAPH_RUN_FLAGS += -DGRAPH_COMPILE\n");
+        ofp->puts("GRAPH_BINARY_DEP = \n");
         ofp->puts("endif\n\n");
         ofp->puts("all: " + EmitPoplarProgram::topClassName() + "\n\n");
         ofp->puts("$(OBJS_GP):%.gp: %.cpp\n");
@@ -309,17 +319,16 @@ public:
         ofp->puts("$(OBJS_HOST):%.o: %.cpp\n");
         ofp->puts("\t$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@\n");
         ofp->puts("\n");
-        string graphFile
-            = EmitPoplarProgram::prefixNameProtect(netlistp->topModulep()) + ".graph.bin";
         ofp->puts(EmitPoplarProgram::topClassName()
                   + "_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)\n");
-        ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -DGRAPH_COMPILE "
-                  "-o $@\n");
+        ofp->puts(
+            "\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) "
+            "-o $@\n");
         ofp->puts(graphFile + ": " + EmitPoplarProgram::topClassName() + "_graph_compiler\n");
         ofp->puts("\t./$< $(GRAPH_FLAGS)\n");
-        ofp->puts(EmitPoplarProgram::topClassName() + ": $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) "
-                  + graphFile + "\n");
-        ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) -o $@\n");
+        ofp->puts(EmitPoplarProgram::topClassName()
+                  + ": $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) $(GRAPH_BINARY_DEP)\n");
+        ofp->puts("\t$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_RUN_FLAGS) -o $@\n");
         ofp->puts("clean:\n");
         ofp->puts("\trm -rf *.o *.gp *.s report *.graph.bin " + EmitPoplarProgram::topClassName()
                   + " " + EmitPoplarProgram::topClassName() + "_graph_compiler \n");

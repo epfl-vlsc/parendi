@@ -2165,6 +2165,7 @@ void VL_READMEM_PROXY(uint32_t numWords, const T& fileproxy, T& dest) {
 }
 
 // VL_VIEW
+
 template <typename T, typename V>
 VL_INLINE_OPT T& VL_VIEW(V& vec) {
     T& r = (*reinterpret_cast<T*>(vec.data()));
