@@ -34,11 +34,10 @@ struct VlIpuCycle {
     volatile uint32_t l, u;
     VlIpuCycle() {}
     volatile inline void time() {
-        u = -1;
-        while (__builtin_ipu_get_scount_u() < u) {
-            u = __builtin_ipu_get_scount_u();
+        do {
             l = __builtin_ipu_get_scount_l();
-        }
+            u = __builtin_ipu_get_scount_u();
+        } while (__builtin_ipu_get_scount_l() < l);
     }
     inline uint64_t get() const {
         return static_cast<uint64_t>(l) | (static_cast<uint64_t>(u) << 32ull);

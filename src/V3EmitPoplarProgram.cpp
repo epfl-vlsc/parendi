@@ -263,8 +263,17 @@ public:
         ofp->puts("\n");
         ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) "
                   "-Wno-parentheses-equality \n");
-        ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -X-funroll-loops "
-                  "-X-finline-functions -X-finline-hint-functions -Wno-parentheses-equality\n");
+        ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -Wno-parentheses-equality \\");
+        for (const string& clangFlag: {
+            "-finline-functions",
+            "-finline-hint-functions", // respect "inline" hints
+            "-fno-builtin-memset", // do not use memset builtin function, best to unrol and inline
+            "-fno-builtin-memcpy", // most copies can be done without a loop and are more efficient that way
+            "-funroll-loops", // unroll loops when possible
+        })  {
+
+            ofp->puts("\t-X" + clangFlag  + " \\\n");
+        }
         ofp->puts("\n");
         ofp->puts("CODELETS =  \\\n");
         iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },
@@ -357,7 +366,6 @@ public:
 
         ofp->puts("{\n");
         putRecord("autoReport.all", "true");
-        putRecord("autoReport.streamAtEachRun", "false");
         putRecord("autoReport.directory",
                   string{"./"} + (compile ? "" : v3Global.opt.makeDir() + "/") + "poplar_report",
                   true);
