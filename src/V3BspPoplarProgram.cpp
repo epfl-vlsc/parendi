@@ -48,15 +48,55 @@ private:
                                           << " tiles*workers" << endl);
         }
         // simple tile assignment
+        uint32_t maxTileId = 0;
         uint32_t tid = 0;
         uint32_t wid = 0;
         for (AstClass* classp : unlocated) {
+            maxTileId = std::max(maxTileId, tid);
             auto newFlag = classp->flag().withTileId(tid++).withWorkerId(wid);
             classp->flag(newFlag);
             if (tid == m_numAvailTiles) {
                 tid = 0;
                 wid++;
             }
+        }
+        // adjust the numbe of tiles, so we later know exactly how many tiles we should
+        // request from the poplar runtime
+        v3Global.opt.tiles(maxTileId);
+        if (maxTileId < m_numAvailTiles && v3Global.opt.fIpuSupervisor()) {
+            UASSERT(wid == 0, "did not expect workers, this is an internal bug");
+            // promote all the vertices to supervisors, we could also be a bit more
+            // clever and promote only the vertices that have a single worker, but
+            // who cares for now...
+        }
+    }
+
+    void forEachBspClass(std::function<void(AstClass*)>&& fn) {
+        for (AstVarScope* vscp = m_netlistp->topScopep()->scopep()->varsp(); vscp;
+             vscp = VN_CAST(vscp->nextp(), VarScope)) {
+            AstClassRefDType* const clsRefDTypep = VN_CAST(vscp->dtypep(), ClassRefDType);
+            if (!clsRefDTypep || !clsRefDTypep->classp()->flag().isBsp()) { continue; }
+            AstClass* const classp = clsRefDTypep->classp();
+            fn(classp);
+        }
+    }
+    void fixTileCountAndPromoteToSupervisor() {
+        uint32_t maxTileId = 0;
+        uint32_t maxWorkerId = 0;
+        forEachBspClass([&](AstClass* classp) {
+            maxTileId = std::max(classp->flag().tileId(), maxTileId);
+            maxWorkerId = std::max(classp->flag().workerId(), maxWorkerId);
+        });
+        // set the tile count, potentially lower than the requested tile count
+        // by the user (i.e, --tiles)
+        v3Global.opt.tiles(maxTileId);  // this is needed later to pass to the runtime
+        v3Global.opt.workers(maxWorkerId);
+        if (maxWorkerId == 0 && v3Global.opt.fIpuSupervisor()) {
+            // optionally promote every class to a supervisor, it's good for performance
+            UINFO(3, "Promoting all vertices to supervisors" << endl);
+            forEachBspClass([](AstClass* classp) {
+                classp->flag(classp->flag().append(VClassFlag::BSP_SUPERVISOR));
+            });
         }
     }
 
@@ -69,26 +109,17 @@ public:
         m_numAvailWorkers = static_cast<uint32_t>(v3Global.opt.workers());
         std::vector<AstClass*> unlocatedCompute;
         std::vector<AstClass*> unlocatedInit;
-        netlistp->topModulep()->foreach([&](AstVar* varp) {
-            AstClassRefDType* clsTypep = VN_CAST(varp->dtypep(), ClassRefDType);
-            if (clsTypep && clsTypep->classp()->flag().isBsp()
-                && clsTypep->classp()->flag().tileId() >= m_numAvailTiles) {
-                if (clsTypep->classp()->flag().isBspInit())
-                    unlocatedInit.push_back(clsTypep->classp());
-                else
-                    unlocatedCompute.push_back(clsTypep->classp());
-            }
+        forEachBspClass([&](AstClass* classp) {
+            if (classp->flag().isBspInit())
+                unlocatedInit.push_back(classp);
+            else
+                unlocatedCompute.push_back(classp);
         });
+
         doLocate(unlocatedCompute);
         doLocate(unlocatedInit);
+        fixTileCountAndPromoteToSupervisor();
 
-        // netlistp->foreach([&](AstClass* classp) {
-        //     if (classp->flag().isBsp() && classp->flag().tileId() >= m_numAvailTiles) {
-        //         classp->flag(classp->flag().withTileId(0).withWorkerId(
-        //             0));  // dead class, but assign anyway
-        //         if (!classp->flag().isB)
-        //     }
-        // });
     }
 };
 

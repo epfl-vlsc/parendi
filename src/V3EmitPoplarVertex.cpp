@@ -106,7 +106,11 @@ private:
              + "   WORKER = " + cvtToStr(classp->flag().workerId()) + "\n");
         puts("\nclass ");
         puts(prefixNameProtect(classp));
-        puts(" : public poplar::Vertex {\n");
+        string baseClass = "Vertex";
+        if (classp->flag().isSupervisor()) {
+            baseClass = "SupervisorVertex";
+        }
+        puts(" : public poplar::" + baseClass + " {\n");
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);  // public
 
@@ -129,6 +133,9 @@ private:
         // emit method decls
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) {
+                if (classp->flag().isSupervisor() && funcp->name() == "compute") {
+                    puts("__attribute__((target(\"supervisor\"))) ");
+                }
                 emitCFuncHeader(funcp, classp, false);
                 puts(";\n");
             }

@@ -263,6 +263,11 @@ public:
         ofp->puts("\n");
         ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) "
                   "-Wno-parentheses-equality \n");
+
+        ofp->puts("HOST_FLAGS += -DVL_NUM_TILES_USED=" + cvtToStr(v3Global.opt.tiles()) + "\n");
+        ofp->puts("HOST_FLAGS += -DVL_NUM_WORKERS_USED=" + cvtToStr(v3Global.opt.workers()) + "\n");
+
+        ofp->puts("\n\n");
         ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -Wno-parentheses-equality \\\n");
         for (const string& clangFlag: {
             "-finline-functions",

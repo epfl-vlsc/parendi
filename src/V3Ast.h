@@ -1331,7 +1331,8 @@ public:
         NONE = 0x0000,
         BSP_BUILTIN = 0x0001,
         BSP_INIT_BUILTIN = 0x0002,
-        BSP_COND_BUILTIN = 0x0004
+        BSP_COND_BUILTIN = 0x0004,
+        BSP_SUPERVISOR   = 0x0008
     };
 
 private:
@@ -1361,6 +1362,7 @@ public:
     bool isBsp() const { return (m_flag & BSP_BUILTIN); }
     bool isBspInit() const { return (m_flag & BSP_INIT_BUILTIN); }
     bool isBspCond() const { return (m_flag & BSP_COND_BUILTIN); }
+    bool isSupervisor() const { return (m_flag & BSP_SUPERVISOR); }
     uint32_t tileId() const { return m_tileId; }
     uint32_t workerId() const { return m_workerId; }
 };

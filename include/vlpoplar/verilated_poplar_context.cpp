@@ -12,14 +12,33 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
-#define VL_NUM_IPUS 1
+#define VL_NUM_TILES_PER_IPU 1472
 
 void VlPoplarContext::init(int argc, char* argv[]) {
 
+    // get the first available device
+
+    uint32_t requiredNumIpus = 0;
+    constexpr uint32_t MAX_TILES_PER_IPU = 1472;
+    if (VL_NUM_TILES_USED <= MAX_TILES_PER_IPU * 1) {
+        requiredNumIpus = 1;
+    } else if (VL_NUM_TILES_USED <= MAX_TILES_PER_IPU * 2) {
+        requiredNumIpus = 2;
+    } else if (VL_NUM_TILES_USED <= MAX_TILES_PER_IPU * 3) {
+        requiredNumIpus = 3;
+    } else if (VL_NUM_TILES_USED <= MAX_TILES_PER_IPU * 4) {
+        requiredNumIpus = 4;
+    } else {
+        std::cerr << "Can not have more than 4 IPUs, max. number of tiles is "
+                  << MAX_TILES_PER_IPU * 4 << " but requested " << VL_NUM_TILES_USED << std::endl;
+        std::exit(-1);
+    }
+
     cfg = parseArgs(argc, argv);
     auto manager = poplar::DeviceManager::createDeviceManager();
-    auto devices = manager.getDevices(poplar::TargetType::IPU, VL_NUM_IPUS);
-    // get the first available device
+
+    auto devices = manager.getDevices(poplar::TargetType::IPU, requiredNumIpus);
+
     auto devIt = std::find_if(devices.begin(), devices.end(),
                               [](poplar::Device& dev) { return dev.attach(); });
     if (devIt == devices.end()) {
@@ -246,9 +265,9 @@ void VlPoplarContext::dumpCycleTrace(std::ostream& os) {
             // if (i >= desc.second.m_count) {
             //     os << "N/A";
             // } else {
-                auto s = t[desc.second.m_index].first;
-                auto e = t[desc.second.m_index].second;
-                os << s << " " << e << " " << (e - s);
+            auto s = t[desc.second.m_index].first;
+            auto e = t[desc.second.m_index].second;
+            os << s << " " << e << " " << (e - s);
             // }
             os << std::endl;
         }

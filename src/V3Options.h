@@ -376,6 +376,7 @@ private:
     bool m_fSubst;       // main switch: -fno-subst: substitute expression temp values
     bool m_fSubstConst;  // main switch: -fno-subst-const: final constant substitution
     bool m_fTable;       // main switch: -fno-table: lookup table creation
+    bool m_fIpuSupervisor; // main switch: -fno-ipu-supervisor: use ipu supervisor contexts when possible
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -533,7 +534,9 @@ public:
     int threadsMaxMTasks() const { return m_threadsMaxMTasks; }
     bool mtasks() const { return (m_threads > 1); }
     int tiles() const VL_MT_SAFE { return m_tiles; }
+    int tiles(int t) { return m_tiles = t; }
     int workers() const VL_MT_SAFE { return m_workers; }
+    int workers(int w) { return m_workers = w; }
     int ipuProfile() const VL_MT_SAFE { return m_ipu_profile; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }
@@ -638,6 +641,7 @@ public:
     bool fSubst() const { return m_fSubst; }
     bool fSubstConst() const { return m_fSubstConst; }
     bool fTable() const { return m_fTable; }
+    bool fIpuSupervisor() const { return m_fIpuSupervisor; }
 
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
