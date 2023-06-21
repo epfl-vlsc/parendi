@@ -263,14 +263,14 @@ public:
         ofp->puts("\n");
         ofp->puts("HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) "
                   "-Wno-parentheses-equality \n");
-        ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -Wno-parentheses-equality \\");
+        ofp->puts("IPU_FLAGS = -O3 $(INCLUDES) -Wno-parentheses-equality \\\n");
         for (const string& clangFlag: {
             "-finline-functions",
             "-finline-hint-functions", // respect "inline" hints
             "-fno-builtin-memset", // do not use memset builtin function, best to unrol and inline
             "-fno-builtin-memcpy", // most copies can be done without a loop and are more efficient that way
             "-funroll-loops", // unroll loops when possible
-        })  {
+        }) {
 
             ofp->puts("\t-X" + clangFlag  + " \\\n");
         }
