@@ -23,31 +23,13 @@
 #include "V3Ast.h"
 #include "V3File.h"
 
-// class V3EmitPoplarBaseVisitor VL_NOT_FINAL : public VNVisitor {
-// protected:
-//     V3OutCFile* m_ofp = nullptr;
-//     V3OutCFile* ofp() const VL_MT_SAFE { return m_ofp; }
-//     void puts(const string& str) { ofp()->puts(str); }
-//     void putbs(const string& str) { ofp()->putbs(str); }
-//     void putsDecoration(const string& str) {
-//         if (v3Global.opt.decoration()) { puts(str); }
-//     }
-//     void putsQuoted(const string& str) { ofp()->putsQuoted(str); }
-//     void ensureNewLine() { ofp()->ensureNewLine(); }
-
-// public:
-//     V3EmitPoplarBaseVisitor(V3OutCFile* ofp) : m_ofp{ofp} {}
-//     ~V3EmitPoplarBaseVisitor() override = default;
-// };
-
-// class V3EmitPoplarVertex final {
-//     static void emit();
-// };
 
 class V3EmitPoplar final {
 public:
     static void emitVertex();
     static void emitProgram();
+    static void emitMake();
+    static void emitStructs();
 };
 
 #endif

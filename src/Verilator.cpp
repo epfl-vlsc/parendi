@@ -567,8 +567,10 @@ static void process() {
     // Output the text
     if (v3Global.opt.poplar()) {
         V3EmitC::emitcConstPool();
-        V3EmitPoplar::emitVertex();
+        V3EmitPoplar::emitStructs();
         V3EmitPoplar::emitProgram();
+        V3EmitPoplar::emitVertex();
+        V3EmitPoplar::emitMake();
         // Statistics
         V3BspStraggler::report();
         reportStatsIfEnabled();

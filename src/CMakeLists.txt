@@ -241,7 +241,9 @@ set(COMMON_SOURCES
     V3EmitCMake.cpp
     V3EmitCModel.cpp
     V3EmitCSyms.cpp
+    V3EmitPoplarMake.cpp
     V3EmitPoplarProgram.cpp
+    V3EmitPoplarStructs.cpp
     V3EmitPoplarVertex.cpp
     V3EmitMk.cpp
     V3EmitV.cpp

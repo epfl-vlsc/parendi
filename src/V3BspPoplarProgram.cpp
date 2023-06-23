@@ -40,7 +40,6 @@ private:
     uint32_t m_numAvailWorkers;
     AstNetlist* m_netlistp;
     void doLocate(const std::vector<AstClass*> unlocated) {
-
         if (unlocated.size() > m_numAvailTiles * m_numAvailWorkers) {
             m_netlistp->v3warn(UNOPT, "Not enough tiles, exceeding worker limit: There are  "
                                           << unlocated.size() << " parallel process but have only "
@@ -59,15 +58,6 @@ private:
                 tid = 0;
                 wid++;
             }
-        }
-        // adjust the numbe of tiles, so we later know exactly how many tiles we should
-        // request from the poplar runtime
-        v3Global.opt.tiles(maxTileId);
-        if (maxTileId < m_numAvailTiles && v3Global.opt.fIpuSupervisor()) {
-            UASSERT(wid == 0, "did not expect workers, this is an internal bug");
-            // promote all the vertices to supervisors, we could also be a bit more
-            // clever and promote only the vertices that have a single worker, but
-            // who cares for now...
         }
     }
 

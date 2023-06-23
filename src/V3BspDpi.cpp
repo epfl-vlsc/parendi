@@ -96,7 +96,13 @@ public:
         netlist.append(s);
     }
     void setInst(AstClass* const classp, AstVarScope* const vscp) {
-        UASSERT(classp && vscp, "expected non-null arguments");
+        if (!vscp) {
+            UASSERT_OBJ(vscp, classp, "no instance for " << classp->name() << endl);
+        }
+        if (!classp) {
+            UASSERT_OBJ(classp, vscp, "not class for instance " << vscp << endl);
+        }
+        // UASSERT(classp && vscp, "expected non-null arguments but got " << classp << " and " << vscp << endl);
         instances[classp] = vscp;
     }
 
@@ -204,7 +210,7 @@ private:
     }
 
     void replaceFuncLocal(AstVar* varp) {
-        UINFO(3, "capture " << varp->name() << endl);
+        UINFO(10, "capture " << varp->name() << endl);
         m_classp->stmtsp()->addHereThisAsNext(varp->unlinkFrBack());
         varp->funcLocal(false);
         varp->bspFlag({VBspFlag::MEMBER_LOCAL});

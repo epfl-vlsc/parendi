@@ -93,6 +93,7 @@ private:
         puts("// Poplar vertex implementation\n");
         puts("#include <vlpoplar/verilated.h>\n");
         puts("#include <poplar/Vertex.hpp>\n");
+        puts("#include \"" + topClassName() + "__structs.h\"\n");
         // puts("using namespace poplar;");
 
         // if (v3Global.dpi()) { v3warn("dpi not supported with poplar\n"); }
@@ -107,9 +108,7 @@ private:
         puts("\nclass ");
         puts(prefixNameProtect(classp));
         string baseClass = "Vertex";
-        if (classp->flag().isSupervisor()) {
-            baseClass = "SupervisorVertex";
-        }
+        if (classp->flag().isSupervisor()) { baseClass = "SupervisorVertex"; }
         puts(" : public poplar::" + baseClass + " {\n");
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);  // public

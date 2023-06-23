@@ -158,6 +158,20 @@ private:
     }
     string freshName(const string& n) { return m_memberNames.get(n); }
     string freshName(const AstNode* nodep) { return m_memberNames.get(nodep); }
+
+    // check whether data type is supported
+    inline bool supportedDType(const AstNodeDType* const dtypep) const {
+        return isAnyTypeFromList<AstBasicDType, AstUnpackArrayDType, AstNodeUOrStructDType>(
+            dtypep);
+    }
+    template <typename... Args>
+    inline bool isAnyTypeFromList(const AstNodeDType* const dtypep) const {
+        for (bool x : {(dynamic_cast<Args*>(dtypep->skipRefp()) != nullptr)...}) {
+            if (x) { return true; }
+        }
+        return false;
+    }
+
     // compute the references to each variable
     void computeReferences() {
         AstNode::user1ClearTree();
@@ -564,8 +578,7 @@ private:
                     // the variable could be produced by another partition, the init
                     // class or the current active. In the latter case, we can keep
                     // it on the stack as an optimizatin, but we don't do it yet.
-                    if (VN_IS(vscp->dtypep()->skipRefp(), BasicDType)
-                        || VN_IS(vscp->dtypep()->skipRefp(), UnpackArrayDType)) {
+                    if (supportedDType(vscp->dtypep())) {
                         UASSERT_OBJ(!refInfo.isOwned(graphp), vscp,
                                     "Expected to be produced by another");
                         if (refInfo.isClocked() || refInfo.initp().first) {
@@ -576,7 +589,7 @@ private:
                             V3Stats::addStatSum("BspModules, input variable", 1);
                         }
                     } else {
-                        vscp->v3error("Unknown data type");
+                        vscp->v3error("Unknown data type " << vscp->dtypep()->skipRefp() << endl);
                     }
                 });
             AstNode* const clonep = activePair.second->stmtsp()->cloneTree(true);
@@ -634,8 +647,7 @@ private:
         newVscp->trace(vscp->isTrace());
         scopep->addVarsp(newVscp);
         vscp->user3p(newVscp);
-        if (VN_IS(vscp->dtypep()->skipRefp(), BasicDType)
-            || VN_IS(vscp->dtypep()->skipRefp(), UnpackArrayDType)) {
+        if (supportedDType(vscp->dtypep())) {
 
             if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
                 // the variable is produced here and does not need
@@ -678,7 +690,7 @@ private:
                 varp->funcLocal(true);
             }
         } else {
-            vscp->v3fatalSrc("Unknown data type" << vscp->dtypep());
+            vscp->v3fatalSrc("Unknown data type " << vscp->dtypep() << endl);
         }
     }
     void makeClassMemberVars(const std::unique_ptr<DepGraph>& graphp, AstScope* const scopep,
@@ -939,7 +951,8 @@ private:
             //                 || refInfo.producer() /* consumed implies produced*/,
             //             vscp, "consumed but not produced!");
             for (const auto& pair : refInfo.targetsp()) {
-                if (refInfo.sourcep().first && refInfo.sourcep() != pair /*no need to send to self*/) {
+                if (refInfo.sourcep().first
+                    && refInfo.sourcep() != pair /*no need to send to self*/) {
                     // UASSERT(refInfo.sourcep() != pair, "Self message not allowed!");
                     copyFuncp->addStmtsp(makeCopyOp(refInfo.sourcep(), pair));
                 }
@@ -975,17 +988,25 @@ private:
         m_topModp->addStmtsp(singletonTopScopep);
         // delete any existing top module in the netlist, but keep the package
         AstNodeModule* oldModsp = m_netlistp->topModulep()->unlinkFrBack();
-        oldModsp->foreach([this](AstCell* cellp) {
-            if (!cellp->modp()->inLibrary()) return;
-            // a library package or something, keep it under the new top module,
-            // this requires replacing the scope below
-            cellp->modp()->foreach([this, cellp](AstScope* scopep) {
-                // scopep->modp()
-                scopep->modp(m_topModp);
-                scopep->aboveScopep(m_topScopep);
-            });
-            m_topModp->addStmtsp(cellp->unlinkFrBack());
-        });
+        for (AstNode* oldNodep = oldModsp->stmtsp(); oldNodep;) {
+            AstNode* oldNextp = oldNodep->nextp();
+            if (AstTypedef* tdefp = VN_CAST(oldNodep, Typedef)) {
+                // keep any typedefs
+                m_topModp->addStmtsp(tdefp->unlinkFrBack());
+            } else if (AstCell* cellp = VN_CAST(oldNodep, Cell)) {
+                if (cellp->modp()->inLibrary()) {
+                    // a library package or something, keep it under the new top module,
+                    // this requires replacing the scope below
+                    cellp->modp()->foreach([this, cellp](AstScope* scopep) {
+                        // scopep->modp()
+                        scopep->modp(m_topModp);
+                        scopep->aboveScopep(m_topScopep);
+                    });
+                    m_topModp->addStmtsp(cellp->unlinkFrBack());
+                }
+            }
+            oldNodep = oldNextp;
+        }
 
         VL_DO_DANGLING(oldModsp->deleteTree(), oldModsp);
         // add the new topmodule (should be first, see AstNetlist::topModulesp())
@@ -995,6 +1016,7 @@ private:
             m_netlistp->addModulesp(m_topModp);
         }
     }
+
     void makeComputeSet(const std::vector<AstClass*> computeClassesp,
                         const std::string& funcName) {
 
