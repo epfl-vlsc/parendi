@@ -790,6 +790,9 @@ void V3Options::notify() {
         v3fatal("verilator: Need --binary, --cc, --sc, --cdc, --dpi-hdr-only, --lint-only, "
                 "--xml-only or --E option");
     }
+    if (outFormatOk() && timing()) {
+        v3fatal("verilator: --timing is not supported with --poplar");
+    }
 
     if (cdc()) {
         cmdfl->v3warn(DEPRECATED, "Option --cdc is deprecated and is planned for removal");

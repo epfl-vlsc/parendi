@@ -87,6 +87,7 @@
 #include "V3Scoreboard.h"
 #include "V3Slice.h"
 #include "V3Split.h"
+#include "V3SplitComb.h"
 #include "V3SplitAs.h"
 #include "V3SplitVar.h"
 #include "V3Stats.h"
@@ -357,6 +358,16 @@ static void process() {
 
         // Split single ALWAYS blocks into multiple blocks for better ordering chances
         V3Split::splitAlwaysAll(v3Global.rootp());
+
+        // Split always_comb blocks into as many as possible, could remove some "false" combinational loops
+        // and provides better reordering chances. The V3Split::splitAlwaysAll is slightly
+        // geared towards clocked blocks and NBA assignments and does not do so well with
+        // combinatioal logic.
+        V3SplitComb::splitAlwaysComb(v3Global.rootp());
+        //V3SplitComb potentially creates a lot of dead code. We should remove them
+        // as early as possible.
+        V3Dead::deadifyAll(v3Global.rootp());
+
 
         V3SplitAs::splitAsAll(v3Global.rootp());
 

@@ -153,6 +153,7 @@ set(HEADERS
     V3Slice.h
     V3Split.h
     V3SplitAs.h
+    V3SplitComb.h
     V3SplitVar.h
     V3Stats.h
     V3StdFuture.h
@@ -301,6 +302,7 @@ set(COMMON_SOURCES
     V3Slice.cpp
     V3Split.cpp
     V3SplitAs.cpp
+    V3SplitComb.cpp
     V3SplitVar.cpp
     V3Stats.cpp
     V3StatsReport.cpp

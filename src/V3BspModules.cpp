@@ -425,7 +425,7 @@ private:
         } else if (edge == VEdgeType::ET_BOTHEDGE) {
             condExprp = new AstXor{itemp->fileline(), exprClonep, prevExprp};
         } else {
-            itemp->v3warn(E_UNSUPPORTED, "Unsupported edge type");
+            itemp->v3warn(E_UNSUPPORTED, "Unsupported edge type " << edge.ascii() << endl);
         }
         AstAssign* updatep = new AstAssign{
             itemp->fileline(), new AstVarRef{itemp->fileline(), prevVscp, VAccess::WRITE},

@@ -152,16 +152,23 @@ void schedule(AstNetlist* netlistp) {
     // Step 1. classify logic classes, may error out on unsupported logic classes
     V3Sched::LogicClasses logicClasses = details::gatherLogicClasses(netlistp);
 
-    UASSERT(logicClasses.m_final.empty(), "final not implemented yet!");
 
+
+    auto unsupportedWhy = [](const auto& region, const string& reason) {
+        if (!region.empty()) {
+            region.front().second->v3warn(
+                E_UNSUPPORTED, "    " << reason
+            );
+        }
+    };
     // Step 3. check for comb cycles and error
     logicClasses.m_hybrid = V3Sched::breakCycles(netlistp, logicClasses.m_comb);
 
-    if (!logicClasses.m_hybrid.empty()) {
-        logicClasses.m_hybrid.front().second->v3warn(
-            E_UNSUPPORTED, "detected combinational loop! Can not have that with BSP");
-    }
-
+    unsupportedWhy(logicClasses.m_hybrid, "Hybrid logic means there is some combinational loop");
+    unsupportedWhy(logicClasses.m_final, "Final logic not implemented, too lazy");
+    unsupportedWhy(logicClasses.m_observed, "Observed region is out of the scope of this work");
+    unsupportedWhy(logicClasses.m_postponed, "Postponed not supported");
+    unsupportedWhy(logicClasses.m_reactive, "Reactive not supported");
     // Step 4. not really needed to settle the logic since we expect no inputs
 
     // Step 5. partition the logic into pre-active, active, and NBA regions.
@@ -177,11 +184,8 @@ void schedule(AstNetlist* netlistp) {
     //         "
     //                        "the top is supported with BSP");
     // }
-    if (!logicRegions.m_pre.empty()) {
-        logicRegions.m_pre.front().second->v3warn(
-            E_UNSUPPORTED, "Pre-Active region not supported yet! Only modules with a single clock "
-                           "at the top is supported with BSP");
-    }
+    unsupportedWhy(logicRegions.m_pre, "Pre-active not supprted because as can only handle a singel clock");
+
 
     V3Sched::LogicByScope& nbaLogic = logicRegions.m_nba;
     // Step 6. make a fine-grained dependence graph. This graph is different from
