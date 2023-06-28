@@ -145,6 +145,7 @@ set(HEADERS
     V3Randomize.h
     V3Reloop.h
     V3Sched.h
+    V3SchedAcyclic.h
     V3Scope.h
     V3Scoreboard.h
     V3SenExprBuilder.h
@@ -155,6 +156,7 @@ set(HEADERS
     V3SplitAs.h
     V3SplitComb.h
     V3SplitVar.h
+    V3SplitVarExtra.h
     V3Stats.h
     V3StdFuture.h
     V3String.h
@@ -304,6 +306,7 @@ set(COMMON_SOURCES
     V3SplitAs.cpp
     V3SplitComb.cpp
     V3SplitVar.cpp
+    V3SplitVarExtra.cpp
     V3Stats.cpp
     V3StatsReport.cpp
     V3String.cpp

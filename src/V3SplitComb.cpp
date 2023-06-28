@@ -56,12 +56,12 @@ private:
     }
 
     void visit(AstAlways* nodep) override { iterateChildren(nodep); }
-    void visit(AstJumpGo* nodep) override {
-        // maybe splittable, but unsure since deadcode may not be able to clean
-        // afterwards
-        UINFO(9, "        Jump prevents split " << nodep << endl);
-        m_unopt = true;
-    }
+    // void visit(AstJumpGo* nodep) override {
+    //     // maybe splittable, but unsure since deadcode may not be able to clean
+    //     // afterwards
+    //     UINFO(9, "        Jump prevents split " << nodep << endl);
+    //     m_unopt = true;
+    // }
     void visit(AstNode* nodep) override {
         if (!nodep->isPure()) {  // PLI or something weird, better not split
             UINFO(7, "        Impure prevents split " << nodep << endl);

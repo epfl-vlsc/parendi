@@ -36,6 +36,8 @@
 #include "config_build.h"
 #include "verilatedos.h"
 
+#include "V3SchedAcyclic.h"
+
 #include "V3Ast.h"
 #include "V3Error.h"
 #include "V3Global.h"
@@ -53,63 +55,115 @@
 VL_DEFINE_DEBUG_FUNCTIONS;
 
 namespace V3Sched {
+namespace V3SchedAcyclic {
+void removeNonCyclic(Graph* graphp) {
+    // Work queue
+    std::vector<V3GraphVertex*> queue;
 
-namespace {
+    const auto enqueue = [&](V3GraphVertex* vtxp) {
+        if (vtxp->user()) return;  // Already in queue
+        vtxp->user(1);
+        queue.push_back(vtxp);
+    };
 
-// ##############################################################################
-//  Data structures (graph types)
+    // Start with vertices with no inputs or outputs
+    for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+        if (vtxp->inEmpty() || vtxp->outEmpty()) enqueue(vtxp);
+    }
 
-class LogicVertex final : public V3GraphVertex {
-    AstNode* const m_logicp;  // The logic node this vertex represents
-    AstScope* const m_scopep;  // The enclosing AstScope of the logic node
+    // Iterate while we still have candidates
+    while (!queue.empty()) {
+        // Pop next candidate
+        V3GraphVertex* const vtxp = queue.back();
+        queue.pop_back();
+        vtxp->user(0);  // No longer in queue
 
-public:
-    LogicVertex(V3Graph* graphp, AstNode* logicp, AstScope* scopep)
-        : V3GraphVertex{graphp}
-        , m_logicp{logicp}
-        , m_scopep{scopep} {}
-    AstNode* logicp() const { return m_logicp; }
-    AstScope* scopep() const { return m_scopep; }
-
-    // LCOV_EXCL_START // Debug code
-    string name() const override { return m_logicp->fileline()->ascii(); };
-    string dotShape() const override { return "rectangle"; }
-    // LCOV_EXCL_STOP
-};
-
-class VarVertex final : public V3GraphVertex {
-    AstVarScope* const m_vscp;  // The AstVarScope this vertex represents
-
-public:
-    VarVertex(V3Graph* graphp, AstVarScope* vscp)
-        : V3GraphVertex{graphp}
-        , m_vscp{vscp} {}
-    AstVarScope* vscp() const { return m_vscp; }
-    AstVar* varp() const { return m_vscp->varp(); }
-
-    // LCOV_EXCL_START // Debug code
-    string name() const override { return m_vscp->name(); }
-    string dotShape() const override { return "ellipse"; }
-    string dotColor() const override { return "blue"; }
-    // LCOV_EXCL_STOP
-};
-
-class Graph final : public V3Graph {
-    void loopsVertexCb(V3GraphVertex* vtxp) override {
-        // TODO: 'typeName' is an internal thing. This should be more human readable.
-        if (LogicVertex* const lvtxp = dynamic_cast<LogicVertex*>(vtxp)) {
-            AstNode* const logicp = lvtxp->logicp();
-            std::cerr << logicp->fileline()->warnOtherStandalone()
-                      << "     Example path: " << logicp->typeName() << endl;
-        } else {
-            VarVertex* const vvtxp = dynamic_cast<VarVertex*>(vtxp);
-            UASSERT(vvtxp, "Cannot be anything else");
-            AstVarScope* const vscp = vvtxp->vscp();
-            std::cerr << vscp->fileline()->warnOtherStandalone()
-                      << "     Example path: " << vscp->prettyName() << endl;
+        if (vtxp->inEmpty()) {
+            // Enqueue children for consideration, remove out edges, and delete this vertex
+            for (V3GraphEdge *edgep = vtxp->outBeginp(), *nextp; edgep; edgep = nextp) {
+                nextp = edgep->outNextp();
+                enqueue(edgep->top());
+                VL_DO_DANGLING(edgep->unlinkDelete(), edgep);
+            }
+            VL_DO_DANGLING(vtxp->unlinkDelete(graphp), vtxp);
+        } else if (vtxp->outEmpty()) {
+            // Enqueue parents for consideration, remove in edges, and delete this vertex
+            for (V3GraphEdge *edgep = vtxp->inBeginp(), *nextp; edgep; edgep = nextp) {
+                nextp = edgep->inNextp();
+                enqueue(edgep->fromp());
+                VL_DO_DANGLING(edgep->unlinkDelete(), edgep);
+            }
+            VL_DO_DANGLING(vtxp->unlinkDelete(graphp), vtxp);
         }
     }
-};
+}
+namespace {
+// Gather all splitting candidates that are in the same SCC as the given vertex
+void gatherSCCCandidatesRecurse(V3GraphVertex* vtxp, std::vector<Candidate>& candidates) {
+    if (vtxp->user()) return;  // Already done
+    vtxp->user(true);
+
+    if (VarVertex* const vvtxp = dynamic_cast<VarVertex*>(vtxp)) {
+        AstVar* const varp = vvtxp->varp();
+        const string name = varp->prettyName();
+        if (!varp->user3SetOnce()  // Only consider each AstVar once
+            && varp->width() != 1  // Ignore 1-bit signals (they cannot be split further)
+            && name.find("__Vdly") == string::npos  // Ignore internal signals
+            && name.find("__Vcell") == string::npos) {
+            // Also compute the fanout of this vertex
+            unsigned fanout = 0;
+            for (V3GraphEdge* ep = vtxp->outBeginp(); ep; ep = ep->outNextp()) ++fanout;
+            candidates.emplace_back(vvtxp, fanout);
+        }
+    }
+
+    // Iterate through all the vertices within the same strongly connected component (same color)
+    for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+        V3GraphVertex* const top = edgep->top();
+        if (top->color() == vtxp->color()) gatherSCCCandidatesRecurse(top, candidates);
+    }
+    for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
+        V3GraphVertex* const fromp = edgep->fromp();
+        if (fromp->color() == vtxp->color()) gatherSCCCandidatesRecurse(fromp, candidates);
+    }
+}
+}  // namespace
+
+std::vector<Candidate> gatherSCCCandidates(Graph* graphp, V3GraphVertex* vvtxp) {
+    // AstNode::user3 is used to mark if we have done a particular variable.
+    // V3GraphVertex::user is used to mark if we have seen this vertex before.
+    std::vector<Candidate> candidates;
+    const VNUser3InUse user3InUse;
+    graphp->userClearVertices();
+    gatherSCCCandidatesRecurse(vvtxp, candidates);
+    graphp->userClearVertices();
+    return candidates;
+}
+
+std::vector<VarVertex*> findCutVertices(Graph* graphp) {
+    std::vector<VarVertex*> result;
+
+    auto isCut = [](const VarVertex* vtxp) -> bool {
+        for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
+            if (edgep->weight() == 0) return true;
+        }
+        for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+            if (edgep->weight() == 0) return true;
+        }
+        return false;
+    };
+
+    const VNUser1InUse user1InUse;  // bool: already added to result
+    for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+        if (VarVertex* const vvtxp = dynamic_cast<VarVertex*>(vtxp)) {
+            if (!vvtxp->vscp()->user1SetOnce() && isCut(vvtxp)) result.push_back(vvtxp);
+        }
+    }
+    return result;
+}
+}  // namespace V3SchedAcyclic
+namespace {
+using namespace V3SchedAcyclic;
 
 //##############################################################################
 // Algorithm implementation
@@ -160,70 +214,6 @@ std::unique_ptr<Graph> buildGraph(const LogicByScope& lbs) {
     return graphp;
 }
 
-void removeNonCyclic(Graph* graphp) {
-    // Work queue
-    std::vector<V3GraphVertex*> queue;
-
-    const auto enqueue = [&](V3GraphVertex* vtxp) {
-        if (vtxp->user()) return;  // Already in queue
-        vtxp->user(1);
-        queue.push_back(vtxp);
-    };
-
-    // Start with vertices with no inputs or outputs
-    for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-        if (vtxp->inEmpty() || vtxp->outEmpty()) enqueue(vtxp);
-    }
-
-    // Iterate while we still have candidates
-    while (!queue.empty()) {
-        // Pop next candidate
-        V3GraphVertex* const vtxp = queue.back();
-        queue.pop_back();
-        vtxp->user(0);  // No longer in queue
-
-        if (vtxp->inEmpty()) {
-            // Enqueue children for consideration, remove out edges, and delete this vertex
-            for (V3GraphEdge *edgep = vtxp->outBeginp(), *nextp; edgep; edgep = nextp) {
-                nextp = edgep->outNextp();
-                enqueue(edgep->top());
-                VL_DO_DANGLING(edgep->unlinkDelete(), edgep);
-            }
-            VL_DO_DANGLING(vtxp->unlinkDelete(graphp), vtxp);
-        } else if (vtxp->outEmpty()) {
-            // Enqueue parents for consideration, remove in edges, and delete this vertex
-            for (V3GraphEdge *edgep = vtxp->inBeginp(), *nextp; edgep; edgep = nextp) {
-                nextp = edgep->inNextp();
-                enqueue(edgep->fromp());
-                VL_DO_DANGLING(edgep->unlinkDelete(), edgep);
-            }
-            VL_DO_DANGLING(vtxp->unlinkDelete(graphp), vtxp);
-        }
-    }
-}
-
-// Has this VarVertex been cut? (any edges in or out has been cut)
-bool isCut(const VarVertex* vtxp) {
-    for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-        if (edgep->weight() == 0) return true;
-    }
-    for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
-        if (edgep->weight() == 0) return true;
-    }
-    return false;
-}
-
-std::vector<VarVertex*> findCutVertices(Graph* graphp) {
-    std::vector<VarVertex*> result;
-    const VNUser1InUse user1InUse;  // bool: already added to result
-    for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-        if (VarVertex* const vvtxp = dynamic_cast<VarVertex*>(vtxp)) {
-            if (!vvtxp->vscp()->user1SetOnce() && isCut(vvtxp)) result.push_back(vvtxp);
-        }
-    }
-    return result;
-}
-
 void resetEdgeWeights(const std::vector<VarVertex*>& cutVertices) {
     for (VarVertex* const vvtxp : cutVertices) {
         for (V3GraphEdge* ep = vvtxp->inBeginp(); ep; ep = ep->inNextp()) ep->weight(1);
@@ -231,51 +221,10 @@ void resetEdgeWeights(const std::vector<VarVertex*>& cutVertices) {
     }
 }
 
-// A VarVertex together with its fanout
-using Candidate = std::pair<VarVertex*, unsigned>;
-
-// Gather all splitting candidates that are in the same SCC as the given vertex
-void gatherSCCCandidates(V3GraphVertex* vtxp, std::vector<Candidate>& candidates) {
-    if (vtxp->user()) return;  // Already done
-    vtxp->user(true);
-
-    if (VarVertex* const vvtxp = dynamic_cast<VarVertex*>(vtxp)) {
-        AstVar* const varp = vvtxp->varp();
-        const string name = varp->prettyName();
-        if (!varp->user3SetOnce()  // Only consider each AstVar once
-            && varp->width() != 1  // Ignore 1-bit signals (they cannot be split further)
-            && name.find("__Vdly") == string::npos  // Ignore internal signals
-            && name.find("__Vcell") == string::npos) {
-            // Also compute the fanout of this vertex
-            unsigned fanout = 0;
-            for (V3GraphEdge* ep = vtxp->outBeginp(); ep; ep = ep->outNextp()) ++fanout;
-            candidates.emplace_back(vvtxp, fanout);
-        }
-    }
-
-    // Iterate through all the vertices within the same strongly connected component (same color)
-    for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
-        V3GraphVertex* const top = edgep->top();
-        if (top->color() == vtxp->color()) gatherSCCCandidates(top, candidates);
-    }
-    for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-        V3GraphVertex* const fromp = edgep->fromp();
-        if (fromp->color() == vtxp->color()) gatherSCCCandidates(fromp, candidates);
-    }
-}
-
 // Find all variables in a loop (SCC) that are candidates for splitting to break loops.
 void reportLoopVars(Graph* graphp, VarVertex* vvtxp) {
     // Vector of variables in UNOPTFLAT loop that are candidates for splitting.
-    std::vector<Candidate> candidates;
-    {
-        // AstNode::user3 is used to mark if we have done a particular variable.
-        // V3GraphVertex::user is used to mark if we have seen this vertex before.
-        const VNUser3InUse user3InUse;
-        graphp->userClearVertices();
-        gatherSCCCandidates(vvtxp, candidates);
-        graphp->userClearVertices();
-    }
+    std::vector<Candidate> candidates = gatherSCCCandidates(graphp, vvtxp);
 
     // Possible we only have candidates the user cannot do anything about, so don't bother them.
     if (candidates.empty()) return;

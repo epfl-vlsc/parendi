@@ -90,6 +90,7 @@
 #include "V3SplitComb.h"
 #include "V3SplitAs.h"
 #include "V3SplitVar.h"
+#include "V3SplitVarExtra.h"
 #include "V3Stats.h"
 #include "V3String.h"
 #include "V3Subst.h"
@@ -355,6 +356,10 @@ static void process() {
         // Move assignments/sensitives into a SBLOCK for each unique sensitivity list
         // (May convert some ALWAYS to combo blocks, so should be before V3Gate step.)
         V3Active::activeAll(v3Global.rootp());
+
+
+        // split variables to remove combinational loops
+        V3SplitVarExtra::splitVariableExtra(v3Global.rootp());
 
         // Split single ALWAYS blocks into multiple blocks for better ordering chances
         V3Split::splitAlwaysAll(v3Global.rootp());
