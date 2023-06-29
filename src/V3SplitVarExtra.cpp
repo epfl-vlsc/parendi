@@ -170,11 +170,9 @@ public:
         if (width == 0) return;
         const int fromIndex = index(from);
         const int toIndex = index(from + width - 1);
-        // std::cout << " " << from << " +: " << width << " (" << fromIndex << ", " << toIndex
-        // <<
-        // ")"
-        //           << std::endl;
-        UASSERT(from + width - 1 < m_width, "invalid range");
+
+        UASSERT(from + width - 1 < m_width,
+                "invalid range [" << from << "+:" << width << "]" << endl);
         const int shAmount = from % BUCKET_SIZE;
         uint32_t mask = 0;
         if (toIndex == fromIndex) {
@@ -394,7 +392,13 @@ private:
                             "scc is not colored properly");
                 // only consider Struct and PackArray types for splitting, unpack array
                 // is rarely a cause for induced combinational loops
-                if (!(VN_IS(dtypep, PackArrayDType) || VN_IS(dtypep, StructDType))) { continue; }
+                if (!(VN_IS(dtypep, PackArrayDType) || VN_IS(dtypep, StructDType)
+                      || VN_IS(dtypep, BasicDType))) {
+                    UINFO(4, "Will not consider " << varVtxp->varp()->prettyNameQ()
+                                                  << " for automatic splitting with dtype "
+                                                  << dtypep->prettyNameQ() << endl);
+                    continue;
+                }
                 if (!V3SplitVar::canSplitVar(varVtxp->varp())) { continue; }
                 // probably can split this var, but we need find the best one to split
                 // m_scoreboard{candidate.first->vscp(), ReadWriteVec{dtypep->width()};
@@ -409,7 +413,7 @@ private:
                 iterateChildren(logicVertexp->logicp());
             }
         }
-        UINFO(3, "********In SCC" << cvtToHex(scc.front()->color()) << " :" << endl);
+        UINFO(3, "        In SCC" << cvtToHex(scc.front()->color()) << " :" << endl);
         for (const auto& pair : m_scoreboard) {
             if (pair.second.conflict()) {
                 const auto disjointReadIntervals
@@ -449,13 +453,19 @@ private:
                 return;
             }
             selLsb = lsbpConst->toSInt();
-            selWidth = m_selp->widthConst();
+
+            // UASSERT_OBJ(selWidth >= m_selp->widthConst() || selLsb == 0, vrefp,
+            //             "Unexpected width, can not determine selection. Is there a AstSel -> "
+            //             "Concat -> VarRef?"
+            //                 << endl);
+
+            selWidth = std::min(selWidth, m_selp->widthConst());
         }
         if (vrefp->access().isWriteOrRW()) {
-            setIt->second.setWrite(selLsb, selWidth, vscp->fileline());
+            setIt->second.setWrite(selLsb, selWidth, vrefp->fileline());
         }
         if (vrefp->access().isReadOrRW()) {
-            setIt->second.setRead(selLsb, selWidth, vscp->fileline());
+            setIt->second.setRead(selLsb, selWidth, vrefp->fileline());
         }
     }
 
@@ -463,8 +473,13 @@ private:
         // UASSERT_OBJ(!m_selp, selp, "nested Sel! " << m_selp << endl);
         VL_RESTORER(m_selp);
         {
-            m_selp = selp;
-            iterateChildren(selp);
+            if (VN_IS(selp->fromp(), Extend) || VN_IS(selp->fromp(), ExtendS)
+                || VN_IS(selp->fromp(), VarRef)) {
+                // perhaps a bit too conservative, but at least this way we
+                // can know the ranges are computed correclty in AstVarRef
+                m_selp = selp;
+                iterateChildren(selp);
+            }
         }
     }
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
@@ -497,6 +512,7 @@ private:
         std::unique_ptr<Graph> graphp = SplitVariableCombLoopsVisitor::build(netlistp);
         if (graphp->empty()) {
             // lucky us, no combinational loops
+            UINFO(3, "        No combinational loops, skipping extra splitting" << endl);
             return;
         }
         // color the strongly connected components and within each loop, and
