@@ -259,7 +259,7 @@ struct ReadWriteVec {
         // turn  the range of sorted intervals with gaps, with one that fully covers [0:width - 1]
         int lsb = 0, msb = 0;
         std::vector<BitInterval> no_gaps;
-        if (original.front().first > 0) { no_gaps.emplace_back(0, original.front().second - 1); }
+        if (original.front().first > 0) { no_gaps.emplace_back(0, original.front().first - 1); }
         for (int i = 0; i < original.size(); i++) {
             auto& r1 = original[i];
             no_gaps.emplace_back(r1.first, r1.second);
@@ -413,22 +413,31 @@ private:
                 iterateChildren(logicVertexp->logicp());
             }
         }
-        UINFO(3, "        In SCC" << cvtToHex(scc.front()->color()) << " :" << endl);
+        UINFO(4, "        In SCC" << cvtToHex(scc.front()->color()) << " :" << endl);
         for (const auto& pair : m_scoreboard) {
             if (pair.second.conflict()) {
                 const auto disjointReadIntervals
                     = ReadWriteVec::maximalDisjoint(pair.second.m_readIntervals);
                 if (disjointReadIntervals.size() > 1) {
-                    UINFO(3, "        considering: " << pair.first->prettyName() << endl
-                                                     << pair.second.conflictReason() << endl);
                     const auto disjointCovered = ReadWriteVec::disjoinFillGaps(
                         disjointReadIntervals, pair.first->dtypep()->width());
+                    if (debug() >= 4) {
+                        std::stringstream ss;
+                        ss << "        ";
+                        for (const auto& bi : vlstd::reverse_view(disjointCovered)) {
+                            ss << "[" << bi.second << ":" << bi.first << "],  ";
+                        }
+                        ss << endl;
+
+                        UINFO(4, "        considering: " << pair.first->prettyName() << endl
+                                                         << ss.str());
+                    }
                     m_disjointReadRanges.emplace(pair.first, std::move(disjointCovered));
                 } else {
-                    UINFO(3, "        can not split: " << pair.first->prettyNameQ() << endl);
+                    UINFO(4, "        can not split: " << pair.first->prettyNameQ() << endl);
                 }
             } else {
-                UINFO(4, "        need not split:  " << pair.first->prettyName() << endl);
+                UINFO(5, "        need not split:  " << pair.first->prettyName() << endl);
             }
         }
     }
@@ -595,6 +604,8 @@ private:
             m_substp.emplace(oldVscp, std::move(newSubstp));
             pushDeletep(oldVscp->unlinkFrBack());
             pushDeletep(varp->unlinkFrBack());
+            UINFO(5, "    Splitting " << oldVscp->prettyNameQ() << " to " << bitIntervals.size()
+                                      << " variables " << endl);
         }
 
         V3Stats::addStat("Optimizations, extra split var", numSplits - 1);
@@ -606,6 +617,7 @@ private:
         if (it == m_substp.end()) {
             return;  // variable reference to unsplit
         }
+
         // AstConcat* const concatp = new AstConcat { vrefp->fileline(), }
         UASSERT_OBJ(it->second.size() >= 2, oldVscp, "improperly split variable");
         AstConcat* concatp = new AstConcat{
