@@ -1840,6 +1840,24 @@ private:
             nodep->v3fatalSrc("tried to merge two Concat which are not adjacent");
         }
     }
+
+    void replaceSelExtend(AstSel* nodep) {
+        // SEL(EXTEND(a, w2), l, w1) -> SEL(a, l, w1) or Const(0)
+        AstExtend* const extp = VN_AS(nodep->fromp(), Extend);
+        if (static_cast<int>(nodep->lsbConst() >= extp->lhsp()->width())) {
+            // SEL(EXTEND(a, w2), l, w1) -> 0
+            AstConst* const newp
+                = new AstConst{nodep->fileline(), AstConst::DTyped{}, nodep->dtypep()};
+            nodep->replaceWith(newp);
+            VL_DO_DANGLING(nodep->deleteTree(), nodep);
+
+        } else if (static_cast<int>(nodep->msbConst() < extp->lhsp()->width())) {
+            // SEL(EXTEND(a, w2), l, w1) -> SEL(a, l, w1)
+            nodep->fromp()->replaceWith(extp->lhsp()->unlinkFrBack());
+            VL_DO_DANGLING(extp->deleteTree(), extp);
+        } // else no change
+    }
+
     void replaceExtend(AstNode* nodep, AstNodeExpr* arg0p) {
         // -> EXTEND(nodep)
         // like a AstExtend{$rhsp}, but we need to set the width correctly from base node
@@ -3548,6 +3566,7 @@ private:
     TREEOPV("AstReplicateN{$lhsp, $rhsp.isOne, $lhsp->width()==nodep->width()}", "replaceWLhs(nodep)");  // {1{lhs}}->lhs
     TREEOPV("AstReplicate{$lhsp.castReplicate, operandRepRep(nodep)}", "DONE");  // {2{3{lhs}}}->{6{lhs}}
     TREEOPV("AstConcat{operandConcatSame(nodep)}", "DONE");  // {a,a}->{2{a}}, {a,2{a}}->{3{a}, etc
+    TREEOPV("AstSel{$fromp.castExtend}", "replaceSelExtend(nodep)");
     // Next rule because AUTOINST puts the width of bits in
     // to pins, even when the widths are exactly the same across the hierarchy.
     TREEOPV("AstSel{matchSelRand(nodep)}",      "DONE");
