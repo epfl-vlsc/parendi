@@ -790,7 +790,7 @@ void V3Options::notify() {
         v3fatal("verilator: Need --binary, --cc, --sc, --cdc, --dpi-hdr-only, --lint-only, "
                 "--xml-only or --E option");
     }
-    if (outFormatOk() && timing().isTrue()) {
+    if (outFormatOk() && v3Global.opt.poplar() && timing().isTrue()) {
         v3fatal("verilator: --timing is not supported with --poplar");
     }
 

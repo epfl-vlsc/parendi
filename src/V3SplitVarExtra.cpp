@@ -418,9 +418,9 @@ private:
             if (pair.second.conflict()) {
                 const auto disjointReadIntervals
                     = ReadWriteVec::maximalDisjoint(pair.second.m_readIntervals);
-                if (disjointReadIntervals.size() > 1) {
-                    const auto disjointCovered = ReadWriteVec::disjoinFillGaps(
-                        disjointReadIntervals, pair.first->dtypep()->width());
+                const auto disjointCovered = ReadWriteVec::disjoinFillGaps(
+                    disjointReadIntervals, pair.first->dtypep()->width());
+                if (disjointCovered.size() > 1) {
                     if (debug() >= 4) {
                         std::stringstream ss;
                         ss << "        ";
@@ -486,6 +486,7 @@ private:
                 || VN_IS(selp->fromp(), VarRef)) {
                 // perhaps a bit too conservative, but at least this way we
                 // can know the ranges are computed correclty in AstVarRef
+                // TODO: handle fromp being Concat
                 m_selp = selp;
                 iterateChildren(selp);
             }
@@ -542,7 +543,7 @@ class SplitExtraPackVisitor : public VNVisitor {
 private:
     using ReplacementHandle = std::vector<std::pair<BitInterval, AstVarScope*>>;
     std::unordered_map<AstVarScope*, ReplacementHandle> m_substp;
-    AstSel* m_selp = nullptr;
+
 
     void mkReplacements(
         const std::unordered_map<AstVarScope*, std::vector<BitInterval>>& splitIntervals,
@@ -611,35 +612,87 @@ private:
         V3Stats::addStat("Optimizations, extra split var", numSplits - 1);
     }
 
+    bool intersects(const BitInterval& p1, const BitInterval& p2) {
+        const int lsb1 = p1.first, msb1 = p1.second;
+        const int lsb2 = p2.first, msb2 = p2.second;
+        if (msb1 < lsb2 || lsb1 > msb2) {
+            return false;
+        } else {
+            return true;
+        }
+    }
     void visit(AstVarRef* vrefp) override {
         AstVarScope* const oldVscp = vrefp->varScopep();
         const auto it = m_substp.find(oldVscp);
         if (it == m_substp.end()) {
             return;  // variable reference to unsplit
         }
+        // are we directly under an AstSel?
+        AstSel* const outerSelp = VN_CAST(vrefp->backp(), Sel);
+        std::vector<std::pair<BitInterval, AstVarScope*>> concatOpsp;
+        const std::vector<std::pair<BitInterval, AstVarScope*>>& intervals = it->second;
+        AstNodeExpr* newExprp = nullptr;
 
-        // AstConcat* const concatp = new AstConcat { vrefp->fileline(), }
-        UASSERT_OBJ(it->second.size() >= 2, oldVscp, "improperly split variable");
-        AstConcat* concatp = new AstConcat{
-            vrefp->fileline(),
-            new AstVarRef{vrefp->fileline(), it->second[1].second, vrefp->access()},
-            new AstVarRef{vrefp->fileline(), it->second[0].second, vrefp->access()}};
-        for (int i = 2; i < it->second.size(); i++) {
-            concatp = new AstConcat{
-                vrefp->fileline(),
-                new AstVarRef{vrefp->fileline(), it->second[i].second, vrefp->access()}, concatp};
+        if (outerSelp && VN_IS(outerSelp->lsbp(), Const)) {
+            int selLsb = outerSelp->lsbConst();
+            const int selWidth = outerSelp->widthConst();
+            UASSERT_OBJ(selLsb + selWidth <= oldVscp->width() && selWidth > 0, outerSelp,
+                        "invalid Sel range");
+            const int selMsb = selLsb + selWidth - 1;
+            // iterate through the split intervals and find all the overlapping ones
+
+            for (const auto& pair : intervals) {
+                const int lsb = pair.first.first;
+                const int msb = pair.first.second;
+                if (intersects({lsb, msb}, {selLsb, selMsb})) {
+                    // overlaps
+                    concatOpsp.push_back(pair);
+                }
+            }
+
+            // adjust the AstSel lsbp
+
+            UASSERT(concatOpsp.size(), "expected at least one overlapping part");
+            UASSERT(selLsb >= concatOpsp.front().first.first, "invalid lsb");
+            AstNode* oldLsbp = outerSelp->lsbp();
+
+            oldLsbp->replaceWith(
+                new AstConst{outerSelp->lsbp()->fileline(),
+                             static_cast<uint32_t>(selLsb - concatOpsp.front().first.first)});
+            VL_DO_DANGLING(pushDeletep(oldLsbp), oldLsbp);
+            // optimal case, no need to concat
+            if (concatOpsp.size() == 1) {
+                newExprp
+                    = new AstVarRef{vrefp->fileline(), concatOpsp.front().second, vrefp->access()};
+                concatOpsp.clear();
+            }
+
+        } else {
+            // cover the whole variable
+            for (const auto& p : intervals) { concatOpsp.push_back(p); }
         }
-        vrefp->replaceWith(concatp);
+        // AstConcat* const concatp = new AstConcat { vrefp->fileline(), }
+        UASSERT_OBJ(concatOpsp.size() >= 2 || concatOpsp.size() == 0, oldVscp,
+                    "improperly split variable");
+        if (concatOpsp.size()) {
+
+            AstConcat* concatp = new AstConcat{
+                vrefp->fileline(),
+                new AstVarRef{vrefp->fileline(), concatOpsp[1].second, vrefp->access()},
+                new AstVarRef{vrefp->fileline(), concatOpsp[0].second, vrefp->access()}};
+            for (int i = 2; i < it->second.size(); i++) {
+                concatp = new AstConcat{
+                    vrefp->fileline(),
+                    new AstVarRef{vrefp->fileline(), it->second[i].second, vrefp->access()},
+                    concatp};
+            }
+            newExprp = concatp;
+        }
+        vrefp->replaceWith(newExprp);
         VL_DO_DANGLING(pushDeletep(vrefp), vrefp);
     }
 
-    // void visit(AstSel* selp) override {
-    //     VL_RESTORER(m_selp);
-    //     {
-    //         m_selp = selp;
 
-    //     }
-    // }
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
 public:
@@ -652,183 +705,8 @@ public:
         }
     }
 };
-class SplitInsertSelOnLVVisitor : public VNVisitor {
-private:
-    std::unordered_map<const AstVarScope*, std::vector<BitInterval>> m_readIntervals;
-    std::vector<BitInterval> m_bitSels;  // clear on NodeAssign
 
-    AstSel* m_selp = nullptr;
-    AstVarScope* m_vscp = nullptr;
-    AstScope* m_scopep = nullptr;
 
-    V3UniqueNames m_tempNames;
-
-    void visit(AstVarRef* vrefp) override {
-
-        if (!vrefp->access().isWriteOrRW()) {
-            return;  // nothing to do
-        }
-        AstVarScope* const vscp = vrefp->varScopep();
-        auto it = m_readIntervals.find(vscp);
-        if (it == m_readIntervals.end()) {
-            return;  // not needed to split write
-        }
-        UASSERT(vscp->dtypep()->width() > 1,
-                "Can not split single bit, check this earlier in V3SplitVarExtra");
-        BitInterval bitInt{0, vscp->dtypep()->width() - 1};
-        if (m_selp) {
-            bitInt.first = m_selp->lsbConst();  // should be Const, if not something else is broken
-            bitInt.second = bitInt.first + m_selp->widthConst() - 1;
-        }
-
-        m_vscp = vscp;
-        std::vector<BitInterval>& allowedIntervals = it->second;
-        // bitInt should either be fully contained with one of the allowed intervals.
-        // If there is and overlaps between multiple we need to split this LV access e.g.:
-        //      allowed intervals: [0:1] [2:3] [4:6] [7:12] [13:31]
-        //      bitInt: [2:8], i.e., v[8:2] = ...
-        //      should become
-        //      v[3:2] = ...
-        //      v[6:4] = ...
-        //      v[8:7] = ...
-        // note that allowedIntervals are sorted in the increasing order of their lsb
-        UASSERT(m_bitSels.empty(), "expected empty container, clear on NodeAssign");
-        for (const auto& ri : allowedIntervals) {
-            if (ri.first > bitInt.second) {
-                break;  // no need to search further
-            }
-            int lsb = std::max(ri.first, bitInt.first);
-            int msb = std::min(ri.second, bitInt.second);
-            if (lsb <= msb) { m_bitSels.emplace_back(lsb, msb); }
-        }
-
-        if (m_bitSels.size() == 1 && m_bitSels.front().first == bitInt.first
-            && m_bitSels.front().second == bitInt.second) {
-            // fully contained, do nothing
-            m_bitSels.pop_back();  // clear it
-            return;
-        }
-    }
-    void visit(AstScope* scopep) override {
-        UASSERT_OBJ(!m_scopep, scopep, "Nested scopes!");
-        VL_RESTORER(m_scopep);
-        {
-            m_scopep = scopep;
-            iterateChildren(scopep);
-        }
-    }
-    void visit(AstSel* selp) override {
-        // UASSERT_OBJ(!m_selp, selp, "Nested AstSel");
-        VL_RESTORER(m_selp);
-        {
-            m_selp = selp;
-            iterateChildren(selp);
-        }
-    }
-    void visit(AstNodeAssign* assignp) override {
-
-        m_vscp = nullptr;
-        m_bitSels.clear();
-
-        // only consider lhs (LV), rhs remains as-is
-        iterate(assignp->lhsp());
-
-        if (m_bitSels.empty()) { return; }
-
-        UASSERT_OBJ(VN_IS(assignp->lhsp(), Sel) || VN_IS(assignp->lhsp(), VarRef), assignp,
-                    "unexpected node under NodeAssign: " << assignp->lhsp()->prettyTypeName());
-        UASSERT_OBJ(VN_IS(assignp, AssignW) || VN_IS(assignp, Assign), assignp,
-                    "unexpected NodeAssign type in comb logic " << assignp->prettyTypeName());
-        AstVar* const tempVarp = new AstVar{assignp->fileline(), VVarType::MODULETEMP,
-                                            m_tempNames.get(assignp), assignp->rhsp()->dtypep()};
-
-        AstVarScope* const tempVscp = new AstVarScope{assignp->fileline(), m_scopep, tempVarp};
-        m_scopep->addVarsp(tempVscp);
-        m_scopep->modp()->addStmtsp(tempVarp);
-        auto newAssign = [&assignp](AstNodeExpr* lhsp, AstNodeExpr* rhsp) -> AstNodeAssign* {
-            AstNode* timingp = assignp->timingControlp()
-                                   ? assignp->timingControlp()->cloneTree(false)
-                                   : nullptr;
-            if (VN_IS(assignp, AssignW)) {
-                return new AstAssignW{assignp->fileline(), lhsp, rhsp, timingp};
-            } else {
-                return new AstAssign{assignp->fileline(), lhsp, rhsp, timingp};
-            }
-        };
-        AstNodeAssign* const tmpAssign
-            = newAssign(new AstVarRef{assignp->fileline(), tempVscp, VAccess::WRITE},
-                        assignp->rhsp()->cloneTree(false));
-
-        // replace this node with a series of assignments
-        // v[x:y] = expr;
-        // becomes:
-        // temp = expr;
-        // v[x1:y1] = temp[x1:y1];
-        // v[x2:x2] = temp[x2:y2];
-        // ...
-        for (const BitInterval& bi : m_bitSels) {
-            // V3Const::constifyEdit()
-            auto newSel = [&](AstVarScope* vscp, VAccess access) {
-                return new AstSel{assignp->lhsp()->fileline(),
-                                  new AstVarRef{assignp->lhsp()->fileline(), vscp, VAccess::WRITE},
-                                  bi.first, bi.second + 1 - bi.first};
-            };
-            auto newp = newAssign(newSel(m_vscp, VAccess::WRITE), newSel(tempVscp, VAccess::READ));
-            tmpAssign->addNext(newp);
-        }
-        assignp->replaceWith(tmpAssign);
-        VL_DO_DANGLING(pushDeletep(assignp), assignp);
-    }
-    void visit(AstNode* nodep) override { iterateChildren(nodep); }
-
-public:
-    explicit SplitInsertSelOnLVVisitor(
-        AstNetlist* netlistp,
-        const std::unordered_map<const AstVarScope*, std::vector<BitInterval>>& intervals)
-        : m_readIntervals{intervals}
-        , m_tempNames{"__Vsplitsel"} {
-        if (!m_readIntervals.empty()) { iterate(netlistp); }
-    }
-};
-class SplitInsertVarScopeVisitor : public VNVisitor {
-private:
-    AstScope* m_scopep = nullptr;
-    enum class VisitMode : uint8_t {
-        FIND_EXISTING = 0,
-        SET_NONEXISTING = 1
-    } m_visitMode = VisitMode::FIND_EXISTING;
-
-    const VNUser1InUse m_user1InUse;
-    // STATE
-    // AstVar::user1p()  -> varscope
-
-    void visit(AstVarRef* vrefp) override {
-        if (!vrefp->varp()->user1p()) {
-            // create a new var scope
-            AstVarScope* const newVscp
-                = new AstVarScope{vrefp->varp()->fileline(), m_scopep, vrefp->varp()};
-            m_scopep->addVarsp(newVscp);
-            vrefp->varp()->user1p(newVscp);
-        }
-        if (!vrefp->varScopep()) { vrefp->varScopep(VN_AS(vrefp->varp()->user1p(), VarScope)); }
-    }
-    void visit(AstScope* scopep) override {
-        VL_RESTORER(m_scopep);
-        {
-            m_scopep = scopep;
-            AstNode::user1ClearTree();
-            for (AstVarScope* vscp = scopep->varsp(); vscp;
-                 vscp = VN_AS(vscp->nextp(), VarScope)) {
-                vscp->varp()->user1p(vscp);
-            }
-            iterateAndNextNull(scopep->blocksp());
-        }
-    }
-    void visit(AstNode* nodep) override { iterateChildren(nodep); }
-
-public:
-    SplitInsertVarScopeVisitor(AstNetlist* nodep) { iterate(nodep); }
-};
 
 void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
     UINFO(4, __FUNCTION__ << ":" << endl);
@@ -838,7 +716,12 @@ void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
     // mark new ones, based on a heuristic
     auto readRanges = SplitVariableExtraVisitor::computeDisjoinReadRanges(netlistp);
     V3Global::dumpCheckGlobalTree("split_var_extra", 0, dumpTree() >= 5);
+
     { SplitExtraPackVisitor{netlistp, readRanges}; }
     V3Global::dumpCheckGlobalTree("split_var_extra_pack", 0, dumpTree() >= 3);
+
+    // Call V3Const to clean up ASSIGN(CONCAT(CONCAT(...))) = CONCAT(CONCAT(...))
+
     V3Const::constifyAll(netlistp);
+
 }
