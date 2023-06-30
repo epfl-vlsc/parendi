@@ -544,7 +544,6 @@ private:
     using ReplacementHandle = std::vector<std::pair<BitInterval, AstVarScope*>>;
     std::unordered_map<AstVarScope*, ReplacementHandle> m_substp;
 
-
     void mkReplacements(
         const std::unordered_map<AstVarScope*, std::vector<BitInterval>>& splitIntervals,
         AstNetlist* netlistp) {
@@ -627,71 +626,20 @@ private:
         if (it == m_substp.end()) {
             return;  // variable reference to unsplit
         }
-        // are we directly under an AstSel?
-        AstSel* const outerSelp = VN_CAST(vrefp->backp(), Sel);
-        std::vector<std::pair<BitInterval, AstVarScope*>> concatOpsp;
-        const std::vector<std::pair<BitInterval, AstVarScope*>>& intervals = it->second;
-        AstNodeExpr* newExprp = nullptr;
-
-        if (outerSelp && VN_IS(outerSelp->lsbp(), Const)) {
-            int selLsb = outerSelp->lsbConst();
-            const int selWidth = outerSelp->widthConst();
-            UASSERT_OBJ(selLsb + selWidth <= oldVscp->width() && selWidth > 0, outerSelp,
-                        "invalid Sel range");
-            const int selMsb = selLsb + selWidth - 1;
-            // iterate through the split intervals and find all the overlapping ones
-
-            for (const auto& pair : intervals) {
-                const int lsb = pair.first.first;
-                const int msb = pair.first.second;
-                if (intersects({lsb, msb}, {selLsb, selMsb})) {
-                    // overlaps
-                    concatOpsp.push_back(pair);
-                }
-            }
-
-            // adjust the AstSel lsbp
-
-            UASSERT(concatOpsp.size(), "expected at least one overlapping part");
-            UASSERT(selLsb >= concatOpsp.front().first.first, "invalid lsb");
-            AstNode* oldLsbp = outerSelp->lsbp();
-
-            oldLsbp->replaceWith(
-                new AstConst{outerSelp->lsbp()->fileline(),
-                             static_cast<uint32_t>(selLsb - concatOpsp.front().first.first)});
-            VL_DO_DANGLING(pushDeletep(oldLsbp), oldLsbp);
-            // optimal case, no need to concat
-            if (concatOpsp.size() == 1) {
-                newExprp
-                    = new AstVarRef{vrefp->fileline(), concatOpsp.front().second, vrefp->access()};
-                concatOpsp.clear();
-            }
-
-        } else {
-            // cover the whole variable
-            for (const auto& p : intervals) { concatOpsp.push_back(p); }
-        }
         // AstConcat* const concatp = new AstConcat { vrefp->fileline(), }
-        UASSERT_OBJ(concatOpsp.size() >= 2 || concatOpsp.size() == 0, oldVscp,
-                    "improperly split variable");
-        if (concatOpsp.size()) {
-
-            AstConcat* concatp = new AstConcat{
+        UASSERT_OBJ(it->second.size() >= 2, oldVscp, "improperly split variable");
+        AstConcat* concatp = new AstConcat{
+            vrefp->fileline(),
+            new AstVarRef{vrefp->fileline(), it->second[1].second, vrefp->access()},
+            new AstVarRef{vrefp->fileline(), it->second[0].second, vrefp->access()}};
+        for (int i = 2; i < it->second.size(); i++) {
+            concatp = new AstConcat{
                 vrefp->fileline(),
-                new AstVarRef{vrefp->fileline(), concatOpsp[1].second, vrefp->access()},
-                new AstVarRef{vrefp->fileline(), concatOpsp[0].second, vrefp->access()}};
-            for (int i = 2; i < it->second.size(); i++) {
-                concatp = new AstConcat{
-                    vrefp->fileline(),
-                    new AstVarRef{vrefp->fileline(), it->second[i].second, vrefp->access()},
-                    concatp};
-            }
-            newExprp = concatp;
+                new AstVarRef{vrefp->fileline(), it->second[i].second, vrefp->access()}, concatp};
         }
-        vrefp->replaceWith(newExprp);
+        vrefp->replaceWith(concatp);
         VL_DO_DANGLING(pushDeletep(vrefp), vrefp);
     }
-
 
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
@@ -705,8 +653,6 @@ public:
         }
     }
 };
-
-
 
 void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
     UINFO(4, __FUNCTION__ << ":" << endl);
@@ -723,5 +669,4 @@ void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
     // Call V3Const to clean up ASSIGN(CONCAT(CONCAT(...))) = CONCAT(CONCAT(...))
 
     V3Const::constifyAll(netlistp);
-
 }
