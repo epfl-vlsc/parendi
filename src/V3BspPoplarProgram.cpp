@@ -109,7 +109,6 @@ public:
         doLocate(unlocatedCompute);
         doLocate(unlocatedInit);
         fixTileCountAndPromoteToSupervisor();
-
     }
 };
 
@@ -198,14 +197,21 @@ public:
         netlistp->foreach([](AstClass* classp) {
             if (classp->flag().isBsp()) {
                 int nameId = 0;
+                const VNUser1InUse user1Inuse;
+                AstNode::user1ClearTree();
+                for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
+                    if (AstVar* const varp = VN_CAST(nodep, Var)) { varp->user1(true); }
+                }
                 classp->foreach([&nameId](AstVarScope* vscp) {
-                    // AstNode::dedotName()
-                    // const std::string newName
-                    //     = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
-                    if (vscp->varp()->origName().empty()) {
-                        vscp->varp()->origName(vscp->varp()->name());
+                    if (vscp->varp()->user1()) {
+                        // AstNode::dedotName()
+                        // const std::string newName
+                        //     = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
+                        if (vscp->varp()->origName().empty()) {
+                            vscp->varp()->origName(vscp->varp()->name());
+                        }
+                        vscp->varp()->name("field_" + cvtToStr(nameId++));
                     }
-                    vscp->varp()->name("field_" + cvtToStr(nameId++));
                 });
             }
         });

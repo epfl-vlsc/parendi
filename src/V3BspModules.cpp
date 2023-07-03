@@ -161,7 +161,7 @@ private:
 
     // check whether data type is supported
     inline bool supportedDType(const AstNodeDType* const dtypep) const {
-        return isAnyTypeFromList<AstBasicDType, AstUnpackArrayDType, AstNodeUOrStructDType>(
+        return isAnyTypeFromList<AstBasicDType, AstPackArrayDType, AstUnpackArrayDType, AstNodeUOrStructDType>(
             dtypep);
     }
     template <typename... Args>

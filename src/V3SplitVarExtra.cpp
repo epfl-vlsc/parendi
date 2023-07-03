@@ -399,7 +399,12 @@ private:
                                                   << dtypep->prettyNameQ() << endl);
                     continue;
                 }
-                if (!V3SplitVar::canSplitVar(varVtxp->varp())) { continue; }
+                if (!V3SplitVar::canSplitVar(varVtxp->varp())) {
+                    UINFO(4, "Can not consider " << varVtxp->varp()->prettyNameQ()
+                                                 << " for automatic splitting with dtype "
+                                                 << dtypep->prettyNameQ() << endl);
+                    continue;
+                }
                 // probably can split this var, but we need find the best one to split
                 // m_scoreboard{candidate.first->vscp(), ReadWriteVec{dtypep->width()};
                 UINFO(8, "        Candidate for automatic splitting: " << varVtxp->vscp() << endl);
@@ -420,6 +425,15 @@ private:
                     = ReadWriteVec::maximalDisjoint(pair.second.m_readIntervals);
                 const auto disjointCovered = ReadWriteVec::disjoinFillGaps(
                     disjointReadIntervals, pair.first->dtypep()->width());
+                auto splitStr = [&disjointCovered]() {
+                    std::stringstream ss;
+                    ss << "        ";
+                    for (const auto& bi : vlstd::reverse_view(disjointCovered)) {
+                        ss << "[" << bi.second << ":" << bi.first << "],  ";
+                    }
+                    ss << endl;
+                    return ss.str();
+                };
                 if (disjointCovered.size() > 1) {
                     if (debug() >= 4) {
                         std::stringstream ss;
@@ -430,14 +444,16 @@ private:
                         ss << endl;
 
                         UINFO(4, "        considering: " << pair.first->prettyName() << endl
-                                                         << ss.str());
+                                                         << splitStr() << endl);
                     }
                     m_disjointReadRanges.emplace(pair.first, std::move(disjointCovered));
                 } else {
-                    UINFO(4, "        can not split: " << pair.first->prettyNameQ() << endl);
+                    UINFO(4, "        can not split: " << pair.first->prettyNameQ() << endl
+                                                       << splitStr() << endl);
                 }
             } else {
-                UINFO(5, "        need not split:  " << pair.first->prettyName() << endl);
+                UINFO(5, "        need not split:  " << pair.first->prettyName()
+                                                     << pair.second.conflictReason() << endl);
             }
         }
     }
@@ -479,18 +495,30 @@ private:
     }
 
     void visit(AstSel* selp) override {
-        // UASSERT_OBJ(!m_selp, selp, "nested Sel! " << m_selp << endl);
-        VL_RESTORER(m_selp);
-        {
-            if (VN_IS(selp->fromp(), Extend) || VN_IS(selp->fromp(), ExtendS)
-                || VN_IS(selp->fromp(), VarRef)) {
-                // perhaps a bit too conservative, but at least this way we
-                // can know the ranges are computed correclty in AstVarRef
-                // TODO: handle fromp being Concat
-                m_selp = selp;
-                iterateChildren(selp);
-            }
+        UASSERT_OBJ(!m_selp, selp, "nested Sel! " << m_selp << endl);
+        // SEL(EXTEND(VARREF)) or SEL(VARREF) will recieve a narrowed down
+        // range but anything else should be read/written as a whole. Note that
+        // as long as we do the following we ensure that we never wrongly compute
+        // the read/write range on VarRef but we may miss some optimization opportunities.
+        // E.g., SEL(CONCAT(VARREF, VARREF)), we could still determine extactly which
+        // bits are being read in each VarRef but instea we end up thinkin all bits
+        // are being written/read
+        AstExtend* const extp = VN_CAST(selp->fromp(), Extend);
+        AstExtendS* const extsp = VN_CAST(selp->fromp(), ExtendS);
+        AstVarRef* const vrefp = VN_CAST(selp->fromp(), VarRef);
+        if (vrefp || (extp && VN_IS(extp->lhsp(), VarRef))
+            || (extsp && VN_IS(extsp->lhsp(), VarRef))) {
+            m_selp = selp;
+            iterate(selp->fromp());
+            // do not visit the rest with m_selp set since the sel range only applies to the
+            // variable referenced directly below but not the ones in lsbp
+            m_selp = nullptr;
+        } else {
+            // SEL(EXPR(VARREF)) will view VarRef as it was read/written as a whole.
+            // This is conservative, but correct.
+            iterate(selp->fromp());
         }
+        iterate(selp->lsbp());
     }
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
@@ -669,4 +697,9 @@ void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
     // Call V3Const to clean up ASSIGN(CONCAT(CONCAT(...))) = CONCAT(CONCAT(...))
 
     V3Const::constifyAll(netlistp);
+
+    // if (dump() >= 3) {
+    const auto loopsp = SplitVariableCombLoopsVisitor::build(netlistp);
+    if (!loopsp->empty()) { loopsp->dumpDotFilePrefixedAlways("split_var_extra_loops_left"); }
+    // }
 }

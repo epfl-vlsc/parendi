@@ -342,12 +342,6 @@ static void process() {
             V3Table::tableAll(v3Global.rootp());
         }
 
-        // remove AstAssignW and order statements, leaves out a single clocked block
-        // and a single comb block
-        // V3MasmAlwaysAll::alwaysAll(v3Global.rootp());
-        // Remove AstIf from active blocks for Manticore
-        // V3IfConversion::predicatedAll(v3Global.rootp());
-
         // Cleanup
         V3Const::constifyAll(v3Global.rootp());
         V3Dead::deadifyDTypesScoped(v3Global.rootp());

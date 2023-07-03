@@ -40,8 +40,7 @@
 #include "V3Stats.h"
 #include "V3UniqueNames.h"
 
-#include <set>
-#include <unordered_set>
+#include "unordered_set"
 
 VL_DEFINE_DEBUG_FUNCTIONS;
 
@@ -49,7 +48,7 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 class CollectLVsVisitor : public VNVisitor {
 private:
     bool m_unopt = false;
-    std::set<AstVarScope*> m_lvsp;
+    std::unordered_set<AstVarScope*> m_lvsp;
 
     void visit(AstVarRef* vrefp) override {
         if (m_unopt) return;
@@ -73,9 +72,9 @@ private:
 
 public:
     explicit CollectLVsVisitor(AstAlways* alwaysp) { iterate(alwaysp); }
-    std::set<AstVarScope*> lvsp() {
+    std::unordered_set<AstVarScope*> lvsp() {
         if (m_unopt) {
-            return std::set<AstVarScope*>{};
+            return std::unordered_set<AstVarScope*>{};
         } else {
             return m_lvsp;
         }
@@ -126,8 +125,7 @@ private:
         if (!m_logicp) return;
         if (vrefp->access().isWriteOrRW()) {
             auto it = m_producer.find(vrefp->varScopep());
-            UINFO(15, "    " << vrefp->varScopep()->prettyName() << " produced by "
-                             << m_logicp->prettyTypeName() << " " << cvtToHex(m_logicp) << endl);
+            UINFO(15, "    " << vrefp->varScopep() << " produced by " << m_logicp << endl);
             if (it == m_producer.end()) {
                 m_producer.emplace(vrefp->varScopep(), std::unordered_set<AstNode*>{m_logicp});
             } else {
@@ -170,74 +168,6 @@ public:
 
     inline LogicMap map() const { return m_producer; }
 };
-
-class SplitMarkKeepVisitor : public VNVisitor {
-private:
-    std::unordered_set<AstNode*> m_keepp;
-    enum Step : int { CHECK_NONE = 0, CHECK_LV = 1, KEEP_RV = 2, POST_ALIVE = 4 };
-    int m_step = CHECK_NONE;
-
-    void visit(AstNodeVarRef* vrefp) override {
-        if ((m_step | CHECK_LV) && vrefp->access().isWriteOrRW()
-            && m_keepp.count(vrefp->varScopep())) {
-            m_step = m_step | POST_ALIVE;
-
-        } else if ((m_step == KEEP_RV) && vrefp->access().isReadOrRW()) {
-            m_keepp.insert(vrefp->varScopep());
-            UINFO(11, "        variable " << vrefp->varScopep() << " is alive " << endl);
-        }
-    }
-    void visit(AstNode* nodep) override {
-        m_step = CHECK_LV;  // assume nodep is dead
-        // iterate childrend backwards and look at any LV reference,
-        // if the LV reference is a live one, come back here and mark any RV
-        // reference below here as also live
-        UINFO(11, "        iterating node " << nodep->prettyTypeName() << "  " << cvtToHex(nodep)
-                                            << endl);
-        iterateChildrenBackwards(nodep);
-        if (m_step & POST_ALIVE) {
-            UINFO(10, "        Keeping node " << nodep->prettyTypeName() << " " << cvtToHex(nodep)
-                                              << endl);
-            m_step = KEEP_RV;
-            iterateChildrenBackwards(nodep);
-        }
-    }
-
-public:
-    explicit SplitMarkKeepVisitor(AstAlways* alwaysp, AstVarScope* alivep)
-        : m_keepp{alivep} {
-        UINFO(10, "    Marking " << alivep->prettyNameQ() << " as alive" << endl);
-        iterateChildrenBackwards(alwaysp);
-    }
-    static std::unordered_set<AstNode*> keepers(AstAlways* alwaysp, AstVarScope* alivep) {
-        return SplitMarkKeepVisitor{alwaysp, alivep}.m_keepp;
-    }
-};
-
-class SplitRemoveDeadStmtsVisitor : public VNVisitor {
-private:
-    const std::unordered_set<AstNode*>& m_keepp;
-
-    void visit(AstNodeAssign* assignp) override {
-        // bool keep =
-        const bool keep = assignp->exists([this](AstNodeVarRef* vrefp) {
-            return vrefp->access().isWriteOrRW() && m_keepp.count(vrefp->varScopep());
-        });
-        if (!keep) {
-            if (assignp->backp()) { assignp->unlinkFrBack(); }
-            VL_DO_DANGLING(assignp->deleteTree(), assignp);
-        }
-    }
-    void visit(AstNode* nodep) override { iterateChildren(nodep); }
-
-public:
-    explicit SplitRemoveDeadStmtsVisitor(AstAlways* alwaysp,
-                                         const std::unordered_set<AstNode*>& keepersp)
-        : m_keepp(keepersp) {
-        iterateChildren(alwaysp);
-    }
-};
-
 class SplitCombVisitor : public VNVisitor {
 private:
     V3UniqueNames m_duplNames;
@@ -267,7 +197,7 @@ private:
         return it->second.size() == 1;
     }
     void visit(AstAlways* alwaysp) override {
-        std::set<AstVarScope*> lvsp = CollectLVsVisitor{alwaysp}.lvsp();
+        std::unordered_set<AstVarScope*> lvsp = CollectLVsVisitor{alwaysp}.lvsp();
         if (lvsp.size() <= 1) {
             return;  // nothing to do
         }
@@ -276,21 +206,10 @@ private:
         AlwaysVec& newCombsp = m_splitsp[alwaysp];
         for (const auto& targetp : lvsp) {
             // clone the always block
-
-            AstAlways* newAlwaysp = alwaysp->cloneTree(false);
-            // find all the node within the clone that we wish to keep
-            const std::unordered_set<AstNode*> keepNodep
-                = SplitMarkKeepVisitor::keepers(newAlwaysp, targetp);
-            // clean anything not needed
-            { SplitRemoveDeadStmtsVisitor{newAlwaysp, keepNodep}; }
-
-            if (!newAlwaysp->stmtsp()) {
-                continue;  // nothing lef after dead code removal
-            }
-            // for any varialbe other than targetp, create block temp substitutions
             std::unordered_map<AstVarScope*, AstVarScope*> substp;
+            // for any varialbe other than targetp, create block temp substitutions
             for (const auto& lvp : lvsp) {
-                if (lvp != targetp && keepNodep.count(lvp)) {
+                if (lvp != targetp) {
                     AstVar* const newVarp
                         = new AstVar{lvp->varp()->fileline(), VVarType::BLOCKTEMP,
                                      m_duplNames.get(lvp->varp()->name()), lvp->varp()->dtypep()};
@@ -302,14 +221,15 @@ private:
                     substp.emplace(lvp, newVscp);
                 }
             }
-
-            // and go through each statement and apply substitutions
+            // clone the always block
+            AstAlways* const newAlwaysp = alwaysp->cloneTree(false);
+            // and go through each statement, applying the substition to each
+            // VarRef
             { VarRefSubstitionVisitor{newAlwaysp, substp}; }
+
             AstNode* const stmtps = newAlwaysp->stmtsp()->unlinkFrBackWithNext();
             for (const auto& oldp : lvsp) {
-                if (oldp == targetp || localProduction(alwaysp, oldp)
-                    || keepNodep.count(oldp) == 0)
-                    continue;
+                if (oldp == targetp || localProduction(alwaysp, oldp)) continue;
                 // if this variable is not uniquely produced here, then we
                 // need to pre-assign it.
                 UASSERT_OBJ(substp.count(oldp), oldp, "no subst?");

@@ -579,7 +579,11 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
                                                &graphp](ConstrCommitVertex* const commitp) {
         AstUnpackArrayDType* const dtypep
             = VN_CAST(commitp->vscp()->varp()->dtypep(), UnpackArrayDType);
-        if (!dtypep || dtypep->arrayUnpackedElements() * dtypep->widthWords() < 64) { return; }
+        constexpr int UnpackMaxWords = 512;  // allow up to 512B to be duplicated
+        if (!dtypep
+            || (dtypep->arrayUnpackedElements() * dtypep->widthWords()) <= UnpackMaxWords) {
+            return;
+        }
 
         auto defp = dynamic_cast<ConstrDefVertex*>(commitp->vscp()->user1u().toGraphVertex());
         UASSERT_OBJ(defp, commitp->vscp(),
