@@ -486,21 +486,27 @@ private:
                     // Put assignment BEHIND of all other statements
                     beginp->addNext(assp);
                 } else if (portp->isNonOutput()) {
+
                     // Make input variable
                     AstVarScope* const inVscp
                         = createVarScope(portp, namePrefix + "__" + portp->shortName());
                     portp->user2p(inVscp);
-                    AstAssign* const assp = new AstAssign{
-                        pinp->fileline(),
-                        new AstVarRef{inVscp->fileline(), inVscp, VAccess::WRITE}, pinp};
-                    assp->fileline()->modifyWarnOff(V3ErrorCode::BLKSEQ,
-                                                    true);  // Ok if in <= block
-                    // Put assignment in FRONT of all other statements
-                    if (AstNode* const afterp = beginp->nextp()) {
-                        afterp->unlinkFrBackWithNext();
-                        AstNode::addNext<AstNode, AstNode>(assp, afterp);
+                    if (portp->isReadOnly() && VN_IS(pinp, Const)) {
+                        // static initialization
+                        inVscp->varp()->valuep(pinp);
+                    } else {
+                        AstAssign* const assp = new AstAssign{
+                            pinp->fileline(),
+                            new AstVarRef{inVscp->fileline(), inVscp, VAccess::WRITE}, pinp};
+                        assp->fileline()->modifyWarnOff(V3ErrorCode::BLKSEQ,
+                                                        true);  // Ok if in <= block
+                        // Put assignment in FRONT of all other statements
+                        if (AstNode* const afterp = beginp->nextp()) {
+                            afterp->unlinkFrBackWithNext();
+                            AstNode::addNext<AstNode, AstNode>(assp, afterp);
+                        }
+                        beginp->addNext(assp);
                     }
-                    beginp->addNext(assp);
                 }
             }
         }

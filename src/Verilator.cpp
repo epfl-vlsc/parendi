@@ -318,6 +318,8 @@ static void process() {
     if (!(v3Global.opt.xmlOnly() && !v3Global.opt.flatten())) {
         // Inline all tasks
         V3Task::taskAll(v3Global.rootp());
+         // Push constants across variables and remove redundant assignments
+        V3Const::constifyAll(v3Global.rootp());
     }
 
     if (!v3Global.opt.xmlOnly()) {
