@@ -39,6 +39,9 @@ bool EmitCFunc::emitSimpleOk(AstNodeExpr* nodep) {
     if (nodep->op1p() && nodep->op1p()->isWide()) return false;
     if (nodep->op2p() && nodep->op2p()->isWide()) return false;
     if (nodep->op3p() && nodep->op3p()->isWide()) return false;
+    if (v3Global.opt.poplar()
+        && (VN_IS(nodep, ShiftL) || VN_IS(nodep, ShiftR))
+        && nodep->isQuad()) return false;
     return true;
 }
 

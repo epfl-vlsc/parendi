@@ -1599,6 +1599,25 @@ static VL_ATTR_ALWINLINE QData VL_SHIFTL_QQQ(int obits, int, int, QData lhs, QDa
     return VL_CLEAN_QQ(obits, obits, lhs << rhs);
 }
 
+static VL_ATTR_ALWINLINE QData VL_SHIFTL_QQI(int obits, int, int, QData lhs, IData rhs) VL_MT_SAFE {
+    VlWide<VL_WQ_WORDS_E> owp;
+    VlWide<VL_WQ_WORDS_E> lwp;
+    VL_SET_WQ(lwp, lhs);
+    if (rhs >= VL_QUADSIZE) {
+        VL_SET_WQ(lwp, 0ULL);
+    } else if (rhs >= VL_EDATASIZE) {
+        owp[0] = 0;
+        owp[1] = (lwp[0] << (rhs - VL_EDATASIZE));
+    } else if (rhs > 0) {
+        owp[0] = lwp[0] << rhs;
+        owp[1] = (lwp[1] << rhs) | (lwp[0] >> (VL_EDATASIZE - rhs));
+    } else {
+        VL_SET_WQ(owp, lhs);
+    }
+    QData r = VL_SET_QW(owp);
+    return VL_SET_QW(owp);
+}
+
 // EMIT_RULE: VL_SHIFTR:  oclean=lclean; rclean==clean;
 // Important: Unlike most other funcs, the shift might well be a computed
 // expression.  Thus consider this when optimizing.  (And perhaps have 2 funcs?)
@@ -1668,6 +1687,28 @@ static VL_ATTR_ALWINLINE IData VL_SHIFTR_IIQ(int obits, int, int, IData lhs, QDa
 static VL_ATTR_ALWINLINE QData VL_SHIFTR_QQQ(int obits, int, int, QData lhs, QData rhs) VL_PURE {
     if (VL_UNLIKELY(rhs >= VL_QUADSIZE)) return 0;
     return VL_CLEAN_QQ(obits, obits, lhs >> rhs);
+}
+
+static VL_ATTR_ALWINLINE QData VL_SHIFTR_QQI(int obits, int, int, QData lhs, IData rhs) VL_PURE {
+
+    VlWide<VL_WQ_WORDS_E> owp;
+    VlWide<VL_WQ_WORDS_E> lwp;
+    VL_SET_WQ(lwp, lhs);
+    if (rhs >= VL_QUADSIZE) {
+        VL_SET_WQ(owp, 0ULL);
+    } else if (rhs >= VL_EDATASIZE) {
+        // VL_EDATASIZE <= rhs < VL_QUADSIZE
+        owp[1] = 0;
+        owp[0] = lwp[1] >> (rhs - VL_EDATASIZE);
+    } else if (rhs == 0) {
+        VL_SET_WQ(owp, lhs);
+    } else {
+        // 0 < rhs < VL_EDATASIZE
+        owp[1] = lwp[1] >> rhs;
+        owp[0] = (lwp[1] << (VL_EDATASIZE - rhs)) | (lwp[0] >> rhs);
+    }
+    // return (lhs >> rhs);
+    return VL_SET_QW(owp);
 }
 
 // EMIT_RULE: VL_SHIFTRS:  oclean=false; lclean=clean, rclean==clean;
