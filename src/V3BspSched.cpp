@@ -170,7 +170,7 @@ buildDepGraphs(AstNetlist* netlistp) {
                    "Pre-active not supprted because as can only handle a single clock");
 
     unsupportedWhy(logicRegions.m_act, "active region computation is not fully supported");
-    
+
     V3Sched::LogicByScope& nbaLogic = logicRegions.m_nba;
     // Step 6. make a fine-grained dependence graph. This graph is different from
     // the V3Order graph in many ways but the most notably difference is wrt ordering

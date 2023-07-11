@@ -161,8 +161,8 @@ private:
 
     // check whether data type is supported
     inline bool supportedDType(const AstNodeDType* const dtypep) const {
-        return isAnyTypeFromList<AstBasicDType, AstPackArrayDType, AstUnpackArrayDType, AstNodeUOrStructDType>(
-            dtypep);
+        return isAnyTypeFromList<AstBasicDType, AstPackArrayDType, AstUnpackArrayDType,
+                                 AstNodeUOrStructDType>(dtypep);
     }
     template <typename... Args>
     inline bool isAnyTypeFromList(const AstNodeDType* const dtypep) const {
@@ -803,10 +803,12 @@ private:
                             || VN_IS(nodep, AssignPost) || VN_IS(nodep, AssignPre)
                             || VN_IS(nodep, AssignW) || VN_IS(nodep, AssignAlias),
                         nodep, "unexpected node type " << nodep->prettyTypeName() << endl);
-            auto flatClone = [](AstNode* nodep) {
+            auto flatClone = [](AstNode* nodep) -> AstNode* {
                 if (AstNodeProcedure* procp = VN_CAST(nodep, NodeProcedure)) {
+                    if (!procp->stmtsp()) return nullptr;
                     return procp->stmtsp()->cloneTree(true);  // clone next
                 } else if (AstNodeBlock* blockp = VN_CAST(nodep, NodeBlock)) {
+                    if (!procp->stmtsp()) return nullptr;
                     return procp->stmtsp()->cloneTree(true);  // clone next
                 } else {
                     // do not clone next, PRE and POST are in the same active
@@ -815,6 +817,7 @@ private:
                 }
             };
             AstNode* const clonep = flatClone(nodep);
+            if (!clonep) { continue; }
             if (currentActive.domainp && vtxDomp) {
                 if (vtxDomp != currentActive.domainp) {
                     // changing domain

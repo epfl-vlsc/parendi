@@ -198,14 +198,14 @@ private:
     void initializeCostValues(const std::unique_ptr<NetlistGraph>& graphp) {
 
         std::vector<NetlistVertex*> sourcesp, sinksp;
-        // rank each vertex, entry nodes will have  rank 1 and the the exist nodes
+        // rank each vertex, entry nodes will have  rank 1 and the the exist node
         // will have the higher rank
         graphp->rank();
         // sort based on rank, i.e., topological order
         graphp->sortVertices();
 
         std::vector<NetlistVertex*> vertices;
-        uint32_t totalCost = 0;
+        uint32_t totalCost = 0;  // total cost of the graph
         for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
             NetlistVertex* const vp = dynamic_cast<NetlistVertex*>(vtxp);
             vertices.push_back(vp);
@@ -222,19 +222,25 @@ private:
             }
             vtxp->tvalue(t);
         }
-        // b(ottom)value compute for each vertex: in reverse topological order
-        // v.bvalue = sum([u.value for (v, u) in v.out]) + sum([u for u : u.rank == v.rank])
+        // b(ottom)value compute for each vertex: bvalue equals the sum of the cost
+        // of executing all vertices that have a higher rank than the vertex under consideration
+
         std::vector<uint32_t> rankSum(vertices.back()->rank());
         std::fill(rankSum.begin(), rankSum.end(), 0);
+
         for (NetlistVertex* vtxp : vertices) {
             UASSERT(vtxp->rank(), "not ranked");
             UASSERT(vtxp->rank() <= rankSum.size(), "invalid rank");
             rankSum[(vtxp->rank() - 1)] += vtxp->cost();
         }
+        // rankSum now contains the aggeragate cost of each rank, i.e., rankSum[i] is the sum of
+        // the cost of all vertices at the ith level
+
+        // r(ank)value is the same for each vertex in the same rank
         for (NetlistVertex* vtxp : vertices) { vtxp->rvalue(rankSum[vtxp->rank() - 1]); }
 
+        // now compute bvalues
         for (int i = rankSum.size() - 2; i >= 0; i--) { rankSum[i] += rankSum[i + 1]; }
-
         for (NetlistVertex* vtxp : vertices) { vtxp->bvalue(rankSum[vtxp->rank() - 1]); }
     }
 
@@ -253,7 +259,7 @@ private:
             vtxpByRank.back().push_back(dynamic_cast<NetlistVertex*>(vtxp));
         }
         UASSERT(seqWritep, "expected a SeqWriteVertex");
-        // auto hasImpure = [](AstNode* nodep) { return !nodep->isPure(); };
+        // Make sure we do not retime any seq block that has impure operations, e.g., DPI/PLI
         if (std::any_of(
                 seqWritep->logicsp().cbegin(), seqWritep->logicsp().cend(), [](const auto& pair) {
                     return pair.second->exists([](AstNode* nodep) { return !nodep->isPure(); });
@@ -262,19 +268,28 @@ private:
             UINFO(3, "impure graph will not be retimed" << endl);
             m_ledger.illegal(graphp);
         }
+        // the graph does not have any readers, should not be retimed and perhaps
+        // should be simply deleted.
         if (seqWritep->readsp().empty()) {
             UINFO(3, "empty readers, will not be retimed" << endl);
             m_ledger.illegal(graphp);
         }
+        // make sure logic does not have multiple domains, we don't know how to retime them
         std::unordered_set<AstSenTree*> diffSenses;
         for (const auto lp : seqWritep->logicsp()) { diffSenses.insert(lp.first); }
         if (diffSenses.size() > 1) {
             UINFO(3, "multi-domain logic can not be retimed" << endl);
             m_ledger.illegal(graphp);
         }
-
+        // if any of the above is true, do not retime, or maybe we cannot retime since
+        // some other graph has been retimed and disabled retiming here
         if (!m_ledger.legal(graphp)) { return; }
-        // starting from the bottom, try to find a new place for the final seq block
+
+        // starting from the bottom, try to find a new place for the final seq block. We don't
+        // really do retiming in the way done for circuits. We basically try to find a level in the
+        // graph where placing registers makes sense. This is not really equivalent to pushing
+        // registers back or forth as is the case with circuit retiming. Not only we end up pushing
+        // registers on some wires, but also we create extra ones that make no sense for a circuit.
         uint32_t bestRetimingRank = vtxpByRank.back().front()->rank() + 1;
         uint32_t bestReducedCost = costToBeat;
         bool canRetime = false;
@@ -290,7 +305,7 @@ private:
             NetlistGraph* const slowestDownStream = seqWritep->slowestReader();
             uint32_t costAbove = slowestVtxpAboveHere->tvalue() + slowestVtxpAboveHere->cost();
             uint32_t costBelow = slowestDownStream->cost() + vtxsInRank.front()->bvalue();
-            // we can not have the cost above us to ever increase, since we are removing the higher
+            // we cannot have the cost above us to ever increase, since we are removing the higher
             // ranked vertices
             UASSERT(costAbove <= costToBeat, "something is not right with the netlist graph");
             // but we can have cost below to surpass the existing worst cost, since we may
@@ -316,7 +331,7 @@ private:
             m_ledger.notify(graphp, bestRetimingRank);
             for (auto& readp : seqWritep->readsp()) {
                 m_ledger.illegal(readp);  // make any further retiming to downstream
-                // graphs illegal
+                // graphs illegal, since retiming will require recomputing the bvalue and tvalues
             }
         } else {
             UINFO(3, "Can not retime " << endl);
@@ -372,28 +387,35 @@ private:
         AstNode::user2ClearTree();
         auto it = m_ledger.retimeRank.find(graphp.get());
         if (it == m_ledger.retimeRank.end()) {
+            // this partition is not retimed. Simply reconstruct the original Ast
             for (V3GraphVertex* dvtxp = depGraphp->verticesBeginp(); dvtxp;
                  dvtxp = dvtxp->verticesNextp()) {
                 if (CompVertex* const compp = dynamic_cast<CompVertex*>(dvtxp)) {
                     if (!compp->activep()->backp()) {
+                        // if not already put back into the Ast, add it to the scope
                         m_netlistp->topScopep()->scopep()->addBlocksp(compp->activep());
                     }
                 }
             }
+            // graphs are no longer relevant
             graphp = nullptr;
             depGraphp = nullptr;
-            return;  // not retimed
+            return;
         }
-        uint32_t cutRank = it->second;
+        const uint32_t cutRank = it->second;
         // anything below cutRank is made into comb logic and the vertices
         // at the cut rank are made into seq logic that samples all the values
         // produced earlier at the cutRank
 
         // Any vertex whose rank <= cutRank and has a successor whose rank > cutRank
-        // needs to be sampled
-        // std::vector<NetlistEdge*> crossingEdgesp;
+        // needs to be sampled. Any RValue reference of the sampled values should be likewise
+        // renamed.Furthermore, any value produced by combinational blocks with rank > cutRank need
+        // to be renamed and the logic should be freshly cloned. This is because the combinational
+        // logic is potentially replicated so we can not use the original one.
 
-        // find the sentree used to sample the combinational values
+        // find the sentree used to sample the combinational values, there should be single one
+        // since I do not know how to retimed logic with multiple domains. It should not be
+        // impossible but requires more care...
         AstSenTree* seqSenTreep = nullptr;
         for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
             if (SeqWriteVertex* const seqWritep = dynamic_cast<SeqWriteVertex*>(vtxp)) {
@@ -415,6 +437,8 @@ private:
             if (vtxp->rank() <= cutRank) {
                 for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
                     if (edgep->top()->rank() > cutRank) {
+                        // the edge crosses the new sequential block. We sample by creating a fresh
+                        // variable that gets assigned in a sequential block
                         NetlistEdge* const netedgep = dynamic_cast<NetlistEdge*>(edgep);
                         UASSERT(netedgep, "invalid edge type");
                         // crossingEdgesp.push_back(netedgep);
@@ -440,7 +464,8 @@ private:
                 }
             } else {
                 if (CombVertex* const combp = dynamic_cast<CombVertex*>(vtxp)) {
-                    // combo block, mark it to be freshly cloned later
+                    // combo block that is pushed to the downstream partitions. These blocks need
+                    // to be fully freshly cloned and their LValues renamed
                     combp->logicp()->user1(VU_CLONECLEAN);
                     UINFO(8, "Marking logic to be cloned " << combp->logicp() << endl);
                     for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep;
@@ -457,39 +482,23 @@ private:
             }
         }
 
-        // each crossing edge has a variable that needs to be sampled
-        // by the the right SenTree, since the netlist graph has collapsed
-        // all of the sequential logic into a single vertex, we may end up
-        // sampling things that never get used in case of multiple SenTrees
-        // always_comb:
-        //    a = ...
-        //    b = ...
-        // always_ff @(pos clk1)
-        //    x = a + ...
-        // always_ff @(pos clk2)
-        //    y = b + ..
-        // Here we need to only sample a and b by the SenTrees that actually
-        // reads them. This information is available in the dependence graph
-        // but not the netlist graph. Essentially we need to find out the set
-        // of active blocks that each variable on the cut edges feed into, and
-        // use the SenTrees to create new sequential active blocks that sample
-        // these variables.
-
         // find the COMBO sentree
         findSenItemComb();
 
         // create an active, and an always_comb to hold the sequential logic
         AstActive* const retimeActiveCombp
             = new AstActive{m_netlistp->fileline(), "retimecomb", m_combSenTreep};
-        AstAlways* const retimeAlwaysComb
+        AstAlways* const retimeAlwaysCombp
             = new AstAlways{m_netlistp->fileline(), VAlwaysKwd::ALWAYS_COMB, nullptr, nullptr};
-        retimeActiveCombp->addStmtsp(retimeAlwaysComb);
+        retimeActiveCombp->addStmtsp(retimeAlwaysCombp);
         m_netlistp->topScopep()->scopep()->addBlocksp(retimeActiveCombp);
 
-        // compute the topological order
+        // sort the verices in the dependence graph in topological order. Needed since
+        // we create exactly one comb block for all the sequential logic, including Pre or Post.
         depGraphp->rank();
         depGraphp->sortVertices();
 
+        // keep a list of LValues in the sequential logic
         std::set<AstVarScope*> commitedp;
         for (V3GraphVertex* vtxp = depGraphp->verticesBeginp(); vtxp;
              vtxp = vtxp->verticesNextp()) {
@@ -498,13 +507,10 @@ private:
             }
             CompVertex* const compVtxp = dynamic_cast<CompVertex*>(vtxp);
             if (!compVtxp) continue;  // not logic
-
             AstNode* nodep = compVtxp->nodep();
-
             if (!compVtxp->activep()->backp()) {
-                // put active back into the netlist if it is stranded. This is because
-                // an earlier call to the V3Sched::partition snatched all logic out of
-                // the netlist
+                // put active back into the netlist if it is stranded. This is to undo unlinking
+                // done by V3Sched::partition
                 m_netlistp->topScopep()->scopep()->addBlocksp(compVtxp->activep());
             }
             if (compVtxp->domainp()) {  // sequential logic
@@ -512,16 +518,18 @@ private:
                 UINFO(15, "Transforming to comb logic:    " << nodep << endl);
                 // turn sequential logic into combinational
                 if (VN_IS(nodep, AssignPost) || VN_IS(nodep, AssignPre)) {
+                    // cannot have AssignPost and AssignPre under Always (V3BspGraph fails
+                    // otherwise)
                     AstNodeAssign* assignOldp = VN_AS(nodep, NodeAssign);
                     // rewrite as vanilla Assign
                     AstAssign* newp
                         = new AstAssign{assignOldp->fileline(), assignOldp->lhsp()->unlinkFrBack(),
                                         assignOldp->rhsp()->unlinkFrBack()};
-                    retimeAlwaysComb->addStmtsp(newp);
+                    retimeAlwaysCombp->addStmtsp(newp);
                     VL_DO_DANGLING(assignOldp->unlinkFrBack()->deleteTree(), assignOldp);
                     // rename variables
                 } else if (AstNodeProcedure* blockp = VN_CAST(nodep, NodeProcedure)) {
-                    retimeAlwaysComb->addStmtsp(blockp->stmtsp()->unlinkFrBackWithNext());
+                    retimeAlwaysCombp->addStmtsp(blockp->stmtsp()->unlinkFrBackWithNext());
                     VL_DO_DANGLING(blockp->unlinkFrBack()->deleteTree(), blockp);
                 } else {
                     // something is up
@@ -530,25 +538,26 @@ private:
                 }
 
             } else {
-                UINFO(10, "Reinstate logic " << nodep << endl);
-                // comb logic or no retiming, keep as-is
-
+                // comb logic that needs fresh cloning
                 if (nodep->user1() == VU_CLONECLEAN) {
                     UINFO(8, "Fresh clone " << nodep << endl);
                     // need to create a fresh clone that is also renamed
                     AstNode* const newp = nodep->cloneTree(false);
+                    // iterateChildren renames variables based on AstVarScope::user2p
                     iterateChildren(newp);
                     compVtxp->activep()->addStmtsp(newp);
                 }
             }
         }
-        iterateChildren(retimeAlwaysComb);
+        // rename any variables in the newly constructed comb block
+        iterateChildren(retimeAlwaysCombp);
 
+        // almost done, we now need to handle initial values
         AstNode::user1ClearTree();
         AstNode::user2ClearTree();
         // create a clone of the commited variables
         for (AstVarScope* const vscp : commitedp) {
-            // for each vscp create an initValue that contains
+            // for each vscp create an "initValue" that contains
             // the value set by any initial/static assignments
             vscp->user2p(makeVscp(vscp));
         }
@@ -557,13 +566,10 @@ private:
         m_logicClasses.m_static.foreachLogic(substInit);
         m_logicClasses.m_initial.foreachLogic(substInit);
 
-        // now create a "flag" variable
-
+        // now create a "initVscp" variable, which is set to 1 initially
         findSenItemInit();
-
         AstVar* const initVarp = new AstVar{m_netlistp->fileline(), VVarType::VAR,
                                             m_newNames.get("init"), m_netlistp->findUInt32DType()};
-
         AstVarScope* const initVscp
             = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(), initVarp};
         initVscp->scopep()->addVarsp(initVscp);
@@ -586,13 +592,32 @@ private:
         // sequential block:
         // for each vscp commit create newVscp
         // then create:
-        // always_ff
+        // always_comb
         //      if (initVscp)
-        //         newVscp = initValue
-        //         initVscp = 0;
+        //         vscp = initValue
         //      else
-        //         newVscp = vscp;
-        //
+        //         vscp = newVscp;
+        //         rest of the original seq logic
+        // always_ff @(sentree)
+        //      newVscp = vscp;
+        //      initVscp = 0;
+        // Note that setting vscp = newValue is necessary to simulate the "latching" behavior
+        // and also to correctly set the initial value. Latching behavior is needed even in the
+        // simplest case: always_ff
+        //      counter = counter + 1
+        // simply turned into a comb block results in a comb loop:
+        // always_comb counter = counter + 1;
+        // but with the above transformation we'll have:
+        // always_comb:
+        //      if (initCounter)
+        //          counter = initial value of the counter, if any, otherwise garbage
+        //      else
+        //          counter = newCounter;
+        //          counter = counter + 1;
+        // always_ff
+        //      newCounter = counter;
+        //      initCounter = 0;
+        // Now this new program has no comb loops and is behaviorally equivalent
         AstIf* const ifp = new AstIf{
             m_netlistp->fileline(), new AstVarRef{m_netlistp->fileline(), initVscp, VAccess::READ},
             nullptr, nullptr};
@@ -619,16 +644,12 @@ private:
                               new AstVarRef{m_netlistp->fileline(), newVscp, VAccess::WRITE},
                               new AstVarRef{m_netlistp->fileline(), vscp, VAccess::READ}});
         }
-        ifp->addElsesp(retimeAlwaysComb->stmtsp()->unlinkFrBackWithNext());
-        retimeAlwaysComb->addStmtsp(ifp);
+        ifp->addElsesp(retimeAlwaysCombp->stmtsp()->unlinkFrBackWithNext());
+        retimeAlwaysCombp->addStmtsp(ifp);
 
+        // clear pointers so that no one uses them anymore
         depGraphp = nullptr;
         graphp = nullptr;
-        // We have all the sampling logic, now we need to turn the sequential logic into
-        // combinational and rename all the "cut" variables in the transformed logic.
-        // In transforming sequential logic, we create one always_comb that subsumes all
-        // the AssignPre and AssignPost/AlwaysPost logic as well.
-        // morphLogic(std::move(depGraphp), true);
     }
 
     void visit(AstNodeVarRef* vrefp) {
@@ -657,16 +678,18 @@ public:
         m_logicClasses = std::move(std::get<0>(deps));
 
         if (!regions.m_act.empty()) {
-            regions.m_act.front().second->v3warn(UNOPTFLAT, "active regions prevents retiming");
+            // perhaps not fail but simply return
+            regions.m_act.front().second->v3fatalExit("active regions prevents retiming");
             return;
         }
         UASSERT(regions.m_act.empty(), "retiming can not be done when there is an active region");
-        // use the data dependence graph to build a netlist grpah, a netlist graph is
-        // a per partition graph with a single sink node that represents a combinational
-        // pass followed by sequential logic as sink. The sequential logic may be a collection
-        // of registers.
 
+        // use the data dependence graph to build a netlist grpah, a netlist graph is
+        // a per partition graph with a single sink that combines all the nba logic as one
+        // giant sequential vertex. Our goal is to see if we can move this sequential vertex
+        // which is also a sink, essentially pushing it into another partition.
         std::vector<std::unique_ptr<NetlistGraph>> netGraphsp = buildNetlistGraphs(depGraphsp);
+
         // initialize cost values for each netlist
         for (auto& netp : netGraphsp) { initializeCostValues(netp); }
 
@@ -716,6 +739,8 @@ public:
 // using HeapNode = MaxHeap::Node;
 // }  // namespace
 
+// Iterate the netlist and check that there exists only a single enclosing scope
+// for all the actives. Otherwise we cannot retime.
 class IsRetimingAllowedVisitor final : VNVisitor {
 private:
     AstScope* m_scopep = nullptr;
@@ -752,7 +777,7 @@ void retimeAll(AstNetlist* netlistp) {
         auto deps = V3BspSched::buildDepGraphs(netlistp);
         { RetimerVisitor{netlistp, std::move(deps)}; }
         v3Global.dumpCheckGlobalTree("retimed", 0, dumpTree() >= 3);
-        // clean the tree
+        // clean the tree, there might be empty actives or unused always_comb blocks
         V3Dead::deadifyAllScoped(netlistp);
     } else {
         netlistp->v3warn(UNOPTFLAT, "skipping retiming since the design is not flattened");
