@@ -50,8 +50,10 @@ set(HEADERS
     V3BspGraph.h
     V3BspIpuProfile.h
     V3BspModules.h
+    V3BspNetlistGraph.h
     V3BspPlusArgs.h
     V3BspPoplarProgram.h
+    V3BspRetiming.h
     V3BspSched.h
     V3BspStraggler.h
     V3Case.h
@@ -204,6 +206,7 @@ set(COMMON_SOURCES
     V3BspModules.cpp
     V3BspPlusArgs.cpp
     V3BspPoplarProgram.cpp
+    V3BspRetiming.cpp
     V3BspSched.cpp
     V3BspStraggler.cpp
     V3CCtors.cpp

@@ -1,7 +1,7 @@
 // -*- mode: C++; c-file-style: "cc-mode" -*-
 //*************************************************************************
-// DESCRIPTION: Verilator: Bulk-synchronous Parallel Scheduling
-//
+// DESCRIPTION: Verilator: BSP retiming
+
 // Code available from: https://verilator.org
 //
 //*************************************************************************
@@ -13,29 +13,27 @@
 // SPDX-License-Identifier: LGPL-3.0-only OR Artistic-2.0
 //
 //*************************************************************************
+//
 
-#ifndef VERILATOR_BSP_SCHED_H
-#define VERILATOR_BSP_SCHED_H
+#ifndef VERILATOR_V3BSPRETIMING_H_
+#define VERILATOR_V3BSPRETIMING_H_
 
 #include "config_build.h"
 #include "verilatedos.h"
 
+#include "V3Ast.h"
 #include "V3BspGraph.h"
+#include "V3BspNetlistGraph.h"
+#include "V3Sched.h"
 
-#include <functional>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
-class AstNetlist;
-//=============================================================================
 namespace V3BspSched {
+namespace Retiming {
 
-std::tuple<V3Sched::LogicClasses, V3Sched::LogicRegions, std::vector<std::unique_ptr<DepGraph>>>
-buildDepGraphs(AstNetlist* netlistp);
+// std::vector<std::unique_ptr<NetlistGraph>>
+// buildNetlistGraphs(const std::vector<std::unique_ptr<DepGraph>>& partitionsp);
 
-void schedule(AstNetlist*);
+void retimeAll(AstNetlist* netlistp);
 
+};  // namespace Retiming
 };  // namespace V3BspSched
-
 #endif

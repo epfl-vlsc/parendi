@@ -76,6 +76,7 @@
 #include "V3Ast.h"
 #include "V3BspGraph.h"
 #include "V3BspModules.h"
+#include "V3BspRetiming.h"
 #include "V3EmitCBase.h"
 #include "V3EmitV.h"
 #include "V3Order.h"
@@ -137,30 +138,17 @@ V3Sched::LogicClasses gatherLogicClasses(AstNetlist* netlistp) {
 }
 
 };  // namespace details
-void schedule(AstNetlist* netlistp) {
 
-    // we will try to use as much code from V3Sched as possible, though some
-    // stuff about timing and multiple clock domains are simply not considered
-    // at all, hence we do less here (future work should handle multiple clock domains as well)
-    const auto addSizeStat = [](const string& name, const V3Sched::LogicByScope& lbs) {
-        uint64_t size = 0;
-        lbs.foreachLogic([&](AstNode* nodep) { size += nodep->nodeCount(); });
-        V3Stats::addStat("Scheduling, " + name, size);
-    };
+std::tuple<V3Sched::LogicClasses, V3Sched::LogicRegions, std::vector<std::unique_ptr<DepGraph>>>
+buildDepGraphs(AstNetlist* netlistp) {
 
-    // no need for a timing kit
     // Step 1. classify logic classes, may error out on unsupported logic classes
     V3Sched::LogicClasses logicClasses = details::gatherLogicClasses(netlistp);
 
-
-
     auto unsupportedWhy = [](const auto& region, const string& reason) {
-        if (!region.empty()) {
-            region.front().second->v3warn(
-                E_UNSUPPORTED, "    " << reason
-            );
-        }
+        if (!region.empty()) { region.front().second->v3warn(E_UNSUPPORTED, "    " << reason); }
     };
+
     // Step 3. check for comb cycles and error
     logicClasses.m_hybrid = V3Sched::breakCycles(netlistp, logicClasses.m_comb);
 
@@ -178,15 +166,11 @@ void schedule(AstNetlist* netlistp) {
     V3Sched::LogicRegions logicRegions
         = V3Sched::partition(logicClasses.m_clocked, logicClasses.m_comb, logicClasses.m_hybrid);
 
-    // if (!logicRegions.m_act.empty()) {
-    //     logicRegions.m_act.front().second->v3warn(
-    //         E_UNSUPPORTED, "Active region not supported yet! Only modules with a single clock at
-    //         "
-    //                        "the top is supported with BSP");
-    // }
-    unsupportedWhy(logicRegions.m_pre, "Pre-active not supprted because as can only handle a singel clock");
+    unsupportedWhy(logicRegions.m_pre,
+                   "Pre-active not supprted because as can only handle a single clock");
 
-
+    unsupportedWhy(logicRegions.m_act, "active region computation is not fully supported");
+    
     V3Sched::LogicByScope& nbaLogic = logicRegions.m_nba;
     // Step 6. make a fine-grained dependence graph. This graph is different from
     // the V3Order graph in many ways but the most notably difference is wrt ordering
@@ -203,10 +187,18 @@ void schedule(AstNetlist* netlistp) {
     } else if (graphp->verticesBeginp()) {
         splitGraphsp = DepGraphBuilder::splitIndependent(graphp);
     }
+    return {std::move(logicClasses), std::move(logicRegions), std::move(splitGraphsp)};
+}
 
-    // Step 8. Merge the, skipped for now.
+void schedule(AstNetlist* netlistp) {
 
-    // Step 9. Create a module for each DepGraph. To do this we also need to determine
+    Retiming::retimeAll(netlistp);
+
+    auto deps = buildDepGraphs(netlistp);
+    auto& splitGraphsp = std::get<2>(deps);
+    auto& logicClasses = std::get<0>(deps);
+    auto& logicRegions = std::get<1>(deps);
+    // Create a module for each DepGraph. To do this we also need to determine
     // whether a varialbe is solely referenced locally or by multiple cores.
     V3BspModules::makeModules(netlistp, splitGraphsp, logicClasses.m_initial,
                               logicClasses.m_static, logicRegions.m_act);

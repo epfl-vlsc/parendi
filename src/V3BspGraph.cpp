@@ -23,7 +23,6 @@
 #include "V3File.h"
 #include "V3Hasher.h"
 #include "V3Stats.h"
-
 VL_DEFINE_DEBUG_FUNCTIONS;
 namespace V3BspSched {
 
@@ -87,6 +86,7 @@ private:
     bool m_inClocked = false;  // in a clocked active
     bool m_inPre = false;  // under AssignPre
     bool m_inPost = false;  // undre AssignPost
+    AstActive* m_active = nullptr;  // enclosing active
     AstScope* m_scopep = nullptr;  // enclosing scope
     AstSenTree* m_domainp = nullptr;  // enclosing domain, nullptr means comb logic
     CompVertex* m_logicVtx = nullptr;  // enclosing logic vertex
@@ -98,7 +98,7 @@ private:
         UASSERT_OBJ(!m_logicVtx, nodep, "Nesting logic?");
         // Reset the usage
         AstNode::user2ClearTree();
-        m_logicVtx = new CompVertex{m_graphp, m_scopep, nodep, m_domainp};
+        m_logicVtx = new CompVertex{m_graphp, m_scopep, nodep, m_domainp, m_active};
         V3Stats::addStatSum("BspGraph, Computation nodes", 1);
         iterateChildren(nodep);
         m_logicVtx = nullptr;
@@ -127,10 +127,11 @@ private:
             m_inClocked = m_domainp->hasClocked();
             UASSERT_OBJ(m_domainp->hasClocked(), nodep, "Unexpected sense type");
         }
-
+        m_active = nodep;
         iterateChildren(nodep);
         m_inClocked = false;
         m_domainp = nullptr;
+        m_active = nullptr;
     }
 
     void visit(AstVarRef* nodep) override {

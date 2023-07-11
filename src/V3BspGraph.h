@@ -54,6 +54,7 @@ class AnyVertex VL_NOT_FINAL : public V3GraphVertex {
 private:
     AstSenTree* m_domainp = nullptr;
     V3Hash m_hash;
+
 protected:
     // CONSTRUCTOR
     AnyVertex(DepGraph* graphp, AstSenTree* domainp)
@@ -80,11 +81,14 @@ class CompVertex final : public AnyVertex {
 private:
     AstNode* const m_nodep;  // the logic represented by this vertex
     AstScope* const m_scopep;  // the scope that m_nodep belongs to
+    AstActive* const m_activep;  // the active aroudn the logic
 public:
-    CompVertex(DepGraph* graphp, AstScope* scopep, AstNode* nodep, AstSenTree* domainp)
+    CompVertex(DepGraph* graphp, AstScope* scopep, AstNode* nodep, AstSenTree* domainp,
+               AstActive* activep)
         : AnyVertex{graphp, domainp}
         , m_nodep{nodep}
-        , m_scopep{scopep} {
+        , m_scopep{scopep}
+        , m_activep{activep} {
         UASSERT_OBJ(scopep, nodep, "logic requires scope!");
         UASSERT(nodep, "Can not have null logic!");
     }
@@ -92,9 +96,9 @@ public:
 
     AstNode* nodep() const { return m_nodep; }
     AstScope* scopep() const { return m_scopep; }
-
+    AstActive* activep() const { return m_activep; }
     CompVertex* clone(DepGraph* graphp) const override {
-        return new CompVertex{graphp, scopep(), nodep(), domainp()};
+        return new CompVertex{graphp, scopep(), nodep(), domainp(), activep()};
     }
     // LCOV_EXCL_START // Debug code
     string name() const override {

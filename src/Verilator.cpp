@@ -365,7 +365,7 @@ static void process() {
         // geared towards clocked blocks and NBA assignments and does not do so well with
         // combinatioal logic.
         V3SplitComb::splitAlwaysComb(v3Global.rootp());
-        //V3SplitComb potentially creates a lot of dead code. We should remove them
+        // V3SplitComb potentially creates a lot of dead code. We should remove them
         // as early as possible.
         V3Dead::deadifyAll(v3Global.rootp());
 
