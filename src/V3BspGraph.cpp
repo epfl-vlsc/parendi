@@ -339,8 +339,9 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         AnyVertex* const headp = toVisit.front();
         toVisit.pop();
         visited.push_back(headp);
-        if (dynamic_cast<ConstrPostVertex* const>(headp)) {
-            continue;  // do not follow
+        if (dynamic_cast<ConstrPostVertex* const>(headp)
+            || dynamic_cast<ConstrInitVertex* const>(headp)) {
+            continue;  // do not follow, not data dependence, only ordering constraints
         }
         for (auto itp = headp->inBeginp(); itp; itp = itp->inNextp()) {
             AnyVertex* const fromp = static_cast<AnyVertex* const>(itp->fromp());
@@ -607,8 +608,12 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
                 if (!edgep->top()->user()) {
                     AnyVertex* const top = dynamic_cast<AnyVertex* const>(edgep->top());
                     UASSERT(top, "invalid vertex type?");
-                    toVisit.push(top);
                     top->user(1);
+                    if (!dynamic_cast<ConstrPostVertex* const>(top)
+                        && !dynamic_cast<ConstrInitVertex* const>(top)) {
+                        // only follow data deps
+                        toVisit.push(top);
+                    }
                 }
             }
         }
