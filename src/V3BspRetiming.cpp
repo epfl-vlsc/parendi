@@ -106,7 +106,6 @@ private:
             for (AstVarScope* vscp : commitsp) { vscp->user1u(VNUser{writep}); }
             allGraphsp.emplace_back(netGraphp);
             writesp.push_back(writep);
-            partp->dumpDotFilePrefixedAlways("net_partition_" + std::to_string(graphIndex++));
         }
         graphIndex = 0;
         for (const auto& partp : partitionsp) {
@@ -188,10 +187,8 @@ private:
                     }
                 }
             }
-
-            netGraphp->dumpDotFilePrefixedAlways("netlist_" + std::to_string(graphIndex - 1));
         }
-
+        // do not remove redundant edges, since we need the vscp label of each edge later
         return allGraphsp;
     }
 
@@ -217,8 +214,16 @@ private:
         // v.tvalue = sum([u.tvalue for (u, v) in v.in])
         for (NetlistVertex* vtxp : vertices) {
             uint32_t t = 0;
+            std::unordered_set<NetlistVertex*> prevsp;
             for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-                t += dynamic_cast<NetlistVertex*>(edgep->fromp())->cost();
+                NetlistVertex* const fromp = dynamic_cast<NetlistVertex*>(edgep->fromp());
+                if (!prevsp.count(fromp)) {
+                    // there might be multiple edges to the same predecessor, with either the
+                    // same vscp label or different ones. So we need to keep track of the visited
+                    // ones to avoid double counting
+                    t += fromp->cost() + fromp->tvalue();
+                    prevsp.insert(fromp);
+                }
             }
             vtxp->tvalue(t);
         }
@@ -241,7 +246,9 @@ private:
 
         // now compute bvalues
         for (int i = rankSum.size() - 2; i >= 0; i--) { rankSum[i] += rankSum[i + 1]; }
-        for (NetlistVertex* vtxp : vertices) { vtxp->bvalue(rankSum[vtxp->rank() - 1]); }
+        for (NetlistVertex* vtxp : vertices) {
+            vtxp->bvalue(rankSum[vtxp->rank() - 1] - vtxp->rvalue());
+        }
     }
 
     void markRetiming(NetlistGraph* const graphp) {
@@ -250,11 +257,7 @@ private:
         std::vector<std::vector<NetlistVertex*>> vtxpByRank;
         SeqWriteVertex* seqWritep = nullptr;
         for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-            if (!vtxp->verticesNextp()) {
-                seqWritep = dynamic_cast<SeqWriteVertex*>(vtxp);
-                break;  // the last vertex does not matter, since we are trying to move that one up
-                        // the graph
-            }
+            if (!vtxp->verticesNextp()) { seqWritep = dynamic_cast<SeqWriteVertex*>(vtxp); }
             if (vtxp->rank() > vtxpByRank.size()) { vtxpByRank.emplace_back(); }
             vtxpByRank.back().push_back(dynamic_cast<NetlistVertex*>(vtxp));
         }
@@ -290,28 +293,35 @@ private:
         // graph where placing registers makes sense. This is not really equivalent to pushing
         // registers back or forth as is the case with circuit retiming. Not only we end up pushing
         // registers on some wires, but also we create extra ones that make no sense for a circuit.
-        uint32_t bestRetimingRank = vtxpByRank.back().front()->rank() + 1;
+        const uint32_t highestRank = vtxpByRank.back().front()->rank();
+        uint32_t bestRetimingRank = highestRank;
         uint32_t bestReducedCost = costToBeat;
         bool canRetime = false;
-        for (const auto& vtxsInRank : vlstd::reverse_view(vtxpByRank)) {
+        for (int r = highestRank - 2; r >= 0; r--) {
+
             // does it make sense to push the final register to the outwards edges of
             // this level/rank?
-            auto slowestVtxpAboveHere = *std::max_element(
-                vtxsInRank.begin(), vtxsInRank.end(), [](const auto* vp1, const auto* vp2) {
-                    return (vp1->tvalue() + vp1->cost()) < (vp2->tvalue() + vp2->cost());
-                });
+
+            uint32_t costAbove = 0;
+            for (NetlistVertex* const vtxp : vtxpByRank[r]) {
+                for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+                    for (V3GraphEdge* iedgep = edgep->top()->inBeginp(); iedgep;
+                         iedgep = iedgep->inNextp()) {
+                        NetlistVertex* const fromp = dynamic_cast<NetlistVertex*>(iedgep->fromp());
+                        costAbove = std::max(costAbove, fromp->cost() + fromp->tvalue());
+                    }
+                }
+            }
 
             // how much improvement do we get from the current costToBeat?
             NetlistGraph* const slowestDownStream = seqWritep->slowestReader();
-            uint32_t costAbove = slowestVtxpAboveHere->tvalue() + slowestVtxpAboveHere->cost();
-            uint32_t costBelow = slowestDownStream->cost() + vtxsInRank.front()->bvalue();
+            uint32_t costBelow = slowestDownStream->cost() + vtxpByRank[r].front()->bvalue();
             // we cannot have the cost above us to ever increase, since we are removing the higher
             // ranked vertices
             UASSERT(costAbove <= costToBeat, "something is not right with the netlist graph");
             // but we can have cost below to surpass the existing worst cost, since we may
             // push the higher ranked vertices to another graph that is already critical
-            UINFO(3, "at rank " << slowestVtxpAboveHere->rank() << " cabove = " << costAbove
-                                << " cbelow = " << costBelow
+            UINFO(3, "at rank " << r + 1 << " cabove = " << costAbove << " cbelow = " << costBelow
                                 << " down = " << slowestDownStream->cost() << endl);
             if (costBelow > costToBeat) {
                 // tough luck, continuing does not make sense since we are bound to
@@ -321,7 +331,7 @@ private:
             const uint32_t costAfterRetimingHere = std::max(costAbove, costBelow);
             if (costAfterRetimingHere <= bestReducedCost) {
                 bestReducedCost = costAfterRetimingHere;
-                bestRetimingRank = slowestVtxpAboveHere->rank();
+                bestRetimingRank = r + 1;
                 canRetime = true;
             }
         }
@@ -715,6 +725,11 @@ public:
         for (int ix = 0; ix < netGraphsp.size(); ix++) {
             auto& graphp = netGraphsp[ix];
             auto& depp = depGraphsp[netIndex[graphp.get()]];
+            if (dumpGraph() >= 4) {
+                graphp->dumpDotFilePrefixedAlways("netlist_" + std::to_string(ix));
+                depp->dumpDotFilePrefixedAlways("partition_"
+                                                + std::to_string(netIndex[graphp.get()]));
+            }
             applyRetiming(std::move(graphp), std::move(depp));
         }
         netGraphsp.clear();

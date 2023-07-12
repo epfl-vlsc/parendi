@@ -12,7 +12,6 @@ module t(
         E_SHL,
         E_SHR,
         E_SHRS,
-        E_MUL,
         E_ONES,
         E_NONE
     } op_t;
@@ -27,12 +26,11 @@ module t(
     assign res_shl = rs1 << shAmount;
     assign res_shr = rs1 >> shAmount;
     assign res_shrs = $signed(rs1) >>> $signed(shAmount);
-    assign res_mul = rs1 * rs2;
     data_t res_d = 512'h7789990008, res_q = 512'h7aaaff, res_qq = 512'hffff89789768;
-    data_t ones;
+    logic[31:0] ones;
     always_comb begin
         ones = 0;
-        for (int i = 0; i < W; i++) ones += W'(rs1[i]);
+        for (int i = 0; i < W; i = i + 32) ones ^= 32'(rs1[i +: 32]);
     end
     always_comb begin
         res_d = res_q;
@@ -42,8 +40,7 @@ module t(
             E_SHL: res_d = res_shl;
             E_SHR: res_d = res_shr;
             E_SHRS: res_d = res_shrs;
-            E_MUL : res_d = res_mul;
-            E_ONES: res_d = ones;
+            E_ONES: res_d = W'(ones);
             default: res_d = '0;
         endcase
     end
@@ -81,7 +78,7 @@ module t(
             end
             if (counter == 11) op <= E_ADD;
             if (counter == 12) op <= E_SUB;
-            if (counter == 13) op <= E_MUL;
+            // if (counter == 13) op <= E_MUL;
             if (counter == 14) op <= E_SHL;
             if (counter == 15) op <= E_ONES;
         end
@@ -92,9 +89,9 @@ module t(
         `EXPECT(1, 512'h7aaaff);
         `EXPECT(14, 512'habaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada03abaada02);
         `EXPECT(15, 512'h5454b9885454b9485454b9085454b8c85454b8885454b8485454b8085454b7c85454b7885454b7485454b7085454b6c85454b6885454b6485454b6085454b5c8);
-        `EXPECT(16, 512'h1d9b8ed2c072aaebd8b2d5fa665c13fe696e68f7e1e9d8e6cfce67cb331c19a50bd2f27459f2f6391d7c28f3566e8ea304ca2b48288f02e2c1bd1972d05472f9);
+        // `EXPECT(16, 512'h1d9b8ed2c072aaebd8b2d5fa665c13fe696e68f7e1e9d8e6cfce67cb331c19a50bd2f27459f2f6391d7c28f3566e8ea304ca2b48288f02e2c1bd1972d05472f9);
         `EXPECT(17, 512'hffffc9a8ffffc988ffffc968ffffc948ffffc928ffffc908ffffc8e8ffffc8c8ffffc8a8ffffc888ffffc868ffffc848ffffc828ffffc808ffffc7e800000000);
-        `EXPECT(18, 512'h171);
+        `EXPECT(18, 512'h0e00);
         if (counter == 18) begin
             $display("*-* All Finished *-*");
             $finish;

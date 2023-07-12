@@ -14,7 +14,7 @@ scenarios(
 );
 
 compile(
-    verilator_flags2 => ["--poplar -O3 -fno-gate"],
+    verilator_flags2 => ["--poplar -O3 -fno-gate --unroll-count 1024"],
     make_main => 0
 );
 

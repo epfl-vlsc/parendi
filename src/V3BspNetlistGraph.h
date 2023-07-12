@@ -87,6 +87,11 @@ public:
 
     uint32_t rvalue() const { return m_rvalue; }
     void rvalue(uint32_t r) { m_rvalue = r; }
+
+    string name() const override {
+        return  "c" + cvtToStr(cost()) + " " + "t" + cvtToStr(tvalue()) + " " + "r"
+               + cvtToStr(rvalue()) + " " + "b" + cvtToStr(bvalue());
+    }
 };
 
 class CombVertex final : public NetlistVertex {
@@ -102,6 +107,9 @@ public:
     AstNode* logicp() const { return m_logicp; }
 
     string dotShape() const override final { return "ellipse"; }
+    string name() const override final {
+        return cvtToHex(m_logicp) + "\n" + NetlistVertex::name();
+    }
 };
 
 // class SeqVertex VL_NOT_FINAL : public NetlistVertex {
@@ -141,7 +149,9 @@ public:
         , m_vscp{vscp} {}
     string dotShape() const override final { return "rect"; }
     AstVarScope* vscp() const { return m_vscp; }
+    string name() const override final { return vscp()->prettyName(); }
 };
+
 class NetlistEdge final : public V3GraphEdge {
 private:
     AstVarScope* const m_vscp = nullptr;
@@ -149,9 +159,9 @@ private:
 public:
     NetlistEdge(NetlistGraph* graphp, NetlistVertex* fromp, NetlistVertex* top,
                 AstVarScope* const vscp)
-        : V3GraphEdge{graphp, fromp, top, 1, false}
+        : V3GraphEdge{graphp, fromp, top, 1, true}
         , m_vscp(vscp) {}
-    string name() const override { return m_vscp->prettyName(); }
+    string dotLabel() const override final { return m_vscp->prettyName(); }
     AstVarScope* vscp() const { return m_vscp; }
 };
 

@@ -40,7 +40,7 @@ private:
     // const AstClass* const m_fileClassp;
     // const bool m_slow;
     V3UniqueNames m_uniqueNames;
-
+    bool m_usesSupervisor = false;
     // hacky override
     void visit(AstReadMemProxy* nodep) override {
         puts(nodep->cFuncPrefixp());
@@ -91,6 +91,9 @@ private:
         ofp()->putsHeader();
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// Poplar vertex implementation\n");
+        if (m_usesSupervisor) {
+            puts("#define VL_USES_IPU_SUPERVISOR\n");
+        }
         puts("#include <vlpoplar/verilated.h>\n");
         puts("#include <poplar/Vertex.hpp>\n");
         puts("#include \"" + topClassName() + "__structs.h\"\n");
@@ -151,14 +154,20 @@ private:
 
 public:
     explicit EmitPoplarVertex(AstNetlist* netlistp) {
+        std::vector<const AstClass*> toEmitp;
         for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
             if (const AstClass* classp = VN_CAST(nodep, Class)) {
                 if (classp->flag().isBsp()) {
-                    UINFO(3, "Emitting " << classp->nameProtect() << endl);
-                    emitClass(classp);
+                    if (classp->flag().isSupervisor()) { m_usesSupervisor = true; }
+                    toEmitp.push_back(classp);
                 }
             }
         }
+        for (const AstClass* classp : toEmitp) {
+            UINFO(3, "Emitting " << classp->nameProtect() << endl);
+            emitClass(classp);
+        }
+
         if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
     }
 };

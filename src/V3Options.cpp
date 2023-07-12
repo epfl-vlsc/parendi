@@ -1223,6 +1223,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-fsubst-const", FOnOff, &m_fSubstConst);
     DECL_OPTION("-ftable", FOnOff, &m_fTable);
     DECL_OPTION("-fipu-supervisor", FOnOff, &m_fIpuSupervisor);
+    DECL_OPTION("-fipu-retime", FOnOff, &m_fIpuRetime);
 
     DECL_OPTION("-G", CbPartialMatch, [this](const char* optp) { addParameter(optp, false); });
     DECL_OPTION("-gate-stmts", Set, &m_gateStmts);

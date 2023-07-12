@@ -192,7 +192,9 @@ buildDepGraphs(AstNetlist* netlistp) {
 
 void schedule(AstNetlist* netlistp) {
 
-    Retiming::retimeAll(netlistp);
+    if (v3Global.opt.fIpuRetime()) {
+        Retiming::retimeAll(netlistp);
+    }
 
     auto deps = buildDepGraphs(netlistp);
     auto& splitGraphsp = std::get<2>(deps);

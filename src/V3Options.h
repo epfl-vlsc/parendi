@@ -377,6 +377,7 @@ private:
     bool m_fSubstConst;  // main switch: -fno-subst-const: final constant substitution
     bool m_fTable;       // main switch: -fno-table: lookup table creation
     bool m_fIpuSupervisor; // main switch: -fno-ipu-supervisor: use ipu supervisor contexts when possible
+    bool m_fIpuRetime = false;   // main switch: -fipu-retime: attempt retiming optimization
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -642,7 +643,7 @@ public:
     bool fSubstConst() const { return m_fSubstConst; }
     bool fTable() const { return m_fTable; }
     bool fIpuSupervisor() const { return m_fIpuSupervisor; }
-
+    bool fIpuRetime() const { return m_fIpuRetime; }
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
     string traceSourceBase() const { return m_traceFormat.sourceName(); }
