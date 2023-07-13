@@ -89,7 +89,7 @@ public:
     void rvalue(uint32_t r) { m_rvalue = r; }
 
     string name() const override {
-        return  "c" + cvtToStr(cost()) + " " + "t" + cvtToStr(tvalue()) + " " + "r"
+        return "c" + cvtToStr(cost()) + " " + "t" + cvtToStr(tvalue()) + " " + "r"
                + cvtToStr(rvalue()) + " " + "b" + cvtToStr(bvalue());
     }
 };
@@ -161,7 +161,7 @@ public:
                 AstVarScope* const vscp)
         : V3GraphEdge{graphp, fromp, top, 1, true}
         , m_vscp(vscp) {}
-    string dotLabel() const override final { return m_vscp->prettyName(); }
+    string dotLabel() const override final { return m_vscp ? m_vscp->prettyName() : "" ; }
     AstVarScope* vscp() const { return m_vscp; }
 };
 

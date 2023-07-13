@@ -46,6 +46,12 @@ private:
         void notify(NetlistGraph* graphp, uint32_t rank) { retimeRank.emplace(graphp, rank); }
     };
 
+    VDouble0 m_statsNumRetimed;
+    VDouble0 m_statsMaxPostRetime;
+    VDouble0 m_statsMaxPreRetime;
+    VDouble0 m_statsRetimeDisabled;
+    VDouble0 m_statsRetimeTransitiveDisabled;
+
     RetimingLedger m_ledger;
     AstNetlist* const m_netlistp;
     V3UniqueNames m_newNames;
@@ -187,6 +193,7 @@ private:
                     }
                 }
             }
+
         }
         // do not remove redundant edges, since we need the vscp label of each edge later
         return allGraphsp;
@@ -201,32 +208,38 @@ private:
         // sort based on rank, i.e., topological order
         graphp->sortVertices();
 
-        std::vector<NetlistVertex*> vertices;
-        uint32_t totalCost = 0;  // total cost of the graph
-        for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-            NetlistVertex* const vp = dynamic_cast<NetlistVertex*>(vtxp);
-            vertices.push_back(vp);
-            totalCost += vp->cost();
-        }
-        graphp->cost(totalCost);
-
-        // t(op)value computation for each vertex: in topological order
-        // v.tvalue = sum([u.tvalue for (u, v) in v.in])
-        for (NetlistVertex* vtxp : vertices) {
-            uint32_t t = 0;
-            std::unordered_set<NetlistVertex*> prevsp;
-            for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
-                NetlistVertex* const fromp = dynamic_cast<NetlistVertex*>(edgep->fromp());
-                if (!prevsp.count(fromp)) {
-                    // there might be multiple edges to the same predecessor, with either the
-                    // same vscp label or different ones. So we need to keep track of the visited
-                    // ones to avoid double counting
-                    t += fromp->cost() + fromp->tvalue();
-                    prevsp.insert(fromp);
+        // O(EV)
+        auto setTValue = [&](NetlistVertex* vtxp) {
+            graphp->userClearVertices();
+            uint32_t tvalue = 0;
+            std::vector<NetlistVertex*> toVisit{vtxp};
+            vtxp->user(true);
+            while (!toVisit.empty()) {
+                NetlistVertex* const backp = toVisit.back();
+                toVisit.pop_back();
+                for (V3GraphEdge* iedgep = backp->inBeginp(); iedgep; iedgep = iedgep->inNextp()) {
+                    if (!iedgep->fromp()->user()) {
+                        NetlistVertex* const fromp = dynamic_cast<NetlistVertex*>(iedgep->fromp());
+                        fromp->user(true);
+                        tvalue += fromp->cost();
+                    }
                 }
             }
-            vtxp->tvalue(t);
+            vtxp->tvalue(tvalue);
+        };
+
+        uint32_t totalCost = 0;  // total cost of the graph
+        std::vector<NetlistVertex*> vertices;
+        // O(EV^2) can we do better?
+        for (NetlistVertex* vtxp = dynamic_cast<NetlistVertex*>(graphp->verticesBeginp()); vtxp;
+             vtxp = dynamic_cast<NetlistVertex*>(vtxp->verticesNextp())) {
+            vertices.push_back(vtxp);
+            setTValue(vtxp);
+            totalCost += vtxp->cost();
         }
+
+        graphp->cost(totalCost);
+
         // b(ottom)value compute for each vertex: bvalue equals the sum of the cost
         // of executing all vertices that have a higher rank than the vertex under consideration
 
@@ -277,6 +290,11 @@ private:
             UINFO(3, "empty readers, will not be retimed" << endl);
             m_ledger.illegal(graphp);
         }
+        if (std::any_of(seqWritep->readsp().cbegin(), seqWritep->readsp().cend(),
+                        [&](NetlistGraph* otherp) { return otherp == graphp; })) {
+            UINFO(3, "graph cycles to self and will not be retimed" << endl);
+            m_ledger.illegal(graphp);
+        }
         // make sure logic does not have multiple domains, we don't know how to retime them
         std::unordered_set<AstSenTree*> diffSenses;
         for (const auto lp : seqWritep->logicsp()) { diffSenses.insert(lp.first); }
@@ -286,7 +304,10 @@ private:
         }
         // if any of the above is true, do not retime, or maybe we cannot retime since
         // some other graph has been retimed and disabled retiming here
-        if (!m_ledger.legal(graphp)) { return; }
+        if (!m_ledger.legal(graphp)) {
+            m_statsRetimeDisabled++;
+            return;
+        }
 
         // starting from the bottom, try to find a new place for the final seq block. We don't
         // really do retiming in the way done for circuits. We basically try to find a level in the
@@ -297,6 +318,7 @@ private:
         uint32_t bestRetimingRank = highestRank;
         uint32_t bestReducedCost = costToBeat;
         bool canRetime = false;
+        UINFO(5, "netlist has rank " << highestRank << endl);
         for (int r = highestRank - 2; r >= 0; r--) {
 
             // does it make sense to push the final register to the outwards edges of
@@ -318,7 +340,8 @@ private:
             uint32_t costBelow = slowestDownStream->cost() + vtxpByRank[r].front()->bvalue();
             // we cannot have the cost above us to ever increase, since we are removing the higher
             // ranked vertices
-            UASSERT(costAbove <= costToBeat, "something is not right with the netlist graph");
+            UASSERT(costAbove <= costToBeat, "something is not right with the netlist graph "
+                                                 << costAbove << " <= " << costToBeat << endl);
             // but we can have cost below to surpass the existing worst cost, since we may
             // push the higher ranked vertices to another graph that is already critical
             UINFO(3, "at rank " << r + 1 << " cabove = " << costAbove << " cbelow = " << costBelow
@@ -339,7 +362,13 @@ private:
             UINFO(3, "Can slice up in rank " << bestRetimingRank << " which reduces cost to "
                                              << bestReducedCost << endl);
             m_ledger.notify(graphp, bestRetimingRank);
+
+            m_statsNumRetimed += 1;
+            if (m_statsMaxPreRetime < costToBeat) { m_statsMaxPreRetime = costToBeat; }
+            if (m_statsMaxPostRetime < bestReducedCost) { m_statsMaxPostRetime = bestReducedCost; }
+
             for (auto& readp : seqWritep->readsp()) {
+                if (m_ledger.legal(readp)) { m_statsRetimeTransitiveDisabled++; }
                 m_ledger.illegal(readp);  // make any further retiming to downstream
                 // graphs illegal, since retiming will require recomputing the bvalue and tvalues
             }
@@ -452,6 +481,7 @@ private:
                         NetlistEdge* const netedgep = dynamic_cast<NetlistEdge*>(edgep);
                         UASSERT(netedgep, "invalid edge type");
                         // crossingEdgesp.push_back(netedgep);
+                        UASSERT(netedgep->vscp(), "expected VarScope");
                         if (!netedgep->vscp()->user2p()) {
                             AstVarScope* const vscp = netedgep->vscp();
                             AstVarScope* const newVscp = makeVscp(vscp);
@@ -481,6 +511,7 @@ private:
                     for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep;
                          edgep = edgep->outNextp()) {
                         NetlistEdge* const netedgep = dynamic_cast<NetlistEdge*>(edgep);
+                        UASSERT(netedgep->vscp(), "expected VarScope");
                         if (!netedgep->vscp()->user2p()) {
                             UINFO(8, "LValue will be duplicated "
                                          << netedgep->vscp()->prettyNameQ() << endl);
@@ -718,10 +749,6 @@ public:
         // earlier. This is rather restrictive, but we are not looking to do too much retiming
         // anyway. If we can reduce the execution time just slightly, that would be more than
         // enough.
-        for (const auto& gp : netGraphsp) { markRetiming(gp.get()); }
-
-        // iterate through all the partitions and create new sequential logic if
-        // retiming is beneficial based on the resulst of tryRetime
         for (int ix = 0; ix < netGraphsp.size(); ix++) {
             auto& graphp = netGraphsp[ix];
             auto& depp = depGraphsp[netIndex[graphp.get()]];
@@ -730,8 +757,24 @@ public:
                 depp->dumpDotFilePrefixedAlways("partition_"
                                                 + std::to_string(netIndex[graphp.get()]));
             }
+            UINFO(3, "Analyzing retiming in netlist " << ix << endl);
+            markRetiming(graphp.get());
+        }
+
+        // iterate through all the partitions and create new sequential logic if
+        // retiming is beneficial based on the resulst of tryRetime
+        for (int ix = 0; ix < netGraphsp.size(); ix++) {
+            auto& graphp = netGraphsp[ix];
+            auto& depp = depGraphsp[netIndex[graphp.get()]];
             applyRetiming(std::move(graphp), std::move(depp));
         }
+        V3Stats::addStat("Optimizations, retiming number of partitions", depGraphsp.size());
+        V3Stats::addStat("Optimizations, retiming cost before ", m_statsMaxPreRetime);
+        V3Stats::addStat("Optimizations, retiming cost after ", m_statsMaxPostRetime);
+        V3Stats::addStat("Optimizations, retimed partitions", m_statsNumRetimed);
+        V3Stats::addStat("Optimizations, retiming disabled partitions", m_statsRetimeDisabled);
+        V3Stats::addStat("Optimizations, retiming transitively disabled partitions",
+                         m_statsRetimeTransitiveDisabled);
         netGraphsp.clear();
         depGraphsp.clear();
     }
