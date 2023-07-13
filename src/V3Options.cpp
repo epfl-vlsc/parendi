@@ -1601,6 +1601,9 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
         if (m_workers <= 0) fl->v3fatal("--workers should be >= 0: " << valp);
         if (m_workers > 6) fl->v3warn(UNOPT, "suboptimal parallel performance with --worker > 6: " << valp);
     });
+    DECL_OPTION("-max-unpack-copies", CbVal, [this](const char* valp){
+        m_maxUnpackCopies = std::atoi(valp);
+    });
     DECL_OPTION("-ipu-profile", CbVal, [this, fl](const char* valp) {
         m_ipu_profile = std::atoi(valp);
         if (m_ipu_profile <= 0 || m_ipu_profile > (1 << 16)) {

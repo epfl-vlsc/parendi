@@ -309,6 +309,7 @@ private:
     int         m_threads = 1;      // main switch: --threads
     int         m_tiles = 1472;     // main poplar switch: --tiles
     int         m_workers = 6;      // main poplar switch: --workers
+    int         m_maxUnpackCopies = 512;   // main poplar switch: --max-unpack-copies
     int         m_ipu_profile = 0;    // main poplar switch: --ipu-profile
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
@@ -538,6 +539,7 @@ public:
     int tiles(int t) { return m_tiles = t; }
     int workers() const VL_MT_SAFE { return m_workers; }
     int workers(int w) { return m_workers = w; }
+    int maxUnpackCopies() const VL_MT_SAFE { return m_maxUnpackCopies; }
     int ipuProfile() const VL_MT_SAFE { return m_ipu_profile; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }

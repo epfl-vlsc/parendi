@@ -581,15 +581,21 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
                                                &graphp](ConstrCommitVertex* const commitp) {
         AstUnpackArrayDType* const dtypep
             = VN_CAST(commitp->vscp()->varp()->dtypep(), UnpackArrayDType);
-        constexpr int UnpackMaxWords = 512;  // allow up to 512B to be duplicated
+        const int UnpackMaxWords = v3Global.opt.maxUnpackCopies();
         if (!dtypep
-            || (dtypep->arrayUnpackedElements() * dtypep->widthWords()) <= UnpackMaxWords) {
+            || (dtypep->arrayUnpackedElements() * dtypep->widthWords())
+                   <= v3Global.opt.maxUnpackCopies()) {
             return;
         }
 
         auto defp = dynamic_cast<ConstrDefVertex*>(commitp->vscp()->user1u().toGraphVertex());
         UASSERT_OBJ(defp, commitp->vscp(),
                     "not all unpack variables are visited?" << commitp->vscp()->user1p() << endl);
+        UINFO(3, "grouping partitions using unpack variable "
+                     << commitp->vscp()->varp()->prettyNameQ() << " with "
+                     << dtypep->arrayUnpackedElements() * dtypep->widthWords() << " words"
+                     << endl);
+        V3Stats::addStatSum("BspGraph, uncopiable", 1);
         graphp->userClearVertices();
         std::queue<AnyVertex*> toVisit;
         toVisit.push(defp);
