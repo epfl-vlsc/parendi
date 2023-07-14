@@ -61,6 +61,7 @@ private:
 
     const VNUser1InUse user1InUse;
     const VNUser2InUse user2InUse;
+    const VNUser3InUse user3InUse;
     enum ReplacementAction {
         VU_NOACTION = 0,
         VU_SAMPLE = 1,
@@ -68,14 +69,18 @@ private:
         VU_CLONECLEAN = 3,
         VU_INITSUBST = 4
     };
+
     // const VNUser3InUse user3InUse;
     // AstUser2Allocator<AstVarScope, std::unordered_map<AstSenTree*, AstVarScope*>>
     // m_replacements; AstUser2Allocator<AstScope, AstAlways*> m_guards; reset on partition
     // AstVarScope::user1p()  -> SeqWriteVertex* of the variable
     // AstVarScope::user1()   -> ReplacementAction
     // AstNode::user1()       -> ReplacementAction
-    // AstVarScope::user2p()  -> replacemet variable scope
-    // AstScope::user2p()     -> comb always block to replace the sequential block
+    // AstVarScope::user2p()  -> replacemet variable scope (local to partition)
+    // AstVarScope::user3u()  -> replacement variable scope given a sentreep (makes sure we only
+    // create one sequential instance of every wire)
+    using VarScopeByDomain = std::unordered_map<AstSenTree*, AstVarScope*>;
+    AstUser3Allocator<AstVarScope, VarScopeByDomain> m_vscpByDom;
 
     std::vector<std::unique_ptr<NetlistGraph>>
     buildNetlistGraphs(const std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
@@ -193,7 +198,6 @@ private:
                     }
                 }
             }
-
         }
         // do not remove redundant edges, since we need the vscp label of each edge later
         return allGraphsp;
@@ -482,11 +486,16 @@ private:
                         UASSERT(netedgep, "invalid edge type");
                         // crossingEdgesp.push_back(netedgep);
                         UASSERT(netedgep->vscp(), "expected VarScope");
-                        if (!netedgep->vscp()->user2p()) {
-                            AstVarScope* const vscp = netedgep->vscp();
+                        AstVarScope* const vscp = netedgep->vscp();
+
+                        if (!m_vscpByDom(vscp).count(seqSenTreep)) {
+
                             AstVarScope* const newVscp = makeVscp(vscp);
                             vscp->user1(VU_SAMPLE);
-                            vscp->user2p(newVscp);
+                            vscp->user2p(newVscp);  // used to replace references locally
+                            m_vscpByDom(vscp).emplace(seqSenTreep,
+                                                      newVscp);  // persists across partitions
+
                             UINFO(8, "variable will be sampled for retiming "
                                          << vscp->prettyNameQ() << endl);
                             AstAssign* const assignp = new AstAssign{
@@ -499,6 +508,13 @@ private:
                                 = new AstActive{vscp->fileline(), "retimeseq", seqSenTreep};
                             newActivep->addStmtsp(newAlwaysp);
                             vscp->scopep()->addBlocksp(newActivep);
+
+                        } else {
+                            AstVarScope* const newVscp
+                                = m_vscpByDom(vscp).find(seqSenTreep)->second;
+                            UASSERT_OBJ(newVscp, vscp, "no subst!");
+                            vscp->user2p(newVscp);
+                            vscp->user1(VU_SAMPLE);
                         }
                     }
                 }
@@ -512,11 +528,13 @@ private:
                          edgep = edgep->outNextp()) {
                         NetlistEdge* const netedgep = dynamic_cast<NetlistEdge*>(edgep);
                         UASSERT(netedgep->vscp(), "expected VarScope");
-                        if (!netedgep->vscp()->user2p()) {
+                        AstVarScope* const vscp = netedgep->vscp();
+                        if (!vscp->user2p()) {
                             UINFO(8, "LValue will be duplicated "
                                          << netedgep->vscp()->prettyNameQ() << endl);
                             netedgep->vscp()->user1(VU_LVSUBST);
-                            netedgep->vscp()->user2p(makeVscp(netedgep->vscp()));
+                            AstVarScope* const newVscp = makeVscp(vscp);
+                            vscp->user2p(newVscp);
                         }
                     }
                 }
@@ -763,6 +781,7 @@ public:
 
         // iterate through all the partitions and create new sequential logic if
         // retiming is beneficial based on the resulst of tryRetime
+        AstNode::user3ClearTree();
         for (int ix = 0; ix < netGraphsp.size(); ix++) {
             auto& graphp = netGraphsp[ix];
             auto& depp = depGraphsp[netIndex[graphp.get()]];
