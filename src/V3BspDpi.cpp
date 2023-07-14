@@ -1,5 +1,6 @@
 // -*- mode: C++; c-file-style: "cc-mode" -*-
-//*************************************************************************// DESCRIPTION: Verilator BSP: handle BSP class with DPI calls
+//*************************************************************************//
+// DESCRIPTION: Verilator BSP: handle BSP class with DPI calls
 //
 // Code available from: https://verilator.org
 //
