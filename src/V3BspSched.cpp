@@ -75,6 +75,7 @@
 // reuse some code from V3Sched
 #include "V3Ast.h"
 #include "V3BspGraph.h"
+#include "V3BspMerger.h"
 #include "V3BspModules.h"
 #include "V3BspRetiming.h"
 #include "V3EmitCBase.h"
@@ -194,12 +195,19 @@ void schedule(AstNetlist* netlistp) {
 
     if (v3Global.opt.fIpuRetime()) {
         Retiming::retimeAll(netlistp);
+        V3Stats::statsStage("bspRetime");
     }
 
     auto deps = buildDepGraphs(netlistp);
     auto& splitGraphsp = std::get<2>(deps);
     auto& logicClasses = std::get<0>(deps);
     auto& logicRegions = std::get<1>(deps);
+    V3Stats::statsStage("bspGraph");
+    // merge small partitions into larger ones
+    if (v3Global.opt.fIpuMerge()) {
+        V3BspMerger::merge(splitGraphsp);
+        V3Stats::statsStage("bspMerge");
+    }
     // Create a module for each DepGraph. To do this we also need to determine
     // whether a varialbe is solely referenced locally or by multiple cores.
     V3BspModules::makeModules(netlistp, splitGraphsp, logicClasses.m_initial,

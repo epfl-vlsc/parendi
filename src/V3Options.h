@@ -379,6 +379,7 @@ private:
     bool m_fTable;       // main switch: -fno-table: lookup table creation
     bool m_fIpuSupervisor; // main switch: -fno-ipu-supervisor: use ipu supervisor contexts when possible
     bool m_fIpuRetime = false;   // main switch: -fipu-retime: attempt retiming optimization
+    bool m_fIpuMerge  = true;   // main switch: -fno-ipu-merge: do not merge partitions
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -646,6 +647,7 @@ public:
     bool fTable() const { return m_fTable; }
     bool fIpuSupervisor() const { return m_fIpuSupervisor; }
     bool fIpuRetime() const { return m_fIpuRetime; }
+    bool fIpuMerge() const { return m_fIpuMerge; }
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
     string traceSourceBase() const { return m_traceFormat.sourceName(); }

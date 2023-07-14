@@ -49,6 +49,7 @@ set(HEADERS
     V3BspDly.h
     V3BspGraph.h
     V3BspIpuProfile.h
+    V3BspMerger.h
     V3BspModules.h
     V3BspNetlistGraph.h
     V3BspPlusArgs.h
@@ -203,6 +204,7 @@ set(COMMON_SOURCES
     V3BspDly.cpp
     V3BspGraph.cpp
     V3BspIpuProfile.cpp
+    V3BspMerger.cpp
     V3BspModules.cpp
     V3BspPlusArgs.cpp
     V3BspPoplarProgram.cpp
