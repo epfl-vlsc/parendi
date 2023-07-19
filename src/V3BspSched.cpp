@@ -84,6 +84,7 @@
 #include "V3Sched.h"
 #include "V3SenExprBuilder.h"
 #include "V3Stats.h"
+#include "V3EmitV.h"
 
 VL_DEFINE_DEBUG_FUNCTIONS;
 namespace V3BspSched {
@@ -178,7 +179,7 @@ buildDepGraphs(AstNetlist* netlistp) {
     // of combinational logic. This graph pushes combinational logic before clocked
     // logic, in parallel with AssignPre logic.
     std::unique_ptr<DepGraph> graphp = DepGraphBuilder::build(nbaLogic);
-    if (dumpGraph() > 0) { graphp->dumpDotFilePrefixed("nba_orig"); }
+    if (dumpGraph() >=3 ) { graphp->dumpDotFilePrefixed("nba_orig"); }
 
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs
@@ -193,6 +194,11 @@ buildDepGraphs(AstNetlist* netlistp) {
 
 void schedule(AstNetlist* netlistp) {
 
+    if (dumpTree() >= 3) {
+        UINFO(0, "Emitting verilog\n");
+        V3EmitV::debugEmitV(v3Global.debugFilename("pre-bsp") + ".v");
+
+    }
     if (v3Global.opt.fIpuRetime()) {
         Retiming::retimeAll(netlistp);
         V3Stats::statsStage("bspRetime");

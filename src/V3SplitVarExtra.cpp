@@ -700,6 +700,8 @@ void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
 
     // if (dump() >= 3) {
     const auto loopsp = SplitVariableCombLoopsVisitor::build(netlistp);
-    if (!loopsp->empty()) { loopsp->dumpDotFilePrefixedAlways("split_var_extra_loops_left"); }
+    if (!loopsp->empty() && dumpGraph() >= 3) {
+        loopsp->dumpDotFilePrefixedAlways("split_var_extra_loops_left");
+    }
     // }
 }
