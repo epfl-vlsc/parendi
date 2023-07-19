@@ -1225,7 +1225,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-fipu-supervisor", FOnOff, &m_fIpuSupervisor);
     DECL_OPTION("-fipu-retime", FOnOff, &m_fIpuRetime);
     DECL_OPTION("-fipu-merge", FOnOff, &m_fIpuMerge);
-
+    DECL_OPTION("-fipu-diff-exchange", FOnOff, &m_fIpuDiffExchange);
     DECL_OPTION("-G", CbPartialMatch, [this](const char* optp) { addParameter(optp, false); });
     DECL_OPTION("-gate-stmts", Set, &m_gateStmts);
     DECL_OPTION("-gdb", CbCall, []() {});  // Processed only in bin/verilator shell
@@ -1604,6 +1604,9 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     });
     DECL_OPTION("-max-unpack-copies", CbVal, [this](const char* valp){
         m_maxUnpackCopies = std::atoi(valp);
+    });
+    DECL_OPTION("-diff-exchange-threshold", CbVal, [this](const char* valp) {
+        m_diffExchangeThreshold = std::atoi(valp);
     });
     DECL_OPTION("-ipu-profile", CbVal, [this, fl](const char* valp) {
         m_ipu_profile = std::atoi(valp);

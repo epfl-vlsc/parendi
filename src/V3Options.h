@@ -310,6 +310,7 @@ private:
     int         m_tiles = 1472;     // main poplar switch: --tiles
     int         m_workers = 6;      // main poplar switch: --workers
     int         m_maxUnpackCopies = 512;   // main poplar switch: --max-unpack-copies
+    int         m_diffExchangeThreshold = 16; // main poplar switch: --diff-exchange-threshold
     int         m_ipu_profile = 0;    // main poplar switch: --ipu-profile
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
@@ -380,6 +381,7 @@ private:
     bool m_fIpuSupervisor; // main switch: -fno-ipu-supervisor: use ipu supervisor contexts when possible
     bool m_fIpuRetime = false;   // main switch: -fipu-retime: attempt retiming optimization
     bool m_fIpuMerge  = true;   // main switch: -fno-ipu-merge: do not merge partitions
+    bool m_fIpuDiffExchange = true; // main switch: -fno-ipu-diff-exchange: disable differential exchange
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -541,6 +543,7 @@ public:
     int workers() const VL_MT_SAFE { return m_workers; }
     int workers(int w) { return m_workers = w; }
     int maxUnpackCopies() const VL_MT_SAFE { return m_maxUnpackCopies; }
+    int diffExchangeThreshold() const VL_MT_SAFE { return m_diffExchangeThreshold; }
     int ipuProfile() const VL_MT_SAFE { return m_ipu_profile; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }
@@ -648,6 +651,7 @@ public:
     bool fIpuSupervisor() const { return m_fIpuSupervisor; }
     bool fIpuRetime() const { return m_fIpuRetime; }
     bool fIpuMerge() const { return m_fIpuMerge; }
+    bool fIpuDiffExchnage() const { return m_fIpuDiffExchange; }
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
     string traceSourceBase() const { return m_traceFormat.sourceName(); }

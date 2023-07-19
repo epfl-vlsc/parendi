@@ -22,7 +22,7 @@
 #include "V3Begin.h"
 #include "V3Branch.h"
 #include "V3Broken.h"
-#include "V3BspDly.h"
+#include "V3BspDifferential.h"
 #include "V3BspPoplarProgram.h"
 #include "V3BspSched.h"
 #include "V3BspStraggler.h"
@@ -465,9 +465,14 @@ static void process() {
         if (v3Global.opt.stats()) V3Stats::statsStageAll(v3Global.rootp(), "Scoped");
     }
 
-    // create a poplar program
     if (v3Global.opt.poplar()) {
         // requires scopes
+        if (v3Global.opt.fIpuDiffExchnage()) {
+            // optimize the exchange of unpack variables by only sending the diffs
+            // use --diff-exchange-threshold to tune
+            V3BspDifferential::differentialUnpack(v3Global.rootp());
+        }
+        // create a poplar program
         V3BspPoplarProgram::createProgram(v3Global.rootp());
     }
     // --MODULE OPTIMIZATIONS--------------
