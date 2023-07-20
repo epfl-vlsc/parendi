@@ -22,6 +22,7 @@
 #include "V3AstUserAllocator.h"
 #include "V3File.h"
 #include "V3Hasher.h"
+#include "V3Os.h"
 #include "V3Stats.h"
 VL_DEFINE_DEBUG_FUNCTIONS;
 namespace V3BspSched {
@@ -319,18 +320,18 @@ public:
 
 std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGraph>& graphp,
                                                      const std::vector<AnyVertex*>& postp) {
-    // STATE
-    //  AnyVertex::userp()  -> non nullptr, pointer to the clone
-    //  AnyVertex::user()   -> vertex visited
-    //  DepEdge::user()     -> true if cloned
-    //
-    graphp->userClearVertices();
+
+    // graphp->userClearVertices(); is too expensive, use sets and maps instead
+    // AnyVertex of graphp
+    std::unordered_set<AnyVertex*> origIsVisited;
+
     // the graph that is built during the backward traversal which is essentially
     // the bsp partition
     std::unique_ptr<DepGraph> builderp{new DepGraph};
     std::queue<AnyVertex*> toVisit;
     for (AnyVertex* vp : postp) {
-        vp->user(1);
+        origIsVisited.insert(vp);
+        // vp->user(1);
         toVisit.push(vp);
     }
     // bfs-like, collect all reachable vertices from the postp collection
@@ -345,23 +346,32 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         }
         for (auto itp = headp->inBeginp(); itp; itp = itp->inNextp()) {
             AnyVertex* const fromp = static_cast<AnyVertex* const>(itp->fromp());
-            if (!fromp->user()) {
-                fromp->user(1);
+            if (!origIsVisited.count(fromp)) {
+                origIsVisited.insert(fromp);
+                // fromp->user(1);
                 toVisit.push(fromp);
             }
         }
     }
+    // no longer needed, give up memory
+    origIsVisited.clear();
 
-    graphp->userClearVertices();
+    // map vertices both ways
+    // builderp::AnyVertex -> Grahp::AnyVertex
+    std::unordered_map<AnyVertex*, AnyVertex*> origToClonep;
+    std::unordered_map<AnyVertex*, AnyVertex*> cloneToOrigp;
+    // graphp->userClearVertices();
     // clone vertices collected in the traversal
-    for (AnyVertex* const vtxp : visited) {
-        UASSERT(!vtxp->user(), "invalid user value, double counting a vertex?");
+    auto makeClone = [&](AnyVertex* const vtxp) {
+        UASSERT(!origToClonep.count(vtxp), "invalid state, double counting a vertex?");
         AnyVertex* const clonep = vtxp->clone(builderp.get());
-        clonep->userp(vtxp);
-        vtxp->userp(clonep);
-    }
+        cloneToOrigp.emplace(clonep, vtxp);
+        origToClonep.emplace(vtxp, clonep);
+    };
 
-    // clone immediate successors of the collected vertices
+    for (AnyVertex* const vtxp : visited) { makeClone(vtxp); }
+
+    // clone immediate successors of the collected vertices, in graphp
     for (AnyVertex* const vtxp : visited) {
         CompVertex* const compp = dynamic_cast<CompVertex* const>(vtxp);
         if (!compp) { continue; /* not a CompVertex */ }
@@ -379,27 +389,41 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
         // will result in a DefConstr(x) node that is a sink and hence maynot
         // be added to the partition (i.e., has not been cloned yet)
         for (V3GraphEdge* eitp = compp->outBeginp(); eitp; eitp = eitp->outNextp()) {
-            if (eitp->top()->userp()) {
-                // already part of the partition
-                continue;
-            }
-            ConstrVertex* const oldTop = dynamic_cast<ConstrVertex* const>(eitp->top());
-            UASSERT(oldTop, "expected none-null");
-            AnyVertex* const clonep = oldTop->clone(builderp.get());
-            clonep->userp(oldTop);
-            oldTop->userp(clonep);
+            AnyVertex* top = dynamic_cast<AnyVertex*>(eitp->top());
+            UASSERT(top, "expected AnyVertex type");
+            if (!origToClonep.count(top)) { makeClone(top); }
         }
     }
 
-    graphp->userClearEdges();
+    // graphp->userClearEdges is O(VE), which makes it pretty expensive since this function is
+    // being called many times: use an unordered_set instead
+    std::unordered_set<V3GraphEdge*> graphpEdgesCounted;  // V3GraphEdges of graphp
+
+    auto findChecked = [&](V3GraphVertex* vp, const auto& collection) -> AnyVertex* {
+        AnyVertex* const anyp = dynamic_cast<AnyVertex*>(vp);
+        UASSERT(anyp, "should not be nullptr");
+        auto it = collection.find(anyp);
+        UASSERT(it != collection.end(), "could not find map entry");
+        return it->second;
+    };
+    auto getOrigp = [&](V3GraphVertex* vp) { return findChecked(vp, cloneToOrigp); };
+    auto getClonep = [&](V3GraphVertex* vp) { return findChecked(vp, origToClonep); };
 
     for (V3GraphVertex* itp = builderp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
-        AnyVertex* origp = reinterpret_cast<AnyVertex*>(itp->userp());
+        // AnyVertex* origp = reinterpret_cast<AnyVertex*>(itp->userp());
+        AnyVertex* origp = getOrigp(itp);
         UASSERT_OBJ(origp, itp, "expected original vertex pointer");
         for (V3GraphEdge* eitp = origp->inBeginp(); eitp; eitp = eitp->inNextp()) {
-            if (eitp->user()) { continue; /*already processed*/ }
-            if (!eitp->fromp()->userp()) { continue; /*not part of the partition*/ }
-            auto newFromp = reinterpret_cast<AnyVertex*>(eitp->fromp()->userp());
+            // eitp is in the original graph (i.e., graphp)
+            // if (eitp->user()) { continue; /*already processed*/ }
+            if (graphpEdgesCounted.count(eitp)) { continue; /*already processed*/ }
+            AnyVertex* const fromp = dynamic_cast<AnyVertex*>(eitp->fromp());
+            UASSERT(fromp, "bad vertex type");
+            if (!origToClonep.count(fromp)) {
+                // not part of the new graph
+                continue;
+            }
+            auto newFromp = getClonep(fromp);
             auto fromCompp = dynamic_cast<CompVertex*>(newFromp);
             auto fromConstrp = dynamic_cast<ConstrVertex*>(newFromp);
             auto toCompp = dynamic_cast<CompVertex*>(itp);
@@ -411,7 +435,8 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
             } else {
                 UASSERT(false, "invalid pointer types!");
             }
-            eitp->user(1);
+            graphpEdgesCounted.insert(eitp);
+            // eitp->user(1);
         }
     }
 
@@ -493,22 +518,8 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
     // These nodes also should not and cannot be replicated.
 
     // hash all the vertices, needed to have stable results between runs
-    V3Hasher nodeHasher;
-    for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
-        V3Hash hash;
-        if (auto compp = dynamic_cast<CompVertex* const>(vtxp)) {
-            hash += "COMP";
-            hash += nodeHasher(compp->nodep());
-            if (compp->domainp()) { hash += nodeHasher(compp->domainp()); }
-            compp->hash(hash);
-        } else if (auto constrp = dynamic_cast<ConstrVertex* const>(vtxp)) {
-            hash += constrp->nameSuffix();
-            hash += nodeHasher(constrp->vscp());
-            constrp->hash(hash);
-        } else {
-            UASSERT(false, "invalid vertex type");
-        }
-    }
+    graphp->rehash();
+
     // STATE
     // AstVarScope::user1p()  -> pointer to ConstrDefVertex
     VNUser1InUse m_user1InUse;
@@ -544,6 +555,7 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
         // that only enforce ordering.
         return hasNoDataDef;
     };
+
     for (auto* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
         if (auto commitp = dynamic_cast<ConstrCommitVertex*>(vtxp)) {
             sets.makeSet(commitp);
@@ -636,7 +648,10 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
     for (const auto& pair : sets.sets()) {
         if (pair.second.empty()) continue;
         disjointSinks.push_back({});
-        for (const auto& s : pair.second) { disjointSinks.back().push_back(s); }
+        auto& vec = disjointSinks.back();
+        vec.resize(pair.second.size());
+        int i = 0;
+        for (const auto& s : pair.second) { vec[i++] = s; }
     }
 
     if (dump() > 0) {
@@ -654,6 +669,28 @@ std::vector<std::vector<AnyVertex*>> groupCommits(const std::unique_ptr<DepGraph
 }
 
 };  // namespace
+
+// set the a hash value for each vertex
+void DepGraph::rehash() {
+
+    V3Hasher nodeHasher;
+    for (V3GraphVertex* vtxp = this->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+        V3Hash hash;
+        if (auto compp = dynamic_cast<CompVertex* const>(vtxp)) {
+            hash += "COMP";
+            hash += nodeHasher(compp->nodep());
+            if (compp->domainp()) { hash += nodeHasher(compp->domainp()); }
+            compp->hash(hash);
+        } else if (auto constrp = dynamic_cast<ConstrVertex* const>(vtxp)) {
+            hash += constrp->nameSuffix();
+            hash += nodeHasher(constrp->vscp());
+            constrp->hash(hash);
+        } else {
+            UASSERT(false, "invalid vertex type");
+        }
+    }
+}
+
 std::unique_ptr<DepGraph> DepGraphBuilder::build(const V3Sched::LogicByScope& logics) {
 
     return std::unique_ptr<DepGraph>{DepGraphBuilderImpl{logics}.graphp()};

@@ -44,6 +44,7 @@ public:
     inline void addEdge(ConstrVertex* fromp, CompVertex* top);
     inline AstModule* modp() const { return m_modp; }
     inline void modp(AstModule* modp) { m_modp = modp; }
+    void rehash();
 };
 
 //=============================================================================

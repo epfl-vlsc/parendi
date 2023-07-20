@@ -172,15 +172,15 @@ buildDepGraphs(AstNetlist* netlistp) {
                    "Pre-active not supprted because as can only handle a single clock");
 
     unsupportedWhy(logicRegions.m_act, "active region computation is not fully supported");
-
     V3Sched::LogicByScope& nbaLogic = logicRegions.m_nba;
     // Step 6. make a fine-grained dependence graph. This graph is different from
     // the V3Order graph in many ways but the most notably difference is wrt ordering
     // of combinational logic. This graph pushes combinational logic before clocked
     // logic, in parallel with AssignPre logic.
+    V3Stats::statsStage("partitionLogic");
     std::unique_ptr<DepGraph> graphp = DepGraphBuilder::build(nbaLogic);
     if (dumpGraph() >=3 ) { graphp->dumpDotFilePrefixed("nba_orig"); }
-
+    V3Stats::statsStage("dagGeneration");
     // Step 7. Break the dependence graph into a maximal set of indepdent parallel
     // graphs
     std::vector<std::unique_ptr<DepGraph>> splitGraphsp;
@@ -189,6 +189,7 @@ buildDepGraphs(AstNetlist* netlistp) {
     } else if (graphp->verticesBeginp()) {
         splitGraphsp = DepGraphBuilder::splitIndependent(graphp);
     }
+    V3Stats::statsStage("dagSplit");
     return {std::move(logicClasses), std::move(logicRegions), std::move(splitGraphsp)};
 }
 
