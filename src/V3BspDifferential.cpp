@@ -89,7 +89,7 @@ private:
             if (m_inDynamicBlock) {
                 // we can not accurately count the number of times the variable
                 // is updated (e.g., inside a while loop). So we don't consider it for optimization
-                UINFO(3, "Will not be optimized: "
+                UINFO(4, "Will not be optimized: "
                              << varp->prettyNameQ()
                              << ", cannot determine number of updates statically" << endl);
                 m_updates.erase(varp);
@@ -97,7 +97,7 @@ private:
                 m_updates.find(varp)->second.numUpdates += 1;
             } else {
                 // not in an assignment, perhaps LV but as function argument
-                UINFO(3, "Will not be optimized: " << varp->prettyNameQ()
+                UINFO(4, "Will not be optimized: " << varp->prettyNameQ()
                                                    << ", not in an assignment" << endl);
                 m_updates.erase(varp);
             }
@@ -322,7 +322,7 @@ private:
 
         if (!classp->user1()) {
             // not marked to be visited
-            UINFO(4, "Will not visit " << classp->prettyNameQ() << endl);
+            UINFO(5, "Will not visit " << classp->prettyNameQ() << endl);
             return;  // do not need to visit
         }
         UASSERT_OBJ(classp->flag().isBsp() && !classp->flag().isBspInit()
@@ -331,7 +331,7 @@ private:
         UASSERT_OBJ(!m_classp, classp, "should not nest classes");
         VL_RESTORER(m_classp);
         if (classp->user1() == VU_WRITER) {
-            UINFO(3, "Visiting writer class " << classp->prettyNameQ() << endl);
+            UINFO(4, "Visiting writer class " << classp->prettyNameQ() << endl);
             m_classp = classp;
             // count the times each variable is updated, if cannot determine the count statically,
             // remove the unpack variable from the scratchpad
@@ -344,7 +344,7 @@ private:
             // iterate children and create new variables
             iterateChildren(classp);
         } else if (classp->user1() == VU_READER) {
-            UINFO(3, "visiting reader class " << classp->prettyNameQ() << endl);
+            UINFO(4, "visiting reader class " << classp->prettyNameQ() << endl);
             m_classp = classp;
             classp->foreach([this](AstCFunc* cfuncp) {
                 if (cfuncp->name() == "nbaTop") { addLogicToReader(cfuncp); }
@@ -527,7 +527,7 @@ public:
             }
             auto numWords = unpackDTypep->arrayUnpackedElements() * unpackDTypep->widthWords();
             if (numWords < v3Global.opt.diffExchangeThreshold()) {
-                UINFO(3, "Will not optimize unpack array "
+                UINFO(4, "Will not optimize unpack array "
                              << unpackDTypep << " with " << numWords
                              << " words which is smaller than --diff-exchange-threshold "
                              << v3Global.opt.diffExchangeThreshold() << endl);
