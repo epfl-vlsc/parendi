@@ -185,6 +185,9 @@ private:
     AstClass* m_initClassp = nullptr;
     AstCFunc* m_initExchangep = nullptr;
     AstCFunc* m_exchangep = nullptr;
+
+    VDouble0 m_statsNumOpt;
+    VDouble0 m_statsNumCandidates;
     // stack of ArraySel nodes above
     std::vector<AstArraySel*> m_aselp;
 
@@ -383,6 +386,7 @@ private:
         UASSERT_OBJ(scratchpad.numUpdates, vrefp, "no write observed!");
         // create the write condition
         if (!scratchpad.subst.condp) {
+            m_statsNumOpt += 1;
             AstNodeDType* condDTypep = m_netlistp->findBitDType(
                 static_cast<int>(scratchpad.numUpdates), static_cast<int>(scratchpad.numUpdates),
                 VSigning::UNSIGNED);
@@ -536,9 +540,12 @@ public:
 
             AstClass* const classp = getClass(sourcep);
             AstVar* const unpackVarp = sourcep->varp();
-            // emplace it in the scratchpad to be transformed
-            m_updates.emplace(unpackVarp, UnpackUpdate{classp, unpackDTypep});
-            classp->user1(VU_WRITER);  // mark this class as being a writer
+            if (!marked(unpackVarp)) {
+                // emplace it in the scratchpad to be transformed
+                m_updates.emplace(unpackVarp, UnpackUpdate{classp, unpackDTypep});
+                m_statsNumCandidates += 1;
+                classp->user1(VU_WRITER);  // mark this class as being a writer
+            }
         });
         // iterate any class marked as VU_WRITER, analyze it to ensure we can determine the number
         // of writes to the selected unpack variables statically and then sample write conditions
@@ -567,6 +574,12 @@ public:
         });
         // Iterate the VU_READER classes and add the differential logic
         iterateChildren(netlistp);
+    }
+
+    ~DifferentialUnpackVisitor() override {
+        V3Stats::addStat("Optimizations, ipu differential exchanges applied", m_statsNumOpt);
+        V3Stats::addStat("Optimizations, ipu differential exchange candidates",
+                         m_statsNumCandidates);
     }
 };
 }  // namespace
