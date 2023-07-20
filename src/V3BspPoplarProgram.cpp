@@ -79,8 +79,8 @@ private:
         });
         // set the tile count, potentially lower than the requested tile count
         // by the user (i.e, --tiles)
-        v3Global.opt.tiles(maxTileId);  // this is needed later to pass to the runtime
-        v3Global.opt.workers(maxWorkerId);
+        v3Global.opt.tiles(maxTileId + 1);  // this is needed later to pass to the runtime
+        v3Global.opt.workers(maxWorkerId + 1);
         if (maxWorkerId == 0 && v3Global.opt.fIpuSupervisor()) {
             // optionally promote every class to a supervisor, it's good for performance
             UINFO(3, "Promoting all vertices to supervisors" << endl);
