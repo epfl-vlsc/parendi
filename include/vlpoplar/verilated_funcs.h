@@ -790,12 +790,23 @@ static VL_ATTR_ALWINLINE int _vl_cmp_w(int words, WDataInP const lwp, WDataInP c
 #define VL_GTS_IWW(lbits, lwp, rwp) (_vl_cmps_w(lbits, lwp, rwp) > 0)
 #define VL_GTES_IWW(lbits, lwp, rwp) (_vl_cmps_w(lbits, lwp, rwp) >= 0)
 
+
+static VL_ATTR_ALWINLINE IData VL_GTS_III_IPU_NATIVE(int lbits, IData lhs, IData rhs) VL_PURE {
+
+    const int32_t lhs_signed = VL_EXTENDS_II(32, lbits, lhs);  // I for popc
+    const int32_t rhs_signed = VL_EXTENDS_II(32, lbits, rhs);  // I for popc
+    return lhs_signed > rhs_signed;
+}
+
 static VL_ATTR_ALWINLINE IData VL_GTS_III(int lbits, IData lhs, IData rhs) VL_PURE {
     // For lbits==32, this becomes just a single instruction, otherwise ~5.
     // GCC 3.3.4 sign extension bugs on AMD64 architecture force us to use quad logic
-    const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
-    const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
-    return lhs_signed > rhs_signed;
+    // but we are using popc, which does not have this bug thankfully
+
+    // const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
+    // const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
+    // return lhs_signed > rhs_signed;
+    return VL_GTS_III_IPU_NATIVE(lbits, lhs, rhs);
 }
 static VL_ATTR_ALWINLINE IData VL_GTS_IQQ(int lbits, QData lhs, QData rhs) VL_PURE {
     const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);
@@ -803,10 +814,17 @@ static VL_ATTR_ALWINLINE IData VL_GTS_IQQ(int lbits, QData lhs, QData rhs) VL_PU
     return lhs_signed > rhs_signed;
 }
 
-static VL_ATTR_ALWINLINE IData VL_GTES_III(int lbits, IData lhs, IData rhs) VL_PURE {
-    const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
-    const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
+static VL_ATTR_ALWINLINE IData VL_GTES_III_IPU_NATIVE(int lbits, IData lhs, IData rhs) VL_PURE {
+    const int32_t lhs_signed = VL_EXTENDS_II(32, lbits, lhs);  // I for popc
+    const int32_t rhs_signed = VL_EXTENDS_II(32, lbits, rhs);  // I for popc
     return lhs_signed >= rhs_signed;
+}
+
+static VL_ATTR_ALWINLINE IData VL_GTES_III(int lbits, IData lhs, IData rhs) VL_PURE {
+    // const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
+    // const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
+    // return lhs_signed >= rhs_signed;
+    return VL_GTES_III_IPU_NATIVE(lbits, lhs, rhs);
 }
 static VL_ATTR_ALWINLINE IData VL_GTES_IQQ(int lbits, QData lhs, QData rhs) VL_PURE {
     const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);
@@ -814,22 +832,40 @@ static VL_ATTR_ALWINLINE IData VL_GTES_IQQ(int lbits, QData lhs, QData rhs) VL_P
     return lhs_signed >= rhs_signed;
 }
 
-static VL_ATTR_ALWINLINE IData VL_LTS_III(int lbits, IData lhs, IData rhs) VL_PURE {
-    const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
-    const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
+
+static VL_ATTR_ALWINLINE IData VL_LTS_III_IPU_NATIVE(int lbits, IData lhs, IData rhs) VL_PURE {
+    const int32_t lhs_signed = VL_EXTENDS_II(32, lbits, lhs);  // I for popc
+    const int32_t rhs_signed = VL_EXTENDS_II(32, lbits, rhs);  // I for popc
     return lhs_signed < rhs_signed;
 }
+
+static VL_ATTR_ALWINLINE IData VL_LTS_III(int lbits, IData lhs, IData rhs) VL_PURE {
+    // const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
+    // const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
+    // return lhs_signed < rhs_signed;
+    return VL_LTS_III_IPU_NATIVE(lbits, lhs, rhs);
+}
+
 static VL_ATTR_ALWINLINE IData VL_LTS_IQQ(int lbits, QData lhs, QData rhs) VL_PURE {
     const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);
     const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);
     return lhs_signed < rhs_signed;
 }
 
-static VL_ATTR_ALWINLINE IData VL_LTES_III(int lbits, IData lhs, IData rhs) VL_PURE {
-    const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
-    const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
+static VL_ATTR_ALWINLINE IData VL_LTES_III_IPU_NATIVE(int lbits, IData lhs, IData rhs) VL_PURE {
+    const int32_t lhs_signed = VL_EXTENDS_II(32, lbits, lhs);  // I for popc
+    const int32_t rhs_signed = VL_EXTENDS_II(32, lbits, rhs);  // I for popc
     return lhs_signed <= rhs_signed;
 }
+
+static VL_ATTR_ALWINLINE IData VL_LTES_III(int lbits, IData lhs, IData rhs) VL_PURE {
+    // const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);  // Q for gcc
+    // const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);  // Q for gcc
+    // return lhs_signed <= rhs_signed;
+    return VL_LTES_III_IPU_NATIVE(lbits, lhs, rhs);
+
+}
+
 static VL_ATTR_ALWINLINE IData VL_LTES_IQQ(int lbits, QData lhs, QData rhs) VL_PURE {
     const int64_t lhs_signed = VL_EXTENDS_QQ(64, lbits, lhs);
     const int64_t rhs_signed = VL_EXTENDS_QQ(64, lbits, rhs);
