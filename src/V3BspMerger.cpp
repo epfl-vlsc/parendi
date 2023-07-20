@@ -204,8 +204,18 @@ private:
     void iterVertex(V3Graph* const graphp, Fn&& fn) {
         using Traits = FunctionTraits<Fn>;
         using Arg = typename Traits::template arg<0>::type;
-        for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+        for (V3GraphVertex *vtxp = graphp->verticesBeginp(), *nextp; vtxp; vtxp = nextp) {
+            nextp = vtxp->verticesNextp();
             if (Arg const vp = dynamic_cast<Arg>(vtxp)) { fn(vp); }
+        }
+    }
+    template <typename Fn>
+    void iterEdges(CoreVertex* corep, GraphWay way, Fn&& fn) {
+        using Traits = FunctionTraits<Fn>;
+        using Arg = typename Traits::template arg<0>::type;
+        for (V3GraphEdge *edgep = corep->beginp(way), *nextp; edgep; edgep = nextp) {
+            nextp = edgep->nextp(way);
+            if (Arg const ep = dynamic_cast<Arg>(edgep)) { fn(ep); }
         }
     }
     uint32_t cachedInstrCount(AstNode* nodep) const {
@@ -318,13 +328,13 @@ private:
             corep->recvWords(totalRecv);
         });
 
-        // insert all the cores in a min heap
-        for (CoreVertex* corep : coresp) {
-            if (!corep->hasPli()) {  // don't merge the cores that do PLI, we should
-                // consider them separately
-                m_heap.insert(corep->heapNode().get());
-            }
-        }
+        // // insert all the cores in a min heap
+        // for (CoreVertex* corep : coresp) {
+        //     if (!corep->hasPli()) {  // don't merge the cores that do PLI, we should
+        //         // consider them separately
+        //         m_heap.insert(corep->heapNode().get());
+        //     }
+        // }
 
         if (dumpGraph() >= 5) { m_coreGraphp->dumpDotFilePrefixed("multicore"); }
     }
@@ -424,14 +434,21 @@ private:
         VL_DO_DANGLING(core2p->unlinkDelete(m_coreGraphp.get()), core2p);
     }
 
-    uint32_t iterativeMerge() {
-        uint32_t numMerges = 0;
-        uint32_t numCores = 0;
+    std::vector<CostType> gatherCost() {
         std::vector<CostType> coreCost;
+        iterVertex(m_coreGraphp.get(),
+                   [&coreCost](CoreVertex* const corep) { coreCost.push_back(corep->cost()); });
+        return coreCost;
+    }
+    uint32_t mergeConservatively() {
+        UASSERT(m_heap.empty(), "heap should be empty");
+        uint32_t numMerges = 0;
+        std::vector<CostType> coreCost = gatherCost();
+        uint32_t numCores = coreCost.size();
+        if (numCores <= targetCoreCount()) { return 0; }
 
-        iterVertex(m_coreGraphp.get(), [&numCores, &coreCost](CoreVertex* const corep) {
-            coreCost.push_back(corep->cost());
-            numCores += 1;
+        iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
+            if (!corep->hasPli()) { m_heap.insert(corep->heapNode().get()); }
         });
         std::stable_sort(coreCost.begin(), coreCost.end());
         // do not exceed the 95th percentile worst-case cost
@@ -444,36 +461,30 @@ private:
         // iteratively merge small cores up to the worstCost
         // m_heap.max() is actually min
         HeapNode* minNodep = m_heap.max();
-        if (!minNodep) {
-            UINFO(3, "Heap is empty!");
-            // could be that we have no NBA computation
-            return 0;
-        }
-        // TODO: Avoid merging cores that do DPI, or make sure cores with DPI always remain
-        // a small enough to enable overlapping of condeval and computation
 
+        // Conservatively merge: avoid an increase to the critical path
         while (numCores > targetCoreCount() && !m_heap.empty() && minNodep
                && minNodep->key().corep->cost() <= worstCost) {
             // try merging minNodep with a neighbor
             CoreVertex* bestNeighbor = nullptr;
             CostType bestCost = std::numeric_limits<CostType>::max();
             CoreVertex* corep = minNodep->key().corep;
-            auto iterEdges = [&](GraphWay way) {
-                for (V3GraphEdge* edgep = corep->beginp(way); edgep; edgep = edgep->nextp(way)) {
+            auto visitNeighbor = [&](GraphWay way) {
+                iterEdges(corep, way, [&](V3GraphEdge* edgep) {
                     CoreVertex* const neighbor = dynamic_cast<CoreVertex*>(edgep->furtherp(way));
                     CostType newCost = costAfterMerge(corep, neighbor);
                     if (newCost <= worstCost && newCost <= bestCost) {
                         bestNeighbor = neighbor;
                         bestCost = newCost;
                     }
-                }
+                });
             };
             UINFO(8, "inspecting  " << corep->partsString() << " " << corep->cost() << endl);
             // there are probably more inEdges than outEdges, so maybe we could merge
             // on outEdges to make a it a bit faster. Currently do both to find the better
             // candidate
-            iterEdges(GraphWay::REVERSE);  // iter inEdges
-            iterEdges(GraphWay::FORWARD);  // iter outEdges
+            visitNeighbor(GraphWay::REVERSE);  // iter inEdges
+            visitNeighbor(GraphWay::FORWARD);  // iter outEdges
             if (bestNeighbor) {
                 // found a neighbor, merge it
                 UINFO(8, "Merging with neighbors: " << bestCost << endl);
@@ -504,14 +515,98 @@ private:
             }
             minNodep = m_heap.max();
         }
-        if (numCores > targetCoreCount()) {
-            // we are not done yet, we need to now try to merge, but try to increase
-            // the execution cost as little as possible
-            // v3Global.rootp()->v3warn(UNOPTFLAT, "Failed to partition to " << targetCoreCount()
-            // << "")
-            UASSERT(false, "merge not implemented");
+        // We have done our best not to increase the critical latency. Hopefully we do not need to
+        // merge any further
+
+        // clean up
+        while (!m_heap.empty()) {
+            minNodep = m_heap.max();
+            m_heap.remove(minNodep);
         }
-        if (dumpGraph() >= 5) { m_coreGraphp->dumpDotFilePrefixed("multicore_final"); }
+
+        if (dumpGraph() >= 5) {
+            m_coreGraphp->dumpDotFilePrefixed("multicore_conservative_final");
+        }
+        return numMerges;
+    }
+
+    uint32_t mergeForced() {
+
+        UASSERT(m_heap.empty(), "heap should be empty");
+        // get the current cost estimates
+        std::vector<CostType> coreCost = gatherCost();
+        uint32_t numCores = coreCost.size();
+        if (numCores <= targetCoreCount()) {
+            return 0;  // nothing to do
+        }
+
+        iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
+            // PLI or not, add it to the heap
+            m_heap.insert(corep->heapNode().get());
+        });
+
+        uint32_t numMerges = 0;
+        std::stable_sort(coreCost.begin(), coreCost.end());
+        CostType currentWorst = coreCost.back();
+
+        UINFO(8, "Forcing merge with worst cost " << currentWorst << " and " << numCores
+                                                  << " cores to have target core count "
+                                                  << targetCoreCount() << endl);
+        // merge smallest with a neighbor that yeilds the smallest cost
+
+        while (numCores > targetCoreCount() && !m_heap.empty()) {
+
+            // try merging minNodep with a neighbor
+            HeapNode* minNodep = m_heap.max();  // max is actually min
+            CoreVertex* bestNeighborp = nullptr;
+            CostType bestCost = std::numeric_limits<CostType>::max();
+            CoreVertex* corep = minNodep->key().corep;
+            auto visitNeighor = [&](GraphWay way) {
+                iterEdges(corep, way, [&](V3GraphEdge* edgep) {
+                    CoreVertex* const neighborp = dynamic_cast<CoreVertex*>(edgep->furtherp(way));
+                    CostType newCost = costAfterMerge(corep, neighborp);
+                    if (newCost < bestCost) {
+                        bestNeighborp = neighborp;
+                        bestCost = newCost;
+                    }
+                });
+            };
+            visitNeighor(GraphWay::FORWARD);
+            visitNeighor(GraphWay::REVERSE);
+            auto applyMerge = [&](CoreVertex* otherp, const CostType& newCost) {
+                doMerge(corep, otherp, newCost);
+                if (newCost > currentWorst) {
+                    currentWorst = newCost;
+                    UINFO(6, "Increasing cost " << currentWorst << endl);
+                }
+                numMerges++;
+                UASSERT(numCores > 1, "underflow");
+                numCores--;
+            };
+            if (bestNeighborp) {
+                UINFO(8, "Merging with neighbor core givs "
+                             << bestCost << " current = " << currentWorst << endl);
+                applyMerge(bestNeighborp, bestCost);
+            } else if (HeapNode* const secondMinNodep = m_heap.secondMax()) {
+                // there were no neighbors, merge with the next in the heap
+                CoreVertex* otherCorep = secondMinNodep->key().corep;
+                CostType newCost = costAfterMerge(corep, otherCorep);
+                UINFO(8, "Merging with next in line " << newCost << " current = " << currentWorst
+                                                      << endl);
+                applyMerge(otherCorep, newCost);
+            } else {
+                // something is up
+                UASSERT(false, "Nothing left to merge!");
+            }
+        }
+
+        UASSERT(numCores <= targetCoreCount(), "Could not reach desired count "
+                                                   << targetCoreCount() << " > " << numCores
+                                                   << endl);
+        // clean up
+        while (!m_heap.empty()) { m_heap.remove(m_heap.max()); }
+
+        if (dumpGraph() >= 5) { m_coreGraphp->dumpDotFilePrefixed("multicore_forced_final"); }
         return numMerges;
     }
 
@@ -620,19 +715,17 @@ public:
         if (partitionsp.empty() || partitionsp.size() <= targetCoreCount()) { return; }
 
         buildMultiCoreGraph(partitionsp);
-        uint32_t numMerges = iterativeMerge();
+        uint32_t numMerges = mergeConservatively();
+        uint32_t numMergesForced = mergeForced();
         if (numMerges) {
             V3Stats::addStat("BspMerger, initial partitions", partitionsp.size());
             buildMergedPartitions(partitionsp);  // modifies partitionsp
-            V3Stats::addStat("BspMerger, merged partitions", numMerges);
+            V3Stats::addStat("BspMerger, merged partitions - conservative", numMerges);
+            V3Stats::addStat("BspMerger, merged partitions - forced", numMergesForced);
             V3Stats::addStat("BspMerger, final partitions", partitionsp.size());
         }
     }
 
-    // static std::vector<std::unique_ptr<DepGraph>>
-    // merge(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
-    //     return PartitionMerger{partitionsp}.m_partitionsp;
-    // }
 };
 
 void V3BspMerger::merge(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
