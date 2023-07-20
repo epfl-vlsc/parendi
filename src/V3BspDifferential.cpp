@@ -182,6 +182,7 @@ private:
     AstNetlist* m_netlistp = nullptr;
 
     AstCFunc* m_initComputep = nullptr;
+    AstClass* m_initClassp = nullptr;
     AstCFunc* m_initExchangep = nullptr;
     AstCFunc* m_exchangep = nullptr;
     // stack of ArraySel nodes above
@@ -264,9 +265,10 @@ private:
             AstVarScope* const clsInstp = VN_AS(m_classp->user2p(), VarScope);
             AstVarScope* const srcInstp = VN_AS(scratchpad.classp->user2p(), VarScope);
             // in the initialize function, set this.condVscp = init.condVscp
-            m_initExchangep->addStmtsp(
-                mkCopyOp(condVscp, clsInstp, scratchpad.origVscp, srcInstp));
-
+            m_initExchangep->addStmtsp(mkCopyOp(condVscp, clsInstp, scratchpad.subst.condInitp,
+                                                VN_AS(m_initClassp->user2p(), VarScope)));
+            // but also copy from the writer
+            m_exchangep->addStmtsp(mkCopyOp(condVscp, clsInstp, scratchpad.subst.condp, srcInstp));
             /// prepare for clone and subst, set user3p to the new Vscp
             scratchpad.origVscp->user3p(vscp);
             scratchpad.subst.condp->user3p(condVscp);
@@ -470,7 +472,10 @@ public:
             AstClass* const classp = VN_CAST(nodep, Class);
             if (classp && classp->flag().isBspInit()) {
                 classp->foreach([&](AstCFunc* funcp) {
-                    if (funcp->name() == "compute") { m_initComputep = funcp; }
+                    if (funcp->name() == "compute") {
+                        m_initComputep = funcp;
+                        m_initClassp = classp;
+                    }
                 });
             }
         }
@@ -497,6 +502,7 @@ public:
         UASSERT(m_exchangep, "could not find exchange");
         UASSERT(m_initExchangep, "could not find initialize");
         UASSERT(m_initComputep, "could not find initial class");
+        UASSERT(m_initClassp, "init class not found");
 
         auto foreachCopyp = [this](auto&& fn) {
             for (AstAssign *copyp = VN_AS(m_exchangep->stmtsp(), Assign), *nextp; copyp;
