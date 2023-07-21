@@ -253,7 +253,7 @@ struct ReadWriteVec {
     IntervalSet m_write, m_read;
     std::vector<FileLine*> m_writeLoc;
     std::vector<FileLine*> m_readLoc;
-    // std::vector<BitInterval> m_readIntervals;
+    std::vector<BitInterval> m_readIntervals;
     const int m_width;
     explicit ReadWriteVec(int width)
         : m_write{width}
@@ -307,7 +307,79 @@ struct ReadWriteVec {
         }
         return no_gaps;
     }
+    static std::vector<BitInterval> maximalDisjoint(const std::vector<BitInterval>& original) {
+        UASSERT(original.size(), "empty original");
+        std::deque<BitInterval> toSplit{original.begin(), original.end()};
+        std::vector<BitInterval> disjoint;
+        auto sortIt = [&](std::deque<BitInterval>& q) {
+            std::sort(q.begin(), q.end(), [](const BitInterval& i1, const BitInterval& i2) {
+                return i1.first < i2.first;
+            });
+        };
+        sortIt(toSplit);
+        // int step = 0;
+        int numLeft = original.size();
+        // auto print = [&]() {
+        //     std::cout << "w" << step << ": \t";
+        //     for (auto x : toSplit) { std::cout << toString(x) << "  "; }
+        //     std::cout << "\t" << numLeft << std::endl;
+        //     std::cout << "r" << step << ": \t";
+        //     for (auto x : disjoint) { std::cout << toString(x) << "  "; }
+        //     std::cout << std::endl << std::endl;
+        //     step++;
+        // };
+        // sort based on the increasing order of lsb
+        while (numLeft > 1) {
+            // print();
+            // take the first one, which has the lowest lsb
+            BitInterval i1 = toSplit.front();
+            numLeft--;
+            toSplit.pop_front();
+            // take the second one
+            BitInterval i2 = toSplit.front();
+            if (i1.second < i2.first) {
+                // i1 is already disjoint
+                disjoint.push_back(i1);
+                continue;
+            }
+            // i1 has some intersection with i2
+            // 0)
+            //  i1:   =====
+            //  i2:   ===
+            // 1)
+            //   i1:  =====
+            //   i2:   ====
+            // 2)
+            //  i1:   ==========
+            //  i2:     =============
+            // 3)
+            //  i1:   ==========
+            //  i2:     =====
+            UASSERT(i1.first <= i2.first, "not sorted!");
+            if (i1.second > i2.second && i1.first == i2.first) {  // 0)
+                numLeft++;
+                toSplit.push_back({i2.second + 1, i1.second});
+            } else if (i1.second <= i2.second && i1.first < i2.first) {
+                // 1) and 2)
+                numLeft++;
+                toSplit.push_back({i1.first, i2.first - 1});
+            } else if (i1.second > i2.second && i1.first < i2.first) {
+                numLeft += 2;
+                toSplit.push_back({i1.first, i2.first - 1});
+                toSplit.push_back({i2.second + 1, i1.second});
+            } else {
+                // i1 is in i2
+                //  ======
+                //  ======
+                // so add nothing (gets eliminated)
+            }
 
+            sortIt(toSplit);
+        }
+        UASSERT(numLeft == 1 && toSplit.size() == 1, "empty queue!");
+        disjoint.push_back(toSplit.front());
+        return disjoint;
+    }
 };
 }  // namespace
 class SplitVariableExtraVisitor : public VNVisitor {
@@ -381,7 +453,8 @@ private:
         UINFO(4, "        In SCC" << cvtToHex(scc.front()->color()) << " :" << endl);
         for (const auto& pair : m_scoreboard) {
             if (pair.second.conflict()) {
-                const auto disjointReadIntervals = pair.second.m_read.intervals();
+                const auto disjointReadIntervals
+                    = ReadWriteVec::maximalDisjoint(pair.second.m_read.intervals());
 
                 const auto disjointCovered = ReadWriteVec::disjoinFillGaps(
                     disjointReadIntervals, pair.first->dtypep()->width());
@@ -461,7 +534,7 @@ private:
         // as long as we do the following we ensure that we never wrongly compute
         // the read/write range on VarRef but we may miss some optimization opportunities.
         // E.g., SEL(CONCAT(VARREF, VARREF)), we could still determine extactly which
-        // bits are being read in each VarRef but instea we end up thinkin all bits
+        // bits are being read in each VarRef but instead we end up thinking all bits
         // are being written/read
         AstExtend* const extp = VN_CAST(selp->fromp(), Extend);
         AstExtendS* const extsp = VN_CAST(selp->fromp(), ExtendS);
@@ -526,6 +599,56 @@ public:
         SplitVariableExtraVisitor vis{netlistp};
         return std::move(vis.m_disjointReadRanges);
     }
+};
+
+class SplitExtraWideVisitor : public VNVisitor {
+private:
+    std::unordered_map<AstVarScope*, std::vector<BitInterval>> m_disjoinReadIntervals;
+
+    AstSel* m_selp = nullptr;
+
+    bool isSplittable(AstVar* const varp) const {
+        AstNodeDType* const dtypep = varp->dtypep();
+        if (!(VN_IS(dtypep, PackArrayDType) || VN_IS(dtypep, StructDType)
+              || VN_IS(dtypep, BasicDType))) {
+            return false;
+        }
+        if (!V3SplitVar::canSplitVar(varp)) { return false; }
+        return true;
+    }
+
+
+    void visit(AstSel* selp) override {
+        UASSERT_OBJ(!m_selp, selp, "nested Sel! " << m_selp << endl);
+        // SEL(EXTEND(VARREF)) or SEL(VARREF) will recieve a narrowed down
+        // range but anything else should be read/written as a whole. Note that
+        // as long as we do the following we ensure that we never wrongly compute
+        // the read/write range on VarRef but we may miss some optimization opportunities.
+        // E.g., SEL(CONCAT(VARREF, VARREF)), we could still determine extactly which
+        // bits are being read in each VarRef but instead we end up thinking all bits
+        // are being written/read
+        AstExtend* const extp = VN_CAST(selp->fromp(), Extend);
+        AstExtendS* const extsp = VN_CAST(selp->fromp(), ExtendS);
+        AstVarRef* const vrefp = VN_CAST(selp->fromp(), VarRef);
+        if (vrefp || (extp && VN_IS(extp->lhsp(), VarRef))
+            || (extsp && VN_IS(extsp->lhsp(), VarRef))) {
+            m_selp = selp;
+            iterate(selp->fromp());
+            // do not visit the rest with m_selp set since the sel range only applies to the
+            // variable referenced directly below but not the ones in lsbp
+            m_selp = nullptr;
+        } else {
+            // SEL(EXPR(VARREF)) will view VarRef as it was read/written as a whole.
+            // This is conservative, but correct.
+            iterate(selp->fromp());
+        }
+        iterate(selp->lsbp());
+    }
+
+    void visit(AstNode* nodep) override { iterateChildren(nodep); }
+
+public:
+    explicit SplitExtraWideVisitor(AstNetlist* netlistp) { iterate(netlistp); }
 };
 class SplitExtraPackVisitor : public VNVisitor {
 private:
