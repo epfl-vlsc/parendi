@@ -143,85 +143,117 @@ public:
     }
 };
 
-class BitVector {
+using BitInterval = std::pair<int /*lsb*/, int /*msb*/>;
+
+class IntervalSet {
 private:
     const int m_width;
-    std::vector<uint32_t> m_bits;
+    std::list<BitInterval> m_ordered;
+
+    inline static void merge(std::list<BitInterval>& sorted) {
+        std::list<BitInterval> res;
+        res.push_back(sorted.front());
+        sorted.pop_front();
+        for (auto it = sorted.cbegin(); it != sorted.cend(); it++) {
+            BitInterval& last = res.back();
+            if (last.second < it->first) {
+                // no need to merge
+                res.push_back(*it);
+            } else {
+                // last.second > it->first --- overlapping
+                auto msb = std::max(last.second, it->second);
+                UASSERT(it->first >= last.first, "not sorted");
+                last.second = msb;
+            }
+        }
+        sorted = std::move(res);
+    }
 
 public:
-    static constexpr int BUCKET_SIZE = sizeof(uint32_t) * 8;
+    explicit IntervalSet(const int width)
+        : m_width(width) {}
 
-    int index(int pos) const { return pos / BUCKET_SIZE; }
+    inline int width() const { return m_width; }
+    void insert(const BitInterval& interval) {
 
-    explicit BitVector(const int width)
-        : m_width{width} {
-        int numWords = index(m_width - 1) + 1;
-        m_bits.clear();
-        for (int i = 0; i < numWords; i++) { m_bits.push_back(0); }
-    }
-    bool conflict(const BitVector& other) const {
-        UASSERT(other.m_width == m_width, "invalid intersection");
-        for (int i = 0; i < m_bits.size(); i++) {
-            if (m_bits[i] & other.m_bits[i]) { return true; }
+        const int lsb = interval.first;
+        const int msb = interval.second;
+        UASSERT(lsb <= msb, "invalid range");
+        // invariant: keep m_ordered sorted
+        // we have m_ordered[i].second < m_ordered[i + 1].first
+        int pos = 0;
+        std::list<BitInterval> high;
+        for (auto it = m_ordered.cbegin(); it != m_ordered.cend(); it++) {
+            if (it->first > lsb) {
+                high.splice(high.cbegin(), m_ordered, it, m_ordered.cend());
+                break;
+            }
         }
-        return false;
-    }
-    void set(int from, int width) {
-        if (width == 0) return;
-        const int fromIndex = index(from);
-        const int toIndex = index(from + width - 1);
 
-        UASSERT(from + width - 1 < m_width,
-                "invalid range [" << from << "+:" << width << "]" << endl);
-        const int shAmount = from % BUCKET_SIZE;
-        uint32_t mask = 0;
-        if (toIndex == fromIndex) {
-            mask = (width == BUCKET_SIZE) ? std::numeric_limits<uint32_t>::max()
-                                          : ((1u << width) - 1u);
-            width = 0;
-            from = 0;
-        } else {
-            UASSERT(toIndex > fromIndex, "invalid index values");
-            mask = std::numeric_limits<uint32_t>::max();
-            width = width - (BUCKET_SIZE - shAmount);
-            UASSERT(width >= 0, "underflow");
-            from = (fromIndex + 1) * BUCKET_SIZE;
-        }
-        mask = mask << shAmount;
-        m_bits[fromIndex] = m_bits[fromIndex] | mask;
-        // std::cout << *this << std::endl;
-        set(from, width);
-    }
-    uint32_t get(int from) const {
-        int fromIndex = index(from);
-        int jIndex = from % BUCKET_SIZE;
-        return ((m_bits[fromIndex] >> jIndex) & 1u);
+        m_ordered.push_back(interval);
+        m_ordered.splice(m_ordered.cend(), high);
+        // now merge intervals
+        merge(m_ordered);
     }
 
-    bool empty() const {
-        for (auto v : m_bits) {
-            if (v) return false;
+    IntervalSet intersect(const BitInterval& other) const {
+        IntervalSet r{width()};
+        for (const auto here : m_ordered) {
+            if (other.second < here.first) { break; }
+            // other.second >= here.first
+            //   ======== other
+            //====== here
+            BitInterval intsct{std::max(other.first, here.first),
+                               std::min(other.second, here.second)};
+            r.m_ordered.push_back(intsct);
         }
-        return true;
+        return r;
     }
 
-    std::string toString() const {
-        std::stringstream ss;
-        for (int ix = m_width - 1; ix >= 0; ix--) {
-            ss << get(ix);
-            if (ix % 8 == 0 && ix != 0) ss << "_";
+    bool conflict(const IntervalSet& other) const {
+        bool r = false;
+        for (const auto i1 : other.m_ordered) {
+            for (const auto i2 : this->m_ordered) {
+                if (i1.second >= i2.first && i1.first <= i2.second) { r = true; }
+            }
         }
-        return ss.str();
+        return r;
     }
+
+    uint32_t get(int index) const {
+        uint32_t res = 0;
+        for (const auto interval : m_ordered) {
+            if (interval.first >= index && interval.second <= index) {
+                res = 1;
+                break;
+            }
+        }
+        return res;
+    }
+
+    bool empty() const { return m_ordered.empty(); }
+
+    std::vector<BitInterval> intervals() const {
+        return std::vector<BitInterval>{m_ordered.cbegin(), m_ordered.cend()};
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const IntervalSet& intervals);
 };
 
-using BitInterval = std::pair<int /*lsb*/, int /*msb*/>;
+std::ostream& operator<<(std::ostream& os, const IntervalSet& intervals) {
+    os << "{ ";
+    for (const auto i : intervals.m_ordered) { os << "[" << i.first << ":" << i.second << "] "; }
+    os << "}";
+    return os;
+}
+
 struct ReadWriteVec {
-    BitVector m_write;
-    BitVector m_read;
+    // BitVector m_write;
+    // BitVector m_read;
+    IntervalSet m_write, m_read;
     std::vector<FileLine*> m_writeLoc;
     std::vector<FileLine*> m_readLoc;
-    std::vector<BitInterval> m_readIntervals;
+    // std::vector<BitInterval> m_readIntervals;
     const int m_width;
     explicit ReadWriteVec(int width)
         : m_write{width}
@@ -231,20 +263,20 @@ struct ReadWriteVec {
         m_readLoc.clear();
     }
     inline void setWrite(int from, int width, FileLine* const loc) {
-        m_write.set(from, width);
+        m_write.insert({from, from + width - 1});
         m_writeLoc.push_back(loc);
     }
     inline void setRead(int from, int width, FileLine* const loc) {
-        m_read.set(from, width);
+        m_read.insert({from, from + width - 1});
         m_readLoc.push_back(loc);
-        m_readIntervals.emplace_back(from, from + width - 1);
+        // m_readIntervals.emplace_back(from, from + width - 1);
     }
     inline bool isRW() const { return !m_write.empty() && !m_read.empty(); }
     inline bool conflict() const { return m_write.conflict(m_read); }
     std::string conflictReason() const {
         std::stringstream ss;
-        ss << "\twrite pattern: " << m_write.toString() << endl;
-        ss << "\tread pattern: " << m_read.toString() << endl;
+        ss << "\twrite pattern: " << m_write << endl;
+        ss << "\tread pattern: " << m_read << endl;
         auto streamLoc = [&ss](const auto vec) {
             for (FileLine* const loc : vec) { ss << "\t\t" << loc->ascii() << endl; }
         };
@@ -275,79 +307,7 @@ struct ReadWriteVec {
         }
         return no_gaps;
     }
-    static std::vector<BitInterval> maximalDisjoint(const std::vector<BitInterval>& original) {
-        UASSERT(original.size(), "empty original");
-        std::deque<BitInterval> toSplit{original.begin(), original.end()};
-        std::vector<BitInterval> disjoint;
-        auto sortIt = [&](std::deque<BitInterval>& q) {
-            std::sort(q.begin(), q.end(), [](const BitInterval& i1, const BitInterval& i2) {
-                return i1.first < i2.first;
-            });
-        };
-        sortIt(toSplit);
-        // int step = 0;
-        int numLeft = original.size();
-        // auto print = [&]() {
-        //     std::cout << "w" << step << ": \t";
-        //     for (auto x : toSplit) { std::cout << toString(x) << "  "; }
-        //     std::cout << "\t" << numLeft << std::endl;
-        //     std::cout << "r" << step << ": \t";
-        //     for (auto x : disjoint) { std::cout << toString(x) << "  "; }
-        //     std::cout << std::endl << std::endl;
-        //     step++;
-        // };
-        // sort based on the increasing order of lsb
-        while (numLeft > 1) {
-            // print();
-            // take the first one, which has the lowest lsb
-            BitInterval i1 = toSplit.front();
-            numLeft--;
-            toSplit.pop_front();
-            // take the second one
-            BitInterval i2 = toSplit.front();
-            if (i1.second < i2.first) {
-                // i1 is already disjoint
-                disjoint.push_back(i1);
-                continue;
-            }
-            // i1 has some intersection with i2
-            // 0)
-            //  i1:   =====
-            //  i2:   ===
-            // 1)
-            //   i1:  =====
-            //   i2:   ====
-            // 2)
-            //  i1:   ==========
-            //  i2:     =============
-            // 3)
-            //  i1:   ==========
-            //  i2:     =====
-            UASSERT(i1.first <= i2.first, "not sorted!");
-            if (i1.second > i2.second && i1.first == i2.first) {  // 0)
-                numLeft++;
-                toSplit.push_back({i2.second + 1, i1.second});
-            } else if (i1.second <= i2.second && i1.first < i2.first) {
-                // 1) and 2)
-                numLeft++;
-                toSplit.push_back({i1.first, i2.first - 1});
-            } else if (i1.second > i2.second && i1.first < i2.first) {
-                numLeft += 2;
-                toSplit.push_back({i1.first, i2.first - 1});
-                toSplit.push_back({i2.second + 1, i1.second});
-            } else {
-                // i1 is in i2
-                //  ======
-                //  ======
-                // so add nothing (gets eliminated)
-            }
 
-            sortIt(toSplit);
-        }
-        UASSERT(numLeft == 1 && toSplit.size() == 1, "empty queue!");
-        disjoint.push_back(toSplit.front());
-        return disjoint;
-    }
 };
 }  // namespace
 class SplitVariableExtraVisitor : public VNVisitor {
@@ -421,8 +381,8 @@ private:
         UINFO(4, "        In SCC" << cvtToHex(scc.front()->color()) << " :" << endl);
         for (const auto& pair : m_scoreboard) {
             if (pair.second.conflict()) {
-                const auto disjointReadIntervals
-                    = ReadWriteVec::maximalDisjoint(pair.second.m_readIntervals);
+                const auto disjointReadIntervals = pair.second.m_read.intervals();
+
                 const auto disjointCovered = ReadWriteVec::disjoinFillGaps(
                     disjointReadIntervals, pair.first->dtypep()->width());
                 auto splitStr = [&disjointCovered]() {
