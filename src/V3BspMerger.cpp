@@ -20,6 +20,7 @@
 #include "V3BspMerger.h"
 
 #include "V3AstUserAllocator.h"
+#include "V3BspDifferential.h"
 #include "V3File.h"
 #include "V3FunctionTraits.h"
 #include "V3Hasher.h"
@@ -39,7 +40,7 @@ struct CostType {
         : instrCount{f}
         , recvCount{s} {}
     CostType() = default;
-    inline uint32_t sum() const { return instrCount + recvCount; }
+    inline uint32_t sum() const { return instrCount; }
     friend inline bool operator<(const CostType& c1, const CostType& c2) {
         return c1.sum() < c2.sum();
     }
@@ -58,6 +59,14 @@ struct CostType {
     friend inline std::ostream& operator<<(std::ostream& os, const CostType& c) {
         os << "Cost(" << c.sum() << ":" << c.instrCount << ", " << c.recvCount << ")";
         return os;
+    }
+    CostType percential(double p) {
+        return CostType{static_cast<uint32_t>(instrCount * p),
+                        static_cast<uint32_t>(recvCount * p)};
+    }
+    static CostType max() {
+        return CostType{std::numeric_limits<uint32_t>::max(),
+                        std::numeric_limits<uint32_t>::max()};
     }
 };
 struct HeapKey {
@@ -139,7 +148,7 @@ inline void MultiCoreGraph::addEdge(CoreVertex* fromp, CoreVertex* top, uint32_t
 }
 inline bool HeapKey::operator<(const HeapKey& other) const {
     // user greater to turn the max-heap into a min-heap
-    return (corep->cost() > other.corep->cost());
+    return (corep->cost() >= other.corep->cost());
 }
 inline uint32_t targetCoreCount() { return v3Global.opt.tiles() * v3Global.opt.workers(); }
 
@@ -306,12 +315,15 @@ private:
                     && producerIndexPlus1 != pix + 1 /*producer is self*/) {
                     const auto& producerCorep = coresp[producerIndexPlus1 - 1];
                     AstNodeDType* const dtypep = defp->vscp()->dtypep();
+                    // Consider future optimizations. Not a perfect...
                     const uint32_t numWords
-                        = dtypep->arrayUnpackedElements() * dtypep->widthWords();
+                        = v3Global.opt.fIpuDiffExchnage()
+                              ? V3BspDifferential::countWords(dtypep)
+                              : dtypep->arrayUnpackedElements() * dtypep->widthWords();
                     // create an edge from producerCore to corep, note that this will
                     // create possibly many edges between two cores and we need to collapse
                     // them into one later
-                    m_coreGraphp->addEdge(producerCorep, corep, numWords);
+                    m_coreGraphp->addEdge(producerCorep, corep, 0);
                 }  // else local production or comb logic production
             });
         }
@@ -322,7 +334,7 @@ private:
         iterVertex(m_coreGraphp.get(), [](CoreVertex* corep) {
             uint32_t totalRecv = 0;
             for (V3GraphEdge* edgep = corep->inBeginp(); edgep; edgep = edgep->inNextp()) {
-                UASSERT(edgep->weight(), "zero weigth edge!");
+                // UASSERT(edgep->weight(), "zero weigth edge!");
                 totalRecv += static_cast<uint32_t>(edgep->weight());
             }
             corep->recvWords(totalRecv);
@@ -452,8 +464,15 @@ private:
         });
         std::stable_sort(coreCost.begin(), coreCost.end());
         // do not exceed the 95th percentile worst-case cost
-        const size_t thresholdIndex = static_cast<size_t>(numCores * 0.95);
-        CostType worstCost = coreCost[thresholdIndex];
+        CostType worstCost = coreCost.back();
+        for (const double p : {0.95, 0.96, 0.97, 0.98, 0.99}) {
+            if (worstCost.percential(p) > CostType{0, 0}) {
+                worstCost = worstCost.percential(p);
+                break;
+            }
+        }
+
+        if (worstCost == CostType{0, 0}) { worstCost = coreCost.back(); }
         // worstCost.instrCount += 200;
         // worstCost.recvCount += 200;
         UINFO(8, "Max permissible cost is " << worstCost << " and the max absolute cost is "
@@ -467,7 +486,7 @@ private:
                && minNodep->key().corep->cost() <= worstCost) {
             // try merging minNodep with a neighbor
             CoreVertex* bestNeighbor = nullptr;
-            CostType bestCost = std::numeric_limits<CostType>::max();
+            CostType bestCost = CostType::max();
             CoreVertex* corep = minNodep->key().corep;
             auto visitNeighbor = [&](GraphWay way) {
                 iterEdges(corep, way, [&](V3GraphEdge* edgep) {
@@ -485,31 +504,30 @@ private:
             // candidate
             visitNeighbor(GraphWay::REVERSE);  // iter inEdges
             visitNeighbor(GraphWay::FORWARD);  // iter outEdges
-            if (bestNeighbor) {
+            HeapNode* const secondMinNodep = m_heap.secondMax();
+            CostType costWithNext = CostType::max();
+            if (secondMinNodep) {
+                costWithNext = costAfterMerge(corep, secondMinNodep->key().corep);
+            }
+            if (bestNeighbor && bestCost <= costWithNext) {
                 // found a neighbor, merge it
                 UINFO(8, "Merging with neighbors: " << bestCost << endl);
                 doMerge(corep, bestNeighbor, bestCost);
                 UASSERT(numCores > 1, "numCores underflowed");
                 numCores--;
                 numMerges++;
-            } else if (HeapNode* const secondMinNodep = m_heap.secondMax()) {
+            } else if (secondMinNodep && costWithNext <= worstCost) {
                 // did not find the neighbor, try the next min key
                 CoreVertex* otherCorep = secondMinNodep->key().corep;
-                CostType newCost = costAfterMerge(corep, otherCorep);
-                if (newCost <= worstCost) {
-                    UINFO(8, "Merging with next the smallest core: " << newCost << endl);
-                    doMerge(corep, otherCorep, newCost);
-                    UASSERT(numCores > 1, "numCores underflowed");
-                    numCores--;
-                    numMerges++;
-                } else {
-                    // could not merge, remove the minNode
-                    UINFO(8, "Could not merge min core" << endl);
-                    m_heap.remove(minNodep);
-                }
+                UINFO(8, "Merging with next the smallest core: " << costWithNext << endl);
+                doMerge(corep, otherCorep, costWithNext);
+                UASSERT(numCores > 1, "numCores underflowed");
+                numCores--;
+                numMerges++;
+
             } else {
-                // this is the end
-                UINFO(8, "Could not merge with second min core" << endl);
+                // tough luck, cannot merge minNodep with anything, discard it
+                UINFO(8, "Could not merge" << endl);
                 m_heap.remove(minNodep);
                 // UASSERT(!m_heap.max(), "expected empty heap");
             }
@@ -559,9 +577,9 @@ private:
             // try merging minNodep with a neighbor
             HeapNode* minNodep = m_heap.max();  // max is actually min
             CoreVertex* bestNeighborp = nullptr;
-            CostType bestCost = std::numeric_limits<CostType>::max();
+            CostType bestCost = CostType::max();
             CoreVertex* corep = minNodep->key().corep;
-            auto visitNeighor = [&](GraphWay way) {
+            auto visitNeighbor = [&](GraphWay way) {
                 iterEdges(corep, way, [&](V3GraphEdge* edgep) {
                     CoreVertex* const neighborp = dynamic_cast<CoreVertex*>(edgep->furtherp(way));
                     CostType newCost = costAfterMerge(corep, neighborp);
@@ -571,8 +589,13 @@ private:
                     }
                 });
             };
-            visitNeighor(GraphWay::FORWARD);
-            visitNeighor(GraphWay::REVERSE);
+            visitNeighbor(GraphWay::FORWARD);
+            visitNeighbor(GraphWay::REVERSE);
+            HeapNode* const secondMinNodep = m_heap.secondMax();
+            CostType costWithNext = CostType::max();
+            if (secondMinNodep) {
+                costWithNext = costAfterMerge(corep, secondMinNodep->key().corep);
+            }
             auto applyMerge = [&](CoreVertex* otherp, const CostType& newCost) {
                 doMerge(corep, otherp, newCost);
                 if (newCost > currentWorst) {
@@ -583,17 +606,16 @@ private:
                 UASSERT(numCores > 1, "underflow");
                 numCores--;
             };
-            if (bestNeighborp) {
+            if (bestNeighborp && bestCost <= costWithNext) {
                 UINFO(8, "Merging with neighbor core givs "
                              << bestCost << " current = " << currentWorst << endl);
                 applyMerge(bestNeighborp, bestCost);
-            } else if (HeapNode* const secondMinNodep = m_heap.secondMax()) {
+            } else if (secondMinNodep) {
                 // there were no neighbors, merge with the next in the heap
                 CoreVertex* otherCorep = secondMinNodep->key().corep;
-                CostType newCost = costAfterMerge(corep, otherCorep);
-                UINFO(8, "Merging with next in line " << newCost << " current = " << currentWorst
-                                                      << endl);
-                applyMerge(otherCorep, newCost);
+                UINFO(8, "Merging with next in line " << costWithNext
+                                                      << " current = " << currentWorst << endl);
+                applyMerge(otherCorep, costWithNext);
             } else {
                 // something is up
                 UASSERT(false, "Nothing left to merge!");
@@ -725,7 +747,6 @@ public:
             V3Stats::addStat("BspMerger, final partitions", partitionsp.size());
         }
     }
-
 };
 
 void V3BspMerger::merge(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {

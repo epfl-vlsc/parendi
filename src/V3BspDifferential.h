@@ -29,6 +29,9 @@
 class V3BspDifferential final {
 public:
     static void differentialUnpack(AstNetlist* nodep);
+
+    // Estimate the number of words that is communicated should this optimization applies
+    static uint32_t countWords(AstNodeDType* const dtypep);
 };
 
 #endif  // Guard

@@ -591,3 +591,20 @@ void V3BspDifferential::differentialUnpack(AstNetlist* netlistp) {
 
     v3Global.dumpCheckGlobalTree("bspdiff", 0, dumpTree() >= 3);
 }
+
+uint32_t V3BspDifferential::countWords(AstNodeDType* const dtypep) {
+    if (AstUnpackArrayDType* const unpackp = VN_CAST(dtypep, UnpackArrayDType)) {
+        auto numWords = unpackp->arrayUnpackedElements() * unpackp->widthWords();
+        if (numWords >= v3Global.opt.diffExchangeThreshold()) {
+            // probably can optimize, therefore the cost is "estimated" to be the
+            // cost of sending an address, the data, and a bit.
+            // We can multiply it by the number of times we expect an unpack array
+            // but we expect the number of writes to be 1 (single-port memory)
+            return 2 + unpackp->widthWords();
+        } else {
+            return numWords;
+        }
+    } else {
+        return dtypep->widthWords();
+    }
+}
