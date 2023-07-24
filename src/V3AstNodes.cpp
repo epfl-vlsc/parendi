@@ -2112,6 +2112,12 @@ int AstVarRef::instrCount() const {
         if (callp->fromp() == this) return 1;
     }
     // Otherwise as a load/store
+    if (v3Global.opt.poplar()) {
+        // Member variables require and extra pointer lookup (lookup "this")
+        // Unlike x86, both read an write operations have a cost equal to the
+        // number of words
+        return widthInstrs() + (varp()->isFuncLocal() ? 0 : 1);
+    }
     return widthInstrs() * (access().isReadOrRW() ? INSTR_COUNT_LD : 1);
 }
 void AstVar::dump(std::ostream& str) const {
