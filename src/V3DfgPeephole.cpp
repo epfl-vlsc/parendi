@@ -863,7 +863,9 @@ class V3DfgPeephole final : public DfgVisitor {
         // Sel from Cond
         if (DfgCond* const condp = fromp->cast<DfgCond>()) {
             // If at least one of the branches are a constant, push the select past the cond
-            if (condp->thenp()->is<DfgConst>() || condp->elsep()->is<DfgConst>()) {
+            // Do the same if a branch is Concat, helps with some Chisel code.
+            if (condp->thenp()->is<DfgConst>() || condp->elsep()->is<DfgConst>()  ||
+                condp->thenp()->is<DfgConcat>() || condp->elsep()->is<DfgConcat>()) {
                 APPLYING(PUSH_SEL_THROUGH_COND) {
                     // The new 'then' vertex
                     DfgSel* const newThenp = make<DfgSel>(flp, vtxp->dtypep());
