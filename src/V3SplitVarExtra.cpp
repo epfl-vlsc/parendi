@@ -28,7 +28,7 @@
 #include "V3SplitVar.h"
 #include "V3Stats.h"
 #include "V3UniqueNames.h"
-
+#include "V3DfgOptimizer.h"
 #include "queue"
 
 #include <memory>
@@ -603,12 +603,11 @@ public:
 
 class SplitExtraWideVisitor : public VNVisitor {
 private:
-    std::unordered_map<AstVarScope*, std::vector<BitInterval>> m_disjoinReadIntervals;
-
-    AstSel* m_selp = nullptr;
-
+    std::unordered_map<AstVarScope*, std::vector<BitInterval>> m_readIntervals;
+    std::unordered_set<AstVarScope*> m_unopt;
     bool isSplittable(AstVar* const varp) const {
         AstNodeDType* const dtypep = varp->dtypep();
+        if (!dtypep->isWide()) { return false; }
         if (!(VN_IS(dtypep, PackArrayDType) || VN_IS(dtypep, StructDType)
               || VN_IS(dtypep, BasicDType))) {
             return false;
@@ -617,9 +616,24 @@ private:
         return true;
     }
 
-
+    void visit(AstNodeVarRef* vrefp) override {
+        if (vrefp->access().isReadOrRW()) {
+            // read as a whole, do not split
+            m_unopt.insert(vrefp->varScopep());
+        }
+    }
     void visit(AstSel* selp) override {
-        UASSERT_OBJ(!m_selp, selp, "nested Sel! " << m_selp << endl);
+
+        // iterate lsbp, but not from. Lsbp may contain another Sel internally that
+        // wraps around some VarRef, that has nothing to do with the range selection here
+        iterate(selp->lsbp());
+
+        // not try to determine the range selection on the fromp
+        if (!VN_IS(selp->lsbp(), Const)) {
+            // cannot determine the selection statically
+            return;
+        }
+
         // SEL(EXTEND(VARREF)) or SEL(VARREF) will recieve a narrowed down
         // range but anything else should be read/written as a whole. Note that
         // as long as we do the following we ensure that we never wrongly compute
@@ -627,28 +641,61 @@ private:
         // E.g., SEL(CONCAT(VARREF, VARREF)), we could still determine extactly which
         // bits are being read in each VarRef but instead we end up thinking all bits
         // are being written/read
-        AstExtend* const extp = VN_CAST(selp->fromp(), Extend);
-        AstExtendS* const extsp = VN_CAST(selp->fromp(), ExtendS);
-        AstVarRef* const vrefp = VN_CAST(selp->fromp(), VarRef);
-        if (vrefp || (extp && VN_IS(extp->lhsp(), VarRef))
-            || (extsp && VN_IS(extsp->lhsp(), VarRef))) {
-            m_selp = selp;
+        std::function<AstNodeVarRef*(AstNode*)> findBase
+            = [&findBase](AstNode* nodep) -> AstNodeVarRef* {
+            if (VN_IS(nodep, NodeVarRef)) {
+                return VN_AS(nodep, NodeVarRef);
+            } else if (auto extp = VN_CAST(nodep, Extend)) {
+                return findBase(extp->lhsp());
+            } else if (auto extsp = VN_CAST(nodep, ExtendS)) {
+                return findBase(extp->lhsp());
+            } else {
+                return nullptr;
+            }
+        };
+        AstNodeVarRef* const fromp = findBase(selp->fromp());
+        if (!fromp) {
+            // could not find the fromp VarRef. This is some pattern that we
+            // could not optimize
+            UINFO(3, "Could not determine fromp VarRef " << selp << ", will not try to optimize..."
+                                                         << endl);
+            // willl see any VarRef under here as full range selection
             iterate(selp->fromp());
-            // do not visit the rest with m_selp set since the sel range only applies to the
-            // variable referenced directly below but not the ones in lsbp
-            m_selp = nullptr;
-        } else {
-            // SEL(EXPR(VARREF)) will view VarRef as it was read/written as a whole.
-            // This is conservative, but correct.
-            iterate(selp->fromp());
+            return;
         }
-        iterate(selp->lsbp());
+        const bool canSplit = isSplittable(fromp->varp());
+        const int lsb = selp->lsbConst();
+        const int width = selp->widthConst();
+        if (canSplit && fromp->access().isReadOrRW() && width < fromp->varp()->width()) {
+            UINFO(8, "Wide selection " << selp << endl);
+            m_readIntervals[fromp->varScopep()].emplace_back(lsb, lsb + width - 1);
+        }
     }
 
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
-public:
+private:
     explicit SplitExtraWideVisitor(AstNetlist* netlistp) { iterate(netlistp); }
+
+public:
+    static std::unordered_map<AstVarScope*, std::vector<BitInterval>>
+    findExtraSplittable(AstNetlist* netlistp) {
+        const SplitExtraWideVisitor impl{netlistp};
+        std::unordered_map<AstVarScope*, std::vector<BitInterval>> reads;
+        for (const auto& it : impl.m_readIntervals) {
+
+            if (impl.m_unopt.count(it.first)) continue;
+
+            const auto disjoint = ReadWriteVec::maximalDisjoint(it.second);
+            const auto filled = ReadWriteVec::disjoinFillGaps(disjoint, it.first->width());
+            if (filled.size() > 1) {
+                UINFO(4, "Will split " << it.first->prettyNameQ() << " into " << filled.size()
+                                       << " parts" << endl);
+                reads.emplace(it.first, filled);
+            }
+        }
+        return reads;
+    }
 };
 class SplitExtraPackVisitor : public VNVisitor {
 private:
@@ -772,19 +819,27 @@ void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
     // netlistp->foreach([](AstVar* varp) { varp->attrSplitVar(false); });
     // mark new ones, based on a heuristic
     auto readRanges = SplitVariableExtraVisitor::computeDisjoinReadRanges(netlistp);
-    V3Global::dumpCheckGlobalTree("split_var_extra", 0, dumpTree() >= 5);
+    V3Global::dumpCheckGlobalTree("split_var_extra_pre", 0, dumpTree() >= 5);
 
     { SplitExtraPackVisitor{netlistp, readRanges}; }
-    V3Global::dumpCheckGlobalTree("split_var_extra_pack", 0, dumpTree() >= 3);
-
+    V3Global::dumpCheckGlobalTree("split_var_extra_pack_loop", 0, dumpTree() >= 3);
     // Call V3Const to clean up ASSIGN(CONCAT(CONCAT(...))) = CONCAT(CONCAT(...))
-
     V3Const::constifyAll(netlistp);
+    V3DfgOptimizer::optimize(netlistp, "post split loop extra");
 
-    // if (dump() >= 3) {
-    const auto loopsp = SplitVariableCombLoopsVisitor::build(netlistp);
-    if (!loopsp->empty() && dumpGraph() >= 3) {
-        loopsp->dumpDotFilePrefixedAlways("split_var_extra_loops_left");
+    auto extraReadRanges = SplitExtraWideVisitor::findExtraSplittable(netlistp);
+    if (extraReadRanges.size()) {
+        UINFO(3, "Trying to split extra non-loop variabbles " << endl);
+        { SplitExtraPackVisitor{netlistp, extraReadRanges}; }
+        V3Global::dumpCheckGlobalTree("split_var_extra_pack_wide", 0, dumpTree() >= 3);
+        V3Const::constifyAll(netlistp);
+        V3DfgOptimizer::optimize(netlistp, "post split extra");
     }
-    // }
+
+    V3Global::dumpCheckGlobalTree("split_var_extra_final", 0, dumpTree() >= 3);
+
+    if (dump() >= 3) {
+        const auto loopsp = SplitVariableCombLoopsVisitor::build(netlistp);
+        if (!loopsp->empty()) { loopsp->dumpDotFilePrefixedAlways("split_var_extra_loops_left"); }
+    }
 }
