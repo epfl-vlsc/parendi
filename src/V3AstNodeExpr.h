@@ -4677,7 +4677,10 @@ public:
     bool sizeMattersLhs() const override {
         return false;  // Because the EXTEND operator self-casts
     }
-    int instrCount() const override { return 0; }
+    int instrCount() const override {
+        // three operations: 2 ors 1 and and 1 sub
+        return 4;
+    }
     bool signedFlavor() const override { return true; }
 };
 class AstFEof final : public AstNodeUniop {

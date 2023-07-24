@@ -31,7 +31,11 @@ bool AstNode::width1() const {  // V3Const uses to know it can optimize
     return dtypep() && dtypep()->width() == 1;
 }
 int AstNode::widthInstrs() const {
-    return (!dtypep() ? 1 : (dtypep()->isWide() ? dtypep()->widthWords() : 1));
+
+    return (!dtypep() ? 1 :
+            (dtypep()->isWide() ? dtypep()->widthWords() :
+                dtypep()->isQuad() && v3Global.opt.poplar() ? 2 : 1));
+
 }
 bool AstNode::isDouble() const VL_MT_SAFE {
     return dtypep() && VN_IS(dtypep(), BasicDType) && VN_AS(dtypep(), BasicDType)->isDouble();
