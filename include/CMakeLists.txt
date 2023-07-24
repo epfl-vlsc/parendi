@@ -14,3 +14,4 @@
 
 
 configure_file(verilated.mk.in ${CMAKE_CURRENT_SOURCE_DIR}/verilated.mk @ONLY)
+configure_file(vlpoplar/verilated.mk.in ${CMAKE_CURRENT_SOURCE_DIR}/vlpoplar/verilated.mk @ONLY)

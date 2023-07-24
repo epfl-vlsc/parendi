@@ -1,0 +1,84 @@
+
+CXX ?= g++
+POPC ?= popc
+INCLUDES := -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/include/vltstd -I.
+LIBS := -lpoplar -lpopops -lpoputil -lpthread -lboost_program_options
+
+HOST_DEFINES =  \
+	-DVPROGRAM="$(VMAIN_ROOT)" \
+	-DVPROGRAM_HEADER="\"$(VMAIN_ROOT).h\"" \
+	-DROOT_NAME="\"$(VMAIN_ROOT)\""\
+	-DCODELET_LIST="\"$(VMAIN_ROOT).list\""\
+	-DOBJ_DIR="\"$(OBJ_DIR)\""
+
+
+
+HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) -Wno-parentheses-equality
+
+HOST_FLAGS += -DVL_NUM_TILES_USED=$(TILES_USED)
+HOST_FLAGS += -DVL_NUM_WORKERS_USED=$(WORKERS_USED)
+
+# Schedule optimization flags, ensures minimum cycle count?
+IPU_SCHED_FLAGS:=  	\
+	-X-mmax-insn-nop-padding=6 	\
+	-X-mmax-nops-in-function=6 \
+	-X-mllvm -X--enable-misched \
+	-X-mllvm -X--enable-post-misched \
+	-X-mllvm -X--pre-RA-sched=default \
+	-X-mllvm -X--post-RA-scheduler \
+	-X-mllvm -X--verify-misched \
+	-X-mllvm -X--Ot
+
+IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
+	-X-finline-functions \
+	-X-finline-hint-functions \
+	-X-fno-builtin-memset \
+	-X-fno-builtin-memcpy \
+	-X-funroll-loops \
+	$(IPU_SCHED_FLAGS)
+
+
+
+HOST_SOURCES += $(USER_CPP)
+OBJS_HOST = $(HOST_SOURCES:cpp=o)
+OBJS_GP = $(CODELETS:cpp=gp)
+OBJS_S = $(CODELETS:cpp=s)
+
+INSTRUMENT ?= 0
+ifneq ($(INSTRUMENT), 0)
+HOST_FLAGS += -DPOPLAR_INSTRUMENT
+endif
+
+GRAPH_COMPILE_FLAGS = -DGRAPH_COMPILE
+GRAPH_RUN_FLAGS = -DGRAPH_RUN
+GRAPH_BINARY_DEP = VMain___024root.graph.bin
+PRECOMPILE ?= 1
+ifeq ($(PRECOMPILE), 0)
+GRAPH_RUN_FLAGS += -DGRAPH_COMPILE
+GRAPH_BINARY_DEP =
+endif
+
+all: $(VMAIN)
+
+$(OBJS_GP):%.gp: %.cpp
+	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
+$(OBJS_S):%.s: %.cpp
+	$(POPC) $^ $(IPU_FLAGS) -S --target ipu2 -o $@
+
+assembly: $(OBJS_S)
+vertex: $(OBJ_GP)
+
+$(OBJS_HOST):%.o: %.cpp
+	$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@
+
+$(VMAIN)_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
+	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) -o $@
+$(VMAIN_ROOT).graph.bin: $(VMAIN)_graph_compiler
+	./$< $(GRAPH_FLAGS)
+$(VMAIN): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) $(GRAPH_BINARY_DEP)
+	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_RUN_FLAGS) -o $@
+
+clean_main:
+	rm $(VMAIN) $(VMAIN_ROOT).graph.bin $(VMAIN)_graph_compiler
+clean:
+	rm -rf *.o *.gp *.s report *.graph.bin VMain VMain_graph_compiler
