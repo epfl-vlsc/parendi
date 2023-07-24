@@ -492,7 +492,9 @@ private:
                 iterEdges(corep, way, [&](V3GraphEdge* edgep) {
                     CoreVertex* const neighbor = dynamic_cast<CoreVertex*>(edgep->furtherp(way));
                     CostType newCost = costAfterMerge(corep, neighbor);
-                    if (newCost <= worstCost && newCost <= bestCost) {
+                    // update cost if neighbor does not have pli has offers a better cost that
+                    // already found
+                    if (!neighbor->hasPli() && newCost <= worstCost && newCost <= bestCost) {
                         bestNeighbor = neighbor;
                         bestCost = newCost;
                     }
