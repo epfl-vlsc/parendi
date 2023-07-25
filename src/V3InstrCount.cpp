@@ -124,6 +124,7 @@ private:
         if (m_osp) nodep->user4(m_instrCount + 1);  // Else don't mark to avoid writeback
     }
 
+
     // VISITORS
     void visit(AstNodeSel* nodep) override {
         if (m_ignoreRemaining) return;
@@ -144,6 +145,10 @@ private:
         // its width) and the cost of the lsbp() and widthp() nodes, but not
         // the fromp() node which could be disproportionately large.
         const VisitBase vb{this, nodep};
+        if (!VN_IS(nodep->fromp(), NodeVarRef)) {
+            // there is actual computation going on
+            iterateAndNextNull(nodep->fromp());
+        }
         iterateAndNextNull(nodep->lsbp());
         iterateAndNextNull(nodep->widthp());
     }

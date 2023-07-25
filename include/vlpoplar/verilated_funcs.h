@@ -1004,7 +1004,6 @@ static VL_ATTR_ALWINLINE WDataOutP VL_MULS_WWW(int lbits, WDataOutP owp, WDataIn
         lbits);  // Clean.  Note it's ok for the multiply to overflow into the sign bit
     if ((lneg ^ rneg) & 1) {  // Negate output (not using NEGATE, as owp==lwp)
         QData carry = 0;
-        // #pragma clang loop unroll(full)
         for (int i = 0; i < words; ++i) {
             carry = carry + static_cast<QData>(static_cast<IData>(~owp[i]));
             if (i == 0) ++carry;  // Negation of temp2
