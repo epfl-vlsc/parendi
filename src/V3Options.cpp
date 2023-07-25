@@ -1226,6 +1226,8 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-fipu-retime", FOnOff, &m_fIpuRetime);
     DECL_OPTION("-fipu-merge", FOnOff, &m_fIpuMerge);
     DECL_OPTION("-fipu-diff-exchange", FOnOff, &m_fIpuDiffExchange);
+    DECL_OPTION("-fsplit-extra-wide", FOnOff, &m_fSplitExtraWide);
+
     DECL_OPTION("-G", CbPartialMatch, [this](const char* optp) { addParameter(optp, false); });
     DECL_OPTION("-gate-stmts", Set, &m_gateStmts);
     DECL_OPTION("-gdb", CbCall, []() {});  // Processed only in bin/verilator shell

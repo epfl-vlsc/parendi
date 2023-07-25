@@ -827,13 +827,16 @@ void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
     V3Const::constifyAll(netlistp);
     V3DfgOptimizer::optimize(netlistp, "post split loop extra");
 
-    auto extraReadRanges = SplitExtraWideVisitor::findExtraSplittable(netlistp);
-    if (extraReadRanges.size()) {
-        UINFO(3, "Trying to split extra non-loop variabbles " << endl);
-        { SplitExtraPackVisitor{netlistp, extraReadRanges}; }
-        V3Global::dumpCheckGlobalTree("split_var_extra_pack_wide", 0, dumpTree() >= 3);
-        V3Const::constifyAll(netlistp);
-        V3DfgOptimizer::optimize(netlistp, "post split extra");
+    if (v3Global.opt.fSplitExtraWide()) {
+        auto extraReadRanges = SplitExtraWideVisitor::findExtraSplittable(netlistp);
+        while (extraReadRanges.size()) { // TODO do it in a while loop
+            UINFO(3, "Trying to split extra non-loop variabbles " << endl);
+            { SplitExtraPackVisitor{netlistp, extraReadRanges}; }
+            V3Global::dumpCheckGlobalTree("split_var_extra_pack_wide", 0, dumpTree() >= 3);
+            V3Const::constifyAll(netlistp);
+            V3DfgOptimizer::optimize(netlistp, "post split extra");
+            extraReadRanges = SplitExtraWideVisitor::findExtraSplittable(netlistp);
+        }
     }
 
     V3Global::dumpCheckGlobalTree("split_var_extra_final", 0, dumpTree() >= 3);

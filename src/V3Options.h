@@ -382,6 +382,7 @@ private:
     bool m_fIpuRetime = false;   // main switch: -fipu-retime: attempt retiming optimization
     bool m_fIpuMerge  = true;   // main switch: -fno-ipu-merge: do not merge partitions
     bool m_fIpuDiffExchange = true; // main switch: -fno-ipu-diff-exchange: disable differential exchange
+    bool m_fSplitExtraWide = false; /// main switch: -fsplit-extra-wide: split extra wide variables
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -652,6 +653,8 @@ public:
     bool fIpuRetime() const { return m_fIpuRetime; }
     bool fIpuMerge() const { return m_fIpuMerge; }
     bool fIpuDiffExchnage() const { return m_fIpuDiffExchange; }
+    bool fSplitExtraWide() const { return m_fSplitExtraWide; }
+
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
     string traceSourceBase() const { return m_traceFormat.sourceName(); }
