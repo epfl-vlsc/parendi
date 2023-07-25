@@ -27,6 +27,7 @@
 #include "V3InstrCount.h"
 #include "V3PairingHeap.h"
 #include "V3Stats.h"
+
 VL_DEFINE_DEBUG_FUNCTIONS;
 namespace V3BspSched {
 
@@ -233,6 +234,7 @@ private:
         return m_instrCount[index];
     }
 
+
     void buildMultiCoreGraph(const std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
 
         AstNode::user1ClearTree();
@@ -244,8 +246,14 @@ private:
         totalCost.resize(partitionsp.size());
         hasPli.resize(partitionsp.size());
         std::fill_n(hasPli.begin(), hasPli.size(), false);
-
         for (int pix = 0; pix < partitionsp.size(); pix++) {
+
+            std::unique_ptr<std::ofstream> ofsp;
+            if (dump() >= 10) {
+                ofsp = std::unique_ptr<std::ofstream>{V3File::new_ofstream(
+                    v3Global.debugFilename("cost_" + cvtToStr(pix) + ".txt"))};
+            }
+
             const auto& graphp = partitionsp[pix];
             uint32_t costAccum = 0;
             iterVertex(graphp.get(), [&](AnyVertex* const vtxp) {
@@ -260,7 +268,7 @@ private:
                 // compute and cache the cost of each node
                 if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
                     auto& infoRef = m_nodeInfo(compp->nodep());
-                    const uint32_t numInstr = V3InstrCount::count(compp->nodep(), false);
+                    const uint32_t numInstr = V3InstrCount::count(compp->nodep(), ofsp.get());
                     if (InstrPliChecker::hasPli(compp->nodep())) { hasPli[pix] = true; }
                     costAccum += numInstr;
                     if (!infoRef.visited) {
@@ -340,14 +348,7 @@ private:
             corep->recvWords(totalRecv);
         });
 
-        // // insert all the cores in a min heap
-        // for (CoreVertex* corep : coresp) {
-        //     if (!corep->hasPli()) {  // don't merge the cores that do PLI, we should
-        //         // consider them separately
-        //         m_heap.insert(corep->heapNode().get());
-        //     }
-        // }
-
+       
         if (dumpGraph() >= 5) { m_coreGraphp->dumpDotFilePrefixed("multicore"); }
     }
     // compute the cost of merging
