@@ -309,7 +309,7 @@ private:
     int         m_threads = 1;      // main switch: --threads
     int         m_tiles = 1472;     // main poplar switch: --tiles
     int         m_workers = 6;      // main poplar switch: --workers
-    int         m_maxUnpackCopies = 512;   // main poplar switch: --max-unpack-copies
+    int         m_maxUnpackCopies = 4096;   // main poplar switch: --max-unpack-copies
     int         m_diffExchangeThreshold = 16; // main poplar switch: --diff-exchange-threshold
     int         m_ipu_profile = 0;    // main poplar switch: --ipu-profile
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
