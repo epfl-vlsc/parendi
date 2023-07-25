@@ -58,7 +58,7 @@ GRAPH_RUN_FLAGS += -DGRAPH_COMPILE
 GRAPH_BINARY_DEP =
 endif
 
-all: $(VMAIN)
+all: $(VMAIN) $(GRAPH_BINARY_DEP)
 
 $(OBJS_GP):%.gp: %.cpp
 	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
@@ -75,7 +75,7 @@ $(VMAIN)_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) -o $@
 $(VMAIN_ROOT).graph.bin: $(VMAIN)_graph_compiler
 	./$< $(GRAPH_FLAGS)
-$(VMAIN): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) $(GRAPH_BINARY_DEP)
+$(VMAIN): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_RUN_FLAGS) -o $@
 
 clean_main:
