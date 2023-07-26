@@ -226,6 +226,7 @@ private:
                         NetlistVertex* const fromp = dynamic_cast<NetlistVertex*>(iedgep->fromp());
                         fromp->user(true);
                         tvalue += fromp->cost();
+                        toVisit.push_back(fromp);
                     }
                 }
             }

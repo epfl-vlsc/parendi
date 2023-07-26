@@ -22,13 +22,14 @@
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3Const.h"
+#include "V3DfgOptimizer.h"
 #include "V3Graph.h"
 #include "V3Sched.h"
 #include "V3SchedAcyclic.h"
 #include "V3SplitVar.h"
 #include "V3Stats.h"
 #include "V3UniqueNames.h"
-#include "V3DfgOptimizer.h"
+
 #include "queue"
 
 #include <memory>
@@ -618,8 +619,8 @@ private:
 
     void visit(AstNodeVarRef* vrefp) override {
         if (vrefp->access().isReadOrRW()) {
-            // read as a whole, do not split
-            m_unopt.insert(vrefp->varScopep());
+            // read as a whole, do not split?
+            // m_unopt.insert(vrefp->varScopep());
         }
     }
     void visit(AstSel* selp) override {
@@ -667,7 +668,8 @@ private:
         const int lsb = selp->lsbConst();
         const int width = selp->widthConst();
         if (canSplit && fromp->access().isReadOrRW() && width < fromp->varp()->width()) {
-            UINFO(8, "Wide selection " << selp << endl);
+            UINFO(10, "Wide selection " << selp << " of variable " << fromp->varp()->prettyNameQ()
+                                        << endl);
             m_readIntervals[fromp->varScopep()].emplace_back(lsb, lsb + width - 1);
         }
     }
@@ -688,6 +690,8 @@ public:
 
             const auto disjoint = ReadWriteVec::maximalDisjoint(it.second);
             const auto filled = ReadWriteVec::disjoinFillGaps(disjoint, it.first->width());
+            UINFO(8, "Variable" << it.first->prettyNameQ() << " has " << disjoint.size()
+                                << " disjoint reads" << endl);
             if (filled.size() > 1) {
                 UINFO(4, "Will split " << it.first->prettyNameQ() << " into " << filled.size()
                                        << " parts" << endl);
@@ -829,7 +833,7 @@ void V3SplitVarExtra::splitVariableExtra(AstNetlist* netlistp) {
 
     if (v3Global.opt.fSplitExtraWide()) {
         auto extraReadRanges = SplitExtraWideVisitor::findExtraSplittable(netlistp);
-        while (extraReadRanges.size()) { // TODO do it in a while loop
+        while (extraReadRanges.size()) {  // TODO do it in a while loop
             UINFO(3, "Trying to split extra non-loop variabbles " << endl);
             { SplitExtraPackVisitor{netlistp, extraReadRanges}; }
             V3Global::dumpCheckGlobalTree("split_var_extra_pack_wide", 0, dumpTree() >= 3);

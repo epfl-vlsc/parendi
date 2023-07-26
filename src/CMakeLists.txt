@@ -53,8 +53,11 @@ set(HEADERS
     V3BspMerger.h
     V3BspModules.h
     V3BspNetlistGraph.h
+    V3BspPliCheck.h
     V3BspPlusArgs.h
     V3BspPoplarProgram.h
+    V3BspResync.h
+    V3BspResyncGraph.h
     V3BspRetiming.h
     V3BspSched.h
     V3BspStraggler.h
@@ -208,8 +211,10 @@ set(COMMON_SOURCES
     V3BspIpuProfile.cpp
     V3BspMerger.cpp
     V3BspModules.cpp
+    V3BspPliCheck.cpp
     V3BspPlusArgs.cpp
     V3BspPoplarProgram.cpp
+    V3BspResync.cpp
     V3BspRetiming.cpp
     V3BspSched.cpp
     V3BspStraggler.cpp
@@ -336,8 +341,6 @@ set(COMMON_SOURCES
     V3ParseGrammar.cpp
     V3ParseLex.cpp
     V3PreProc.cpp
-    V3IfConversion.cpp
-
 )
 
 SET(COVERAGE_SOURCES

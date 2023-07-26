@@ -21,6 +21,7 @@
 
 #include "V3AstUserAllocator.h"
 #include "V3BspDifferential.h"
+#include "V3BspPliCheck.h"
 #include "V3File.h"
 #include "V3FunctionTraits.h"
 #include "V3Hasher.h"
@@ -153,30 +154,6 @@ inline bool HeapKey::operator<(const HeapKey& other) const {
 }
 inline uint32_t targetCoreCount() { return v3Global.opt.tiles() * v3Global.opt.workers(); }
 
-class InstrPliChecker final : public VNVisitor {
-private:
-    bool m_hasPli = false;
-    inline void setPli() { m_hasPli = true; }
-    void visit(AstCCall* callp) {
-        if (callp->funcp()->dpiImportWrapper()) { setPli(); }
-        iterateChildren(callp);
-    }
-    void visit(AstDisplay* nodep) override { setPli(); }
-    void visit(AstFinish* nodep) override { setPli(); }
-    void visit(AstStop* nodep) override { setPli(); }
-    void visit(AstNodeReadWriteMem* nodep) override { setPli(); }
-    void visit(AstNode* nodep) { iterateChildren(nodep); }
-    explicit InstrPliChecker(AstNode* nodep) {
-        m_hasPli = false;
-        iterate(nodep);
-    }
-
-public:
-    static bool hasPli(AstNode* nodep) {
-        const InstrPliChecker visitor{nodep};
-        return visitor.m_hasPli;
-    }
-};
 class PartitionMerger {
 private:
     struct NodeInfo {
@@ -234,7 +211,6 @@ private:
         return m_instrCount[index];
     }
 
-
     void buildMultiCoreGraph(const std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
 
         AstNode::user1ClearTree();
@@ -269,7 +245,7 @@ private:
                 if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
                     auto& infoRef = m_nodeInfo(compp->nodep());
                     const uint32_t numInstr = V3InstrCount::count(compp->nodep(), ofsp.get());
-                    if (InstrPliChecker::hasPli(compp->nodep())) { hasPli[pix] = true; }
+                    if (PliCheck::check(compp->nodep())) { hasPli[pix] = true; }
                     costAccum += numInstr;
                     if (!infoRef.visited) {
                         infoRef.visited = true;
@@ -348,7 +324,6 @@ private:
             corep->recvWords(totalRecv);
         });
 
-       
         if (dumpGraph() >= 5) { m_coreGraphp->dumpDotFilePrefixed("multicore"); }
     }
     // compute the cost of merging
