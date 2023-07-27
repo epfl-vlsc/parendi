@@ -1639,6 +1639,9 @@ static VL_ATTR_ALWINLINE QData VL_SHIFTL_QQI(int obits, int, int, QData lhs, IDa
     VlWide<VL_WQ_WORDS_E> lwp;
     VL_SET_WQ(lwp, lhs);
     if (rhs >= VL_QUADSIZE) {
+        // not exactly how lhs << rhs would behave, but that's how Verilog should do it
+        // probably the standard verilator implementation is buggy since
+        // lhs << rhs is equal to (lhs << (rhs & 63)) so 1 << 65 is actually 2 but should be 0
         VL_SET_WQ(lwp, 0ULL);
     } else if (rhs >= VL_EDATASIZE) {
         owp[0] = 0;
@@ -1730,6 +1733,7 @@ static VL_ATTR_ALWINLINE QData VL_SHIFTR_QQI(int obits, int, int, QData lhs, IDa
     VlWide<VL_WQ_WORDS_E> lwp;
     VL_SET_WQ(lwp, lhs);
     if (rhs >= VL_QUADSIZE) {
+        // not exactly how the x86 counterpart works see VL_SHIFTL_QQI for explanation
         VL_SET_WQ(owp, 0ULL);
     } else if (rhs >= VL_EDATASIZE) {
         // VL_EDATASIZE <= rhs < VL_QUADSIZE
@@ -1757,9 +1761,10 @@ static VL_ATTR_ALWINLINE IData VL_SHIFTRS_III(int obits, int lbits, int, IData l
     return (lhs >> rhs) | (sign & VL_CLEAN_II(obits, obits, signext));
 }
 static VL_ATTR_ALWINLINE QData VL_SHIFTRS_QQI(int obits, int lbits, int, QData lhs, IData rhs) VL_PURE {
-    const QData sign = -(lhs >> (lbits - 1));
-    const QData signext = ~(VL_MASK_Q(lbits) >> rhs);
-    return (lhs >> rhs) | (sign & VL_CLEAN_QQ(obits, obits, signext));
+    // this is different from the standard Verilator version...
+    const QData sign = -(VL_SHIFTR_QQI(64, 64, 32, lhs, lbits - 1));
+    const QData signext = ~(VL_SHIFTR_QQI(64, 64, 32 ,VL_MASK_Q(lbits), rhs));
+    return VL_SHIFTR_QQI(64, 64, 32, lhs, rhs) | (sign & VL_CLEAN_QQ(obits, obits, signext));
 }
 static VL_ATTR_ALWINLINE IData VL_SHIFTRS_IQI(int obits, int lbits, int rbits, QData lhs, IData rhs) VL_PURE {
     return static_cast<IData>(VL_SHIFTRS_QQI(obits, lbits, rbits, lhs, rhs));
