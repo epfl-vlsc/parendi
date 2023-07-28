@@ -21,6 +21,7 @@
 
 #include "V3Ast.h"
 #include "V3EmitCFunc.h"
+#include "V3File.h"
 #include "V3Global.h"
 #include "V3InstrCount.h"
 #include "V3Stats.h"
@@ -28,14 +29,22 @@
 
 #include <algorithm>
 VL_DEFINE_DEBUG_FUNCTIONS;
+
 void V3BspStraggler::report() {
     AstNetlist* const netlistp = v3Global.rootp();
     std::vector<std::pair<AstClass*, uint32_t>> estimatedCost;
     netlistp->foreach([&estimatedCost](AstClass* classp) {
-        if (!classp->flag().isBsp()) { return; }
+        if (!classp->flag().isBsp() || classp->flag().isBspInit() || classp->flag().isBspCond()) {
+            return;
+        }
         classp->foreach([&estimatedCost, classp](AstCFunc* cfuncp) {
-            if (cfuncp->name() == "compute") {
-                uint32_t count = V3InstrCount::count(cfuncp, true);
+            if (cfuncp->name() == "nbaTop") {
+                std::unique_ptr<std::ofstream> ofsp;
+                if (dump() >= 10) {
+                    ofsp = std::unique_ptr<std::ofstream>{V3File::new_ofstream(
+                        v3Global.debugFilename("cost_" + classp->name() + ".txt"))};
+                }
+                uint32_t count = V3InstrCount::count(cfuncp, true, ofsp.get());
                 estimatedCost.emplace_back(classp, count);
             }
         });
