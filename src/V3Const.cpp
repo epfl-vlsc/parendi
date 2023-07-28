@@ -1468,6 +1468,15 @@ private:
         if (!elsesp->rhsp()->gateTree()) return false;
         return true;
     }
+    bool ifSingleAssignDly(const AstNodeIf* nodep) {
+        if (nodep->elsesp()) return false;
+        const AstAssignDly* const thensp = VN_CAST(nodep->thensp(), AssignDly);
+        if (!thensp || thensp->nextp()) return false;
+        if (!thensp->rhsp()->gateTree()) return false;
+        const AstVarRef* const lvp = VN_CAST(thensp->lhsp(), VarRef);
+        if (!lvp) return false;
+        return true;
+    }
     bool operandIfIf(const AstNodeIf* nodep) {
         if (nodep->elsesp()) return false;
         const AstNodeIf* const lowerIfp = VN_CAST(nodep->thensp(), NodeIf);
@@ -3029,6 +3038,19 @@ private:
                 VL_DO_DANGLING(lowerIfp->deleteTree(), lowerIfp);
             } else if (operandBoolShift(nodep->condp())) {
                 replaceBoolShift(nodep->condp());
+            } else if (ifSingleAssignDly(nodep)) {
+                UINFO(
+                    4,
+                    "IF({a}) ASSIGNDLY({b}, {c})  => ASSIGNDLY({b}, {a} ? {c} : {b})\n");
+                AstAssignDly* const thensp = VN_AS(nodep->thensp(), AssignDly);
+                thensp->unlinkFrBack();
+                AstNodeExpr* const condp = nodep->condp()->unlinkFrBack();
+                AstNodeExpr* const truep = thensp->rhsp()->unlinkFrBack();
+                AstVarRef* const falsep = VN_AS(thensp->lhsp(), VarRef)->cloneTree(false);
+                falsep->access(VAccess::READ);
+                thensp->rhsp(new AstCond{truep->fileline(), condp, truep, falsep});
+                nodep->replaceWith(thensp);
+                VL_DO_DANGLING(nodep->deleteTree(), nodep);
             }
         }
     }
