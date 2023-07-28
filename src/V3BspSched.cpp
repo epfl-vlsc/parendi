@@ -203,6 +203,8 @@ void schedule(AstNetlist* netlistp) {
     if (v3Global.opt.fIpuRetime()) {
         Retiming::retimeAll(netlistp);
         V3Stats::statsStage("bspRetime");
+    } else if (v3Global.opt.fIpuResync()) {
+        
     }
 
     auto deps = buildDepGraphs(netlistp);

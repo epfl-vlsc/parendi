@@ -203,7 +203,7 @@ class ResyncGraphTransformer final {
 private:
     Utils::MaxHeap m_heap;
     std::vector<std::unique_ptr<ResyncGraph>>& m_allGraphsp;
-
+    bool m_changed = false;
     VDouble0 m_statsNumTransformed;
     VDouble0 m_statsTransitivelyDisabled;
     VDouble0 m_statsUnoptDisabled;
@@ -408,6 +408,7 @@ private:
 
     void transformGraph(ResyncGraph* graphp, int cutRank, SeqVertex* const seqp) {
         UASSERT(cutRank > 1, "invalid cut rank");
+        m_changed = true;
         std::vector<ResyncEdge*> samplersp;
         std::vector<CombSeqReadVertex*> sourcesp;
         // collect the vertices that need to be sampled
@@ -560,6 +561,7 @@ public:
         append("improved", m_statsNumTransformed);
     }
     inline void apply() { doApply(); }
+    inline bool changed() { return m_changed; }
 };
 
 class ResyncVisitor final : VNVisitor {
@@ -601,13 +603,11 @@ private:
     inline AstVarRef* mkLV(AstVarScope* const vscp) { return mkVRef(vscp, VAccess::WRITE); }
     inline AstVarRef* mkRV(AstVarScope* const vscp) { return mkVRef(vscp, VAccess::READ); }
 
-    inline void clearLocalSubst() { AstNode::user1ClearTree(); }
-    inline void setLocalSubst(AstVarScope* oldp, AstVarScope* newp) { oldp->user1p(newp); }
     struct LocalSubst {
         static void clearAll() { AstNode::user1ClearTree(); }
         static inline void set(AstVarScope* oldp, AstVarScope* newp) { oldp->user1p(newp); }
         static inline AstVarScope* get(AstVarScope* oldp) {
-            return VN_AS(oldp->user1p(), VarScope);
+            return VN_CAST(oldp->user1p(), VarScope);
         }
     };
     void setSenTrees() {
@@ -714,14 +714,18 @@ private:
                             "unknown node type " << pair.logicp->prettyTypeName() << endl);
             }
         }
+
+        fixBehavSeqComb(vtxp, newAlwaysp);
     }
 
     void fixBehavSeqComb(SeqCombVertex* vtxp, AstAlways* newAlwaysp) {
+
         // Create a clone of every LV in the transformed logic that replaced the original instances
         // in the initial/static initial logic
+
         for (AstVarScope* const vscp : vtxp->lvsp()) {
             AstVarScope* initVscp = makeVscp(vscp);
-            vscp->user2p(initVscp);
+            LocalSubst::set(vscp, initVscp);
         }
         AstScope* const scopep = m_netlistp->topScopep()->scopep();
         m_logicClasses.m_static.foreachLogic([this](AstNode* nodep) { applySubst(nodep); });
@@ -770,6 +774,29 @@ private:
         //      newCounter = counter;
         //      initCounter = 0;
         // Now this new program has no comb loops and is behaviorally equivalent
+
+        // first create the newVscp and the corresponding active
+
+        AstActive* const seqActivep = new AstActive{flp, "resync::seqseq", vtxp->sentreep()};
+        scopep->addBlocksp(seqActivep);
+        AstAlways* const seqAlwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS_FF, nullptr, nullptr};
+        seqActivep->addStmtsp(seqAlwaysp);
+
+        seqAlwaysp->addStmtsp(new AstAssign{flp, mkLV(firstVscp), new AstConst{flp, 0U}});
+
+        AstIf* const ifp = new AstIf{flp, mkRV(firstVscp), nullptr, nullptr};
+
+        for (AstVarScope* const vscp : vtxp->lvsp()) {
+            AstVarScope* const newVscp = makeVscp(vscp);
+            AstVarScope* const initVscp = LocalSubst::get(vscp);
+            UASSERT_OBJ(initVscp, vscp, "initVscp not found");
+            ifp->addThensp(new AstAssign{flp, mkLV(vscp), mkRV(initVscp)});
+            ifp->addElsesp(new AstAssign{flp, mkLV(vscp), mkRV(newVscp)});
+            seqAlwaysp->addStmtsp(new AstAssign{flp, mkLV(newVscp), mkRV(vscp)});
+        }
+
+        ifp->addElsesp(newAlwaysp->stmtsp()->unlinkFrBackWithNext());
+        newAlwaysp->addStmtsp(ifp);
     }
 
     inline void relinkActive(AstActive* activep) {
@@ -780,12 +807,6 @@ private:
         for (const LogicWithActive& pair : vtxp->logicsp()) { relinkActive(pair.activep); }
     }
 
-    template <typename Fn>
-    void match(ResyncVertex* vtxp, Fn&& fn) {
-        using Traits = FunctionTraits<Fn>;
-        using Arg = typename Traits::template arg<0>::type;
-        if (Arg vp = dynamic_cast<Arg>(vtxp)) { fn(vp); }
-    }
     void reconstruct(const std::unique_ptr<ResyncGraph>& graphp) {
 
         LocalSubst::clearAll();
@@ -799,14 +820,10 @@ private:
             }
         });
 
-        // clone or relink logic
-        std::vector<SeqCombVertex*> toFixp;
+        // clone or relink logic, handle SeqComb later
         graphp->foreachVertex([&](ResyncVertex* vp) {
             if (auto vtxp = dynamic_cast<CombCombVertex*>(vp)) {
                 cloneCombComb(vtxp);
-            } else if (auto vtxp = dynamic_cast<SeqCombVertex*>(vp)) {
-                cloneSeqComb(vtxp);
-                toFixp.push_back(vtxp);
             } else if (auto vtxp = dynamic_cast<CombVertex*>(vp)) {
                 relinkComb(vtxp);
             } else if (auto vtxp = dynamic_cast<SeqVertex*>(vp)) {
@@ -815,12 +832,24 @@ private:
         });
 
         LocalSubst::clearAll();
+        // deal with seqentual logic turn comb last since it requires new substitutions
+        graphp->foreachVertex([&](SeqCombVertex* vtxp) { cloneSeqComb(vtxp); });
         // at last, fix the behavior of seq logic that was turned into comb. Need to happen after
         // everything else as there are new substitutions
     }
 
     void applySubst(AstNode* nodep) { iterateChildren(nodep); }
-    void visit(AstNodeVarRef* vrefp) {}
+
+
+    // substitute reference with what's in user1p
+    void visit(AstNodeVarRef* vrefp) {
+        AstVarScope* const oldVscp = vrefp->varScopep();
+        AstVarScope* const newVscp = LocalSubst::get(oldVscp);
+        if (!newVscp) { return; }
+        vrefp->name(newVscp->varp()->name());
+        vrefp->varp(newVscp->varp());
+        vrefp->varScopep(newVscp);
+    }
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 
 public:
@@ -830,7 +859,16 @@ public:
         : m_newNames{"__Vresync"}
         , m_netlistp{netlistp}
         , m_graphsp{graphsp}
-        , m_logicClasses{logicClasses} {}
+        , m_logicClasses{logicClasses} {
+        AstNode::user2ClearTree();
+        AstNode::user1ClearTree();
+        setSenTrees();
+        for (auto& graphp : graphsp) {
+            reconstruct(graphp);
+            VL_DANGLING(graphp);
+        }
+        graphsp.clear();
+    }
 };
 
 class ResyncLegalVisitor final : VNVisitor {
@@ -868,7 +906,7 @@ void resyncAll(AstNetlist* netlistp) {
     if (ResyncLegalVisitor::allowed(netlistp)) {
         auto depGraphs = V3BspSched::buildDepGraphs(netlistp);
 
-        v3Global.dumpCheckGlobalTree("resync", 0, dumpTree() >= 3);
+        v3Global.dumpCheckGlobalTree("preresync", 0, dumpTree() >= 3);
         V3Dead::deadifyAllScoped(netlistp);
         auto deps = V3BspSched::buildDepGraphs(netlistp);
         auto& depGraphsp = std::get<2>(deps);
@@ -879,12 +917,15 @@ void resyncAll(AstNetlist* netlistp) {
             // do better than failing...
             return;
         }
+        bool changed = false;
         auto resyncGraphsp = ResyncGraphBuilder::build(depGraphsp);
         {
             ResyncGraphTransformer resyncer{resyncGraphsp};
             resyncer.apply();
+            changed = resyncer.changed();
         }
         { ResyncVisitor{netlistp, resyncGraphsp, logicClasses}; }
+        v3Global.dumpCheckGlobalTree("postresync", 0, dumpTree() >= 3);
 
     } else {
         netlistp->v3warn(UNOPTFLAT, "Skipping resync. Is the design not flattened?");
