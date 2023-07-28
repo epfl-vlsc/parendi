@@ -96,9 +96,7 @@ private:
         }
         static inline int shiftQConst() { return 3; }
 
-        static inline int logAnd(AstNode* nodep) {
-            return nodep->widthWords() * 2 + BRANCH_PENALTY;
-        }
+        static inline int logAnd(AstNode* nodep) { return nodep->widthWords() * 2; }
         static inline int logNot(AstNode* nodep) { return nodep->widthWords(); }
         // insert
         static inline int insert(AstNode* nodep) {
@@ -146,7 +144,7 @@ private:
                 return n + mulCount + innerCount;
             } else if (nodep->isQuad()) {
                 return 23;  // 64-bit mul is expensive
-            } else  {
+            } else {
                 return 1;  // native
             }
         }
@@ -186,7 +184,11 @@ private:
             if (const AstCMethodHard* const callp = VN_CAST(nodep->backp(), CMethodHard)) {
                 if (callp->fromp() == nodep) return 1;
             }
-            return (nodep->varp()->isFuncLocal() ? 0 : 1) + nodep->widthWords();
+            if (nodep->varp()->isFuncLocal()) {
+                return nodep->widthWords();
+            } else {
+                return nodep->widthWords() + 1;
+            }
         }
     };
 
@@ -234,15 +236,31 @@ private:
     VL_IPU_COST(RedOr, reduceAndOr);
     VL_IPU_COST(RedXor, reduceXor);
 
+    VL_IPU_COST(ShiftL, shiftRL);
+    VL_IPU_COST(ShiftR, shiftRL);
+    VL_IPU_COST(ShiftRS, shiftRS);
 
     VL_IPU_COST(VarRef, vref);
     // TODO: AstReplicate
+
+    void visit(AstNodeIf* nodep) override { set(IpuCostModel::BRANCH_PENALTY); }
+    void visit(AstNodeCond* nodep) override {
+        if (AstNodeAssign* const assignp = VN_CAST(nodep->backp(), NodeAssign)) {
+            AstNodeVarRef* const lvp = VN_CAST(assignp->lhsp(), NodeVarRef);
+            AstNodeVarRef* const elsep = VN_CAST(nodep->elsep(), NodeVarRef);
+            if (lvp && elsep && lvp->varp() == elsep->varp()) {
+                set(3);  // can become movz
+                return;
+            }
+        }
+        set(IpuCostModel::BRANCH_PENALTY);
+    }
 
 #undef VL_IPU_COST
     // default resolution, falls back to verilator's internal cost model
     void visit(AstNode* nodep) override { m_count = nodep->instrCount(); }
 
-    explicit IpuInstrCountOverride(AstNode* nodep) { visit(nodep); }
+    explicit IpuInstrCountOverride(AstNode* nodep) { iterate(nodep); }
 
 public:
     static int count(AstNode* nodep) {
