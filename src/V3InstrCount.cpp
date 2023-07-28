@@ -31,7 +31,225 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 /// execute, not the number we'll generate. That is, for conditionals,
 /// we'll count instructions from either the 'if' or the 'else' branch,
 /// whichever is larger. We know we won't run both.
+class IpuInstrCountOverride final : public VNVisitor {
+private:
+    int m_count = 0;
 
+    inline void set(int c) { m_count = c; }
+
+    struct IpuCostModel {
+        static constexpr int BRANCH_PENALTY = 6;
+        // sign extension
+        static inline int extendS(AstNode*) { return 4 /* 2 ors 1 and 1 sub*/; }
+        // comparison
+        static inline int gtU(AstNode* nodep) {
+            if (nodep->isWide()) {
+                int n = nodep->widthWords();
+                return (4 * n);
+            } else if (nodep->isQuad()) {
+                return (4);
+            } else {
+                return (1);
+            }
+        }
+        static inline int gtEqU(AstNode* nodep) { return gtU(nodep) + 1; }
+        static inline int gtS(AstNode* nodep) {
+            if (nodep->isWide()) {
+                int n = nodep->widthWords();
+                return 7 + 4 * n;
+            } else if (nodep->isQuad()) {
+                return 11;
+            } else {
+                return extendS(nodep) * 2 + 1;
+            }
+        }
+        static inline int gtEqS(AstNode* nodep) { return gtS(nodep) + 1; }
+
+        static inline int eq(AstNode* nodep) {
+            if (nodep->isWide()) {
+                return 2 * nodep->widthWords() + 1;
+            } else if (nodep->isQuad()) {
+                return 3;
+            } else {
+                return 1;
+            }
+        }
+        static inline int neq(AstNode* nodep) { return eq(nodep) + 1; }
+
+        static inline int shiftRL(AstNode* nodep) {
+            if (nodep->isQuad()) {
+                return 6;
+            } else if (nodep->isWide()) {
+                return nodep->widthWords() * 4 + 3;
+            } else {
+                return 1;
+            }
+        }
+        static inline int shiftRS(AstNode* nodep) {
+            if (nodep->isQuad()) {
+                return 12;
+            } else if (nodep->isWide()) {
+                return nodep->widthWords() * 4 + 5;
+            } else {
+                return 10;
+            }
+        }
+        static inline int shiftQConst() { return 3; }
+
+        static inline int logAnd(AstNode* nodep) {
+            return nodep->widthWords() * 2 + BRANCH_PENALTY;
+        }
+        static inline int logNot(AstNode* nodep) { return nodep->widthWords(); }
+        // insert
+        static inline int insert(AstNode* nodep) {
+            if (nodep->isWide()) {
+                return 10 * nodep->widthWords();
+            } else if (nodep->isQuad()) {
+                return 10;
+            } else {
+                return 5;
+            }
+        }
+        // concatenation
+        static inline int concat(AstNode* nodep) {
+            if (nodep->isWide()) {
+                return insert(nodep) + nodep->widthInstrs();
+            } else if (nodep->isQuad()) {
+                return 4;
+            } else {
+                return 2;
+            }
+        }
+
+        static inline int add(AstNode* nodep) {
+            if (nodep->isQuad()) {
+                return 4;  // 3 add 1 cmpltu
+            } else if (nodep->isWide()) {
+                int n = nodep->widthWords();
+                return ((2 * n + 1) /*add*/ + (n + 1) /*cmpltu*/);
+            } else {
+                return 1;
+            }
+        }
+        static inline int sub(AstNode* nodep) { return add(nodep) + 1; }
+
+        static inline int bitwise(AstNode* nodep) { return nodep->widthWords(); }
+
+        static inline int mul(AstNode* nodep) {
+            if (nodep->isWide()) {
+                const int n = nodep->widthWords();
+                const int mulCount = n * n * 23; /*QData * QData takes 23 instructions on the IPU*/
+                // mul carry logic is a triple for loop i = 0 to n - 1, j = 0 to n -1 and k = i + j
+                // to n - 1
+                const int iters = (n * (n + 1) * (n + 2)) / 6;
+                const int innerCount = iters * 3;
+                return n + mulCount + innerCount;
+            } else if (nodep->isQuad()) {
+                return 23;  // 64-bit mul is expensive
+            } else  {
+                return 1;  // native
+            }
+        }
+        static inline int mulS(AstNode* nodep) { return mul(nodep) + 6; }
+
+        static inline int negate(AstNode* nodep) {
+            if (nodep->isWide()) {
+                return 3 * nodep->widthWords();
+            } else if (nodep->isQuad()) {
+                return 5;
+            } else {
+                return 2;
+            }
+        }
+        // RedAnd/Or
+        static inline int reduceAndOr(AstNode* nodep) {
+            if (nodep->isWide()) {
+                return 4 + nodep->widthWords();
+            } else if (nodep->isQuad()) {
+                return 2;
+            } else {
+                return 1;
+            }
+        }
+
+        static inline int reduceXor(AstNode* nodep) {
+            if (nodep->isWide()) {
+                return nodep->widthWords() + 10;
+            } else if (nodep->isWide()) {
+                return 20;
+            } else {
+                return 10;
+            }
+        }
+
+        static inline int vref(AstVarRef* nodep) {
+            if (const AstCMethodHard* const callp = VN_CAST(nodep->backp(), CMethodHard)) {
+                if (callp->fromp() == nodep) return 1;
+            }
+            return (nodep->varp()->isFuncLocal() ? 0 : 1) + nodep->widthWords();
+        }
+    };
+
+#define VL_IPU_COST(N, FN) \
+    void visit(Ast##N* nodep) override { set(IpuCostModel::FN(nodep)); }
+
+    /// COMPARISON cost
+    VL_IPU_COST(Gt, gtU);
+    VL_IPU_COST(GtS, gtS);
+    VL_IPU_COST(Gte, gtEqU);
+    VL_IPU_COST(GteS, gtEqS);
+
+    VL_IPU_COST(Lt, gtU);
+    VL_IPU_COST(LtS, gtS);
+    VL_IPU_COST(Lte, gtEqU);
+    VL_IPU_COST(LteS, gtEqS);
+
+    VL_IPU_COST(EqWild, eq);
+    VL_IPU_COST(Eq, eq);
+    VL_IPU_COST(EqCase, eq);
+    VL_IPU_COST(NeqWild, neq);
+    VL_IPU_COST(Neq, neq);
+    VL_IPU_COST(NeqCase, neq);
+    // TODO: handle T, D, N, and Eq/NeqLog as well
+
+    VL_IPU_COST(LogAnd, logAnd);
+    VL_IPU_COST(LogOr, logAnd);
+    VL_IPU_COST(LogIf, logAnd);
+    VL_IPU_COST(LogNot, logNot);
+
+    VL_IPU_COST(Concat, concat);
+
+    VL_IPU_COST(Add, add);
+    VL_IPU_COST(Sub, sub);
+    VL_IPU_COST(And, bitwise);
+    VL_IPU_COST(Or, bitwise);
+    VL_IPU_COST(Xor, bitwise);
+    VL_IPU_COST(Mul, mul);
+    VL_IPU_COST(MulS, mulS);
+    VL_IPU_COST(Not, bitwise);
+    VL_IPU_COST(Negate, negate);
+    // TODO: handle (D)ouble and (N)string as well?
+
+    VL_IPU_COST(RedAnd, reduceAndOr);
+    VL_IPU_COST(RedOr, reduceAndOr);
+    VL_IPU_COST(RedXor, reduceXor);
+
+
+    VL_IPU_COST(VarRef, vref);
+    // TODO: AstReplicate
+
+#undef VL_IPU_COST
+    // default resolution, falls back to verilator's internal cost model
+    void visit(AstNode* nodep) override { m_count = nodep->instrCount(); }
+
+    explicit IpuInstrCountOverride(AstNode* nodep) { visit(nodep); }
+
+public:
+    static int count(AstNode* nodep) {
+        const IpuInstrCountOverride vi{nodep};
+        return vi.m_count;
+    }
+};
 class InstrCountVisitor final : public VNVisitor {
 private:
     // NODE STATE
@@ -112,7 +330,8 @@ private:
         // debug prints to show local cost of each subtree, so we can see a
         // hierarchical view of the cost when in debug mode.
         const uint32_t savedCount = m_instrCount;
-        m_instrCount = nodep->instrCount();
+        m_instrCount
+            = v3Global.opt.poplar() ? IpuInstrCountOverride::count(nodep) : nodep->instrCount();
         return savedCount;
     }
     void endVisitBase(uint32_t savedCount, AstNode* nodep) {
@@ -123,7 +342,6 @@ private:
     void markCost(AstNode* nodep) {
         if (m_osp) nodep->user4(m_instrCount + 1);  // Else don't mark to avoid writeback
     }
-
 
     // VISITORS
     void visit(AstNodeSel* nodep) override {

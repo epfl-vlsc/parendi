@@ -3644,25 +3644,9 @@ public:
     bool sizeMattersLhs() const override { return true; }
     bool sizeMattersRhs() const override { return true; }
     int instrCount() const override {
-        if (v3Global.opt.poplar()) {
-            return instrCountIpu(widthInstrs());
-        }
         return widthInstrs() * INSTR_COUNT_INT_MUL;
     }
 
-    inline static int instrCountIpu(int n) {
-        if (n == 1) {
-            return 1; // native
-        } else if (n == 2) {
-            return 23; // 64-bit mul is expensive
-        } else /* wide */ {
-            const int mulCount = n * n * 23; /*QData * QData takes 23 instructions on the IPU*/
-            // mul carry logic is a triple for loop i = 0 to n - 1, j = 0 to n -1 and k = i + j to n - 1
-            const int iters = (n * (n + 1) * (n + 2)) / 6;
-            const int innerCount = iters * 3;
-            return n + mulCount + innerCount;
-        }
-    }
 
 };
 class AstMulD final : public AstNodeBiComAsv {
@@ -3712,15 +3696,6 @@ public:
     bool sizeMattersLhs() const override { return true; }
     bool sizeMattersRhs() const override { return true; }
     int instrCount() const override {
-        const int n = widthInstrs();
-        if (v3Global.opt.poplar()) {
-            if (n <= 2) {
-                return 6 + AstMul::instrCountIpu(n);
-            }
-           const int negCost = 2 * n * 2; // negation is a wide add
-           const int mulCost = AstMul::instrCountIpu(n);
-           return negCost + mulCost + n * 3;
-        }
         return widthInstrs() * INSTR_COUNT_INT_MUL;
     }
     bool signedFlavor() const override { return true; }
@@ -4708,10 +4683,7 @@ public:
     bool sizeMattersLhs() const override {
         return false;  // Because the EXTEND operator self-casts
     }
-    int instrCount() const override {
-        // three operations: 2 ors 1 and and 1 sub
-        return 4;
-    }
+    int instrCount() const override { return 0; }
     bool signedFlavor() const override { return true; }
 };
 class AstFEof final : public AstNodeUniop {
