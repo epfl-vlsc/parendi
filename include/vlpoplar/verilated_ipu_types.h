@@ -25,7 +25,7 @@
 #define VERILATOR_VERILATED_IPUTYPES_H_
 
 #ifndef VERILATOR_VERILATED_H_INTERNAL_
-#error "verilated_types.h should only be included by verilated.h"
+#error "verilated_ipu_types.h should only be included by verilated.h"
 #endif
 
 #include <array>

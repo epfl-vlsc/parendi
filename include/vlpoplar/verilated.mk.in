@@ -11,9 +11,10 @@ HOST_DEFINES =  \
 	-DCODELET_LIST="\"$(VMAIN_ROOT).list\""\
 	-DOBJ_DIR="\"$(OBJ_DIR)\""
 
+TRACE_BUFFER_SIZE ?= 4
 
-
-HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) -Wno-parentheses-equality
+HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) \
+				-Wno-parentheses-equality -DVL_IPU_TRACE_BUFFER_SIZE=$(TRACE_BUFFER_SIZE)
 
 HOST_FLAGS += -DVL_NUM_TILES_USED=$(TILES_USED)
 HOST_FLAGS += -DVL_NUM_WORKERS_USED=$(WORKERS_USED)
@@ -35,7 +36,8 @@ IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
 	-X-fno-builtin-memset \
 	-X-fno-builtin-memcpy \
 	-X-funroll-loops \
-	$(IPU_SCHED_FLAGS)
+	$(IPU_SCHED_FLAGS) \
+	-DVL_IPU_TRACE_BUFFER_SIZE=$(TRACE_BUFFER_SIZE)
 
 
 
@@ -49,6 +51,11 @@ ifneq ($(INSTRUMENT), 0)
 HOST_FLAGS += -DPOPLAR_INSTRUMENT
 endif
 
+VL_INSTRUMENT ?= 0
+ifneq ($(VL_INSTRUMENT), 0)
+HOST_FLAGS += -DVL_INSTRUMENT
+endif
+
 GRAPH_COMPILE_FLAGS = -DGRAPH_COMPILE
 GRAPH_RUN_FLAGS = -DGRAPH_RUN
 GRAPH_BINARY_DEP = $(VMAIN_ROOT).graph.bin
@@ -58,7 +65,11 @@ GRAPH_RUN_FLAGS += -DGRAPH_COMPILE
 GRAPH_BINARY_DEP =
 endif
 
+
 all: $(VMAIN) $(GRAPH_BINARY_DEP)
+
+VlTimeStamp.gp: $(VERIPOPLAR_ROOT)/include/vlpoplar/verilated_timestamp.cpp
+	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
 
 $(OBJS_GP):%.gp: %.cpp
 	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
@@ -71,7 +82,7 @@ vertex: $(OBJ_GP)
 $(OBJS_HOST):%.o: %.cpp
 	$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@
 
-$(VMAIN)_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
+$(VMAIN)_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) VlTimeStamp.gp
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) -o $@
 $(VMAIN_ROOT).graph.bin: $(VMAIN)_graph_compiler
 	./$< $(GRAPH_FLAGS)
