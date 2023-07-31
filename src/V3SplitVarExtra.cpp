@@ -649,7 +649,7 @@ private:
             } else if (auto extp = VN_CAST(nodep, Extend)) {
                 return findBase(extp->lhsp());
             } else if (auto extsp = VN_CAST(nodep, ExtendS)) {
-                return findBase(extp->lhsp());
+                return findBase(extsp->lhsp());
             } else {
                 return nullptr;
             }
@@ -667,7 +667,7 @@ private:
         const bool canSplit = isSplittable(fromp->varp());
         const int lsb = selp->lsbConst();
         const int width = selp->widthConst();
-        if (canSplit && fromp->access().isReadOrRW() && width < fromp->varp()->width()) {
+        if (canSplit && width < fromp->varp()->width()) {
             UINFO(10, "Wide selection " << selp << " of variable " << fromp->varp()->prettyNameQ()
                                         << endl);
             m_readIntervals[fromp->varScopep()].emplace_back(lsb, lsb + width - 1);
