@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+
+import argparse
+import pathlib
+import re
+import numpy as np
+import pandas as pd
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
+
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser("plot IPU profile")
+    parser.add_argument("obj_dir", metavar="OBJ_DIR", help="object directory (verilator output given by --Mdir)", default="obj_dir")
+    parser.add_argument('-n', metavar="N", help="number of traces to show", default='20', type=int)
+
+    args = parser.parse_args()
+
+    objDir = pathlib.Path(args.obj_dir)
+
+    def assertFileExists(dir: pathlib.Path):
+        if not dir.exists():
+            raise FileExistsError(f'File "{dir}" does not exist')
+
+    postWorkloadPath = objDir / "postWorkload.txt"
+    preExchangePath = objDir / "preExchange.txt"
+    preWorkloadPath = objDir / "preWorkload.txt"
+    estimatedPath = objDir / "estimatedCost.txt"
+    assertFileExists(postWorkloadPath)
+    assertFileExists(preExchangePath)
+    assertFileExists(preWorkloadPath)
+    assertFileExists(estimatedPath)
+
+
+    # read the estimates
+    estimatedCost = {}
+    numTiles = 0
+    with open(estimatedPath, 'r') as fp:
+        pattern = r'__V.*__(?P<VERTEX>\d+)\s*@\s*\[\s*(?P<TILE>\d+),\s*(?P<WORKER>\d+)\s*\]\s*(?P<COST>\d+)'
+        for line in fp.readlines():
+            m = re.match(pattern, line)
+            if m:
+                t = int(m.group("TILE"))
+                if t not in estimatedCost:
+                    estimatedCost[t] = {
+                        "vertex": [],
+                        "worker": [],
+                        "cost" : []
+                    }
+                v = int(m.group("VERTEX"))
+                w = int(m.group("WORKER"))
+                c = int(m.group("COST"))
+                estimatedCost[t]['worker'].append(w)
+                estimatedCost[t]['vertex'].append(v)
+                estimatedCost[t]['cost'].append(c)
+
+                numTiles = max(numTiles, t + 1)
+
+
+
+
+    exchange = [[] for _ in range(numTiles)]
+    workload = [[] for _ in range(numTiles)]
+
+    with open(postWorkloadPath, 'r') as postfp, open(preExchangePath, 'r') as xfp, open(preWorkloadPath, 'r') as prefp:
+        n = 0
+        for (ex, pre, post) in zip(xfp.readlines(), prefp.readlines(), postfp.readlines()):
+            if n >= args.n:
+                break
+            n += 1
+            et = ex.split()
+            pot = post.split()
+            pret = pre.split()
+
+            for tiles in range(numTiles):
+                e0 = int(et[tiles])
+                p0 = int(pret[tiles])
+                p1 = int(pot[tiles])
+
+                ed = (int(et[tiles]), p0 - e0)
+                wd = (int(pret[tiles]), p1 - p0)
+                exchange[tiles].append(ed)
+                workload[tiles].append(wd)
+    minTs = np.min([ts[0][0] for ts in exchange])
+
+    # zero out the offset
+    gantt_df = pd.DataFrame()
+    for tile in range(numTiles):
+        exchange[tile] = [(s - minTs, d) for (s, d) in exchange[tile]]
+        workload[tile] = [(s - minTs, d) for (s, d) in workload[tile]]
+
+
+    def asDfRow(r, tile, t):
+        return dict(Tile = tile, Start = r[0], Finish = (r[0] + r[1]), Resource = t)
+
+    fig = make_subplots(rows = 1, cols = 1)
+    fig.update_layout(
+        barmode='stack',
+        template = "plotly_dark",
+        xaxis ={'automargin': True},
+        yaxis = {'automargin': True} #, 'categoryorder': 'category ascending'}}
+    )
+
+    def makeDf(data, label):
+        df =  pd.DataFrame(
+            [asDfRow(r, tile, label) for tile in range(numTiles) for r in data[tile]]
+        )
+        df["Duration"] = df["Finish"] - df["Start"]
+        return df
+
+    def plot(label: str, color: str, df: pd.DataFrame):
+
+        fig.add_bar(
+            x = df["Duration"],
+            y = df["Tile"],
+            base = df["Start"],
+            orientation = "h",
+            showlegend=True,
+            marker_color=color,
+            name = label,
+            customdata=df["Duration"],
+            col = 1, row = 1
+        )
+        fig.update_traces(
+            hovertemplate = "<br>".join(["start: %{base}", "tile: %{y}", 'delta: %{customdata}'])
+        )
+    exchange_df = makeDf(exchange, "Exchange")
+    workload_df = makeDf(workload, "Workload")
+
+    workloadAvg_df = pd.DataFrame([dict(Tile = tile, Delta = np.mean(df["Duration"])) for tile, df in workload_df.groupby("Tile")])
+    workloadAvg_est = pd.DataFrame([dict(Tile = tile, Delta = np.max(estimatedCost[tile]['cost'])) for tile in range(numTiles)])
+
+    plot("Exchange", "lightblue", exchange_df)
+    plot("Workload", "tomato", workload_df)
+
+
+
+    fig.update_xaxes(
+        row = 1, col = 1,
+        title = "cycles"
+    )
+    fig.update_yaxes(
+        row = 1, col = 1, title = "tile"
+    )
+
+
+
+    TOMATOR_COLOR_PALE = "rgba(255, 99, 71, 0.5)"
+    fig.add_bar(
+        y = workloadAvg_df['Delta'],
+        x = workloadAvg_df['Tile'],
+        base = 0,
+        orientation = 'v',
+        marker = dict(color =TOMATOR_COLOR_PALE, line=dict(color='tomato', width = 2)),
+        name = 'workload',
+        showlegend = False,
+        hovertemplate="<br>".join(["Delta:%{y}", "Tile:%{x}"]),
+        row = 1, col = 1,
+        visible=False,
+    )
+    # print(workloadAvg_est)
+    # plot estimated value
+    error = [(real - est) / est * 100 for (est, real) in zip(workloadAvg_est['Delta'].tolist(), workloadAvg_df['Delta'].tolist())]
+
+    print(f"Error stats:\n\tmean {np.mean(error):0.1f} std {np.std(error):0.1f} median {np.median(error):0.1f}\n\tmax {np.max(error):0.1f} min {np.min(error):0.1f}")
+    worstAvgs = sorted(zip(workloadAvg_df['Delta'], workloadAvg_df['Tile']), key = lambda d: -d[0])
+    print("Top 10 cycles:")
+    for ((d, t), i) in zip(worstAvgs, range(10)):
+        print(f"\tAt tile {t}: {d} ({np.max(estimatedCost[t]['cost'])})")
+    print(f"Exchnage cycles: {np.max(exchange_df['Duration'])}")
+    fig.add_bar(
+        y = workloadAvg_est['Delta'],
+        x = workloadAvg_est['Tile'],
+        base = 0,
+        orientation= 'v',
+        name = 'estimated',
+        customdata=error,
+        hovertemplate="<br>".join(["Delta:%{y}", "Tile:%{x}", "Error:%{customdata:.0f}%"]),
+        # marker_alpha = 0.5,
+        # marker = dict(color = 'none', pattern_shape='/', alpha=0.5),
+        marker=dict(color='rgba(193, 255, 162, 0.5)', line=dict(color='rgba(0,0,0,0)', width=1), pattern_shape='/'),
+        row = 1, col = 1,
+        visible=False,
+    )
+    fig.update_yaxes(
+        row = 1, col = 1, title = 'cycles'
+    )
+    fig.update_xaxes(
+        row = 1, col = 1, title = 'tiles'
+    )
+
+    fig.add_histogram(
+        x = workloadAvg_df['Delta'],
+        name = 'histogram',
+        nbinsx = 40,
+        row = 1, col = 1,
+        # orientation='h',
+        visible=False,
+    )
+
+    fig.update_layout(
+        updatemenus=[
+            {
+                "buttons": [
+                    {
+                        "args": [
+                            {"visible": [True, True, False, False, False]},
+                        ], # Show first subplot, hide second
+                        "label": "Trace",
+                        "method": "update",
+
+                    },
+                    {
+                        "args": [{"visible": [False, False, True, True, False]}], # Hide first subplot, show second
+                        "label": "Average",
+                        "method": "update",
+                    },
+                    {
+                        "args": [{"visible": [False, False, False, False, True]}], # Hide first subplot, show second
+                        "label": "Histogram",
+                        "method": "update",
+                    },
+                ],
+                "direction": "down",
+                "showactive": True,
+            }
+        ]
+    )
+
+    fig.show()
+
+
