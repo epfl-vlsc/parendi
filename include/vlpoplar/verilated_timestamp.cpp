@@ -5,9 +5,6 @@
 #include <print.h>
 #include <cassert>
 using namespace poplar;
-#ifndef VL_IPU_TRACE_BUFFER_SIZE
-#define VL_IPU_TRACE_BUFFER_SIZE 512
-#endif
 
 #if (VL_IPU_TRACE_BUFFER_SIZE <= 2) || (VL_IPU_TRACE_BUFFER_SIZE % 2)
 #error "expected VL_IPU_TRACE_BUFFER_SIZE >= 32 and it should also be even"

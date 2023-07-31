@@ -52,9 +52,9 @@ void V3BspStraggler::report() {
 
     std::sort(estimatedCost.begin(), estimatedCost.end(),
               [](const auto& p1, const auto& p2) { return p1.second > p2.second; });
-    const std::string filename = v3Global.opt.makeDir() + "/"
-                                 + EmitCFunc::prefixNameProtect(netlistp->topModulep())
-                                 + "_estimated_cost.txt";
+    const std::string filename = v3Global.opt.makeDir() + "/" + "estimatedCost.txt";
+
+
     // UINFO(0, "Dumping estimated const to " << filename << endl);
     std::ofstream ofs(filename, std::ios::out);
     for (const auto& pair : estimatedCost) {
