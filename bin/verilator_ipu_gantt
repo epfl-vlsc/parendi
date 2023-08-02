@@ -155,6 +155,7 @@ if __name__ == "__main__":
         name = 'workload',
         showlegend = False,
         hovertemplate="<br>".join(["Delta:%{y}", "Tile:%{x}"]),
+        width = TRACE_BAR_WIDTH,
         row = 1, col = 1,
         visible=False,
     )
@@ -198,11 +199,12 @@ if __name__ == "__main__":
     # )
 
 
-    def plotHist(nbins: int = 5):
-        traceHist = fig.add_histogram(
-            x = workloadAvg_df['Delta'],
-            name = 'histogram',
-            nbinsx = nbins,
+    def plotHist(df, label, marker):
+        fig.add_histogram(
+            x = df['Delta'],
+            name = label,
+            nbinsx = DEFAULT_NUM_BINS,
+            marker = marker,
             row = 1, col = 1,
             visible=False,
         )
@@ -219,7 +221,8 @@ if __name__ == "__main__":
 
     # interactivePlot = widgets.interactive(plotHist, nbins=binsSlider)
 
-    plotHist(DEFAULT_NUM_BINS)
+    plotHist(workloadAvg_df, "measured", marker=dict(color=TOMATOR_COLOR_PALE, line=dict(color='tomato', width=1), pattern_shape=''),)
+    plotHist(workloadAvg_est, "estimated", marker=dict(color='rgba(193, 255, 162, 0.5)', line=dict(color='rgba(0,0,0,0)', width=1), pattern_shape='/'),)
 
     fig.update_layout(
         updatemenus=[
@@ -227,7 +230,7 @@ if __name__ == "__main__":
                 "buttons": [
                     {
                         "args": [
-                            {"visible": [True, True, False, False, False]},
+                            {"visible": [True, True, False, False, False, False]},
                             {
                                 'xaxis' : {'title' : 'cycle'},
                                 'yaxis' : {'title' : 'tile'},
@@ -240,7 +243,7 @@ if __name__ == "__main__":
                     },
                     {
                         "args": [
-                            {"visible": [False, False, True, True, False]},
+                            {"visible": [False, False, True, True, False, False]},
                             {
                                 'xaxis' : {'title' : 'tile'},
                                 'yaxis' : {'title' : 'cycles'},
@@ -252,10 +255,10 @@ if __name__ == "__main__":
                     },
                     {
                         "args": [
-                            {"visible": [False, False, False, False, True]},
+                            {"visible": [False, False, False, False, True, True]},
                             {
-                                'xaxis' : {'title' : 'bins'},
-                                'yaxis' : {'title' : 'cycles'},
+                                'xaxis' : {'title' : 'cycles'},
+                                'yaxis' : {'title' : 'count'},
                                 'sliders' : [
                                     {
                                         'active': DEFAULT_NUM_BINS - 1, #default value,
@@ -274,7 +277,7 @@ if __name__ == "__main__":
                                         # 'y': 0,
                                         'steps': [{
                                             'args': [
-                                                        { 'nbinsx': int(i), "visible": [False, False, False, False, True]}
+                                                        { 'nbinsx': int(i), "visible": [False, False, False, False, True, True]}
                                                     ],
                                             'label': str(i),
                                             'value': i,
