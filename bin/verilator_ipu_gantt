@@ -9,7 +9,6 @@ import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 
 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser("plot IPU profile")
@@ -112,7 +111,7 @@ if __name__ == "__main__":
 
     def plot(label: str, color: str, df: pd.DataFrame):
 
-        fig.add_bar(
+        traceDf = fig.add_bar(
             x = df["Duration"],
             y = df["Tile"],
             base = df["Start"],
@@ -123,9 +122,10 @@ if __name__ == "__main__":
             customdata=df["Duration"],
             col = 1, row = 1
         )
-        fig.update_traces(
+        traceDf.update_traces(
             hovertemplate = "<br>".join(["start: %{base}", "tile: %{y}", 'delta: %{customdata}'])
         )
+
     exchange_df = makeDf(exchange, "Exchange")
     workload_df = makeDf(workload, "Workload")
 
@@ -136,19 +136,12 @@ if __name__ == "__main__":
     plot("Workload", "tomato", workload_df)
 
 
-
-    fig.update_xaxes(
-        row = 1, col = 1,
-        title = "cycles"
-    )
-    fig.update_yaxes(
-        row = 1, col = 1, title = "tile"
-    )
-
+    fig.update_xaxes(title = 'cycle')
+    fig.update_yaxes(title = 'tile')
 
 
     TOMATOR_COLOR_PALE = "rgba(255, 99, 71, 0.5)"
-    fig.add_bar(
+    traceAvg = fig.add_bar(
         y = workloadAvg_df['Delta'],
         x = workloadAvg_df['Tile'],
         base = 0,
@@ -160,6 +153,8 @@ if __name__ == "__main__":
         row = 1, col = 1,
         visible=False,
     )
+    # traceAvg.update_xaxes(title = 'tile')
+    # traceAvg.update_yaxes(title = 'cycles')
     # print(workloadAvg_est)
     # plot estimated value
     error = [(real - est) / est * 100 for (est, real) in zip(workloadAvg_est['Delta'].tolist(), workloadAvg_df['Delta'].tolist())]
@@ -170,7 +165,7 @@ if __name__ == "__main__":
     for ((d, t), i) in zip(worstAvgs, range(10)):
         print(f"\tAt tile {t}: {d} ({np.max(estimatedCost[t]['cost'])})")
     print(f"Exchnage cycles: {np.max(exchange_df['Duration'])}")
-    fig.add_bar(
+    traceEst = fig.add_bar(
         y = workloadAvg_est['Delta'],
         x = workloadAvg_est['Tile'],
         base = 0,
@@ -184,21 +179,37 @@ if __name__ == "__main__":
         row = 1, col = 1,
         visible=False,
     )
-    fig.update_yaxes(
-        row = 1, col = 1, title = 'cycles'
-    )
-    fig.update_xaxes(
-        row = 1, col = 1, title = 'tiles'
-    )
 
-    fig.add_histogram(
-        x = workloadAvg_df['Delta'],
-        name = 'histogram',
-        nbinsx = 40,
-        row = 1, col = 1,
-        # orientation='h',
-        visible=False,
-    )
+    # traceEst.update_yaxes(
+    #     title = 'cycles'
+    # )
+    # traceEst.update_xaxes(
+    #     title = 'tiles'
+    # )
+
+
+    def plotHist(nbins: int = 5):
+        traceHist = fig.add_histogram(
+            x = workloadAvg_df['Delta'],
+            name = 'histogram',
+            nbinsx = nbins,
+            row = 1, col = 1,
+            visible=False,
+        )
+
+    binRange = range(1, len(workloadAvg_df['Delta'] + 1))
+    # binsSlider = widgets.IntSlider(
+    #     value=20,
+    #     min=1,
+    #     max=len(workloadAvg_df['Delta']),
+    #     step=10,
+    #     description='Number of Bins:',
+    #     continuous_update=False
+    # )
+
+    # interactivePlot = widgets.interactive(plotHist, nbins=binsSlider)
+
+    plotHist(10)
 
     fig.update_layout(
         updatemenus=[
@@ -207,28 +218,73 @@ if __name__ == "__main__":
                     {
                         "args": [
                             {"visible": [True, True, False, False, False]},
+                            {
+                                'xaxis' : {'title' : 'cycle'},
+                                'yaxis' : {'title' : 'tile'},
+                                'sliders': []
+                            }
                         ], # Show first subplot, hide second
                         "label": "Trace",
                         "method": "update",
 
                     },
                     {
-                        "args": [{"visible": [False, False, True, True, False]}], # Hide first subplot, show second
+                        "args": [
+                            {"visible": [False, False, True, True, False]},
+                            {
+                                'xaxis' : {'title' : 'tile'},
+                                'yaxis' : {'title' : 'cycles'},
+                                'sliders': []
+                            }
+                        ],
                         "label": "Average",
                         "method": "update",
                     },
                     {
-                        "args": [{"visible": [False, False, False, False, True]}], # Hide first subplot, show second
+                        "args": [
+                            {"visible": [False, False, False, False, True]},
+                            {
+                                'xaxis' : {'title' : 'bins'},
+                                'yaxis' : {'title' : 'cycles'},
+                                'sliders' : [
+                                    {
+                                        'active': 10 - 1, #default value,
+                                        'yanchor': 'top',
+                                        'xanchor': 'left',
+                                        'currentvalue': {
+                                            'prefix': 'Number of bins: ',
+                                            'visible': True,
+                                            'xanchor': 'right',
+                                            'value': 20,
+                                        },
+                                        'transition': {'duration': 300, 'easing': 'cubic-in-out'},
+                                        # 'pad': {'b': 10, 't': 50},
+                                        # 'len': 0.9,
+                                        # 'x': 0.1,
+                                        # 'y': 0,
+                                        'steps': [{
+                                            'args': [
+                                                        { 'nbinsx': int(i), "visible": [False, False, False, False, True]}
+                                                    ],
+                                            'label': str(i),
+                                            'value': i,
+                                            'method': 'update'
+                                        } for i in binRange] # You can change the range as needed
+                                    }
+                                ]
+                            },
+                        ],
                         "label": "Histogram",
                         "method": "update",
-                    },
+                    }
                 ],
                 "direction": "down",
                 "showactive": True,
             }
         ]
-    )
 
+    )
+    # display(interactivePlot)
     fig.show()
 
 
