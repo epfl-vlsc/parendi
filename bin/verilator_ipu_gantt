@@ -17,6 +17,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("plot IPU profile")
     parser.add_argument("obj_dir", metavar="OBJ_DIR", help="object directory (verilator output given by --Mdir)", default="obj_dir")
     parser.add_argument('-n', '--num', metavar="N", help="number of traces to show", default='5', type=int)
+    parser.add_argument('-t', '--theme', metavar="THEME", help="plotly theme", default="plotly_white", type=str)
+    parser.add_argument('-o', '--output', metavar="FILES", help="output images", nargs="+", type=pathlib.Path, default=list())
+    parser.add_argument('-b', '--nbins', default=DEFAULT_NUM_BINS, help="number of bins in the histogram", type=int)
+    parser.add_argument('-i', '--interactive', action='store_true', help="Bring up the plot interactively")
 
     args = parser.parse_args()
 
@@ -101,7 +105,7 @@ if __name__ == "__main__":
     fig = make_subplots(rows = 1, cols = 1)
     fig.update_layout(
         barmode='stack',
-        template = "plotly_dark",
+        template = args.theme,
         xaxis ={'automargin': True},
         yaxis = {'automargin': True} #, 'categoryorder': 'category ascending'}}
     )
@@ -139,11 +143,19 @@ if __name__ == "__main__":
 
     plot("Exchange", "lightblue", exchange_df)
     plot("Workload", "tomato", workload_df)
-
-
     fig.update_xaxes(title = 'cycle')
     fig.update_yaxes(title = 'tile')
 
+    def saveImages(suffix):
+        for oname in args.output:
+            outwidth = 3.5
+            dpi = 300
+            aspectR = (16, 9)
+            outFile = pathlib.Path(oname)
+            outPath = outFile.parent / ((outFile.stem + "_" + suffix) + outFile.suffix)
+            fig.write_image(outPath, width=outwidth * dpi, height=outwidth * dpi * aspectR[1] / aspectR[0], scale = 1)
+
+    saveImages("trace")
 
     TOMATOR_COLOR_PALE = "rgba(255, 99, 71, 0.5)"
     traceAvg = fig.add_bar(
@@ -191,6 +203,7 @@ if __name__ == "__main__":
         visible=False,
     )
 
+    saveImages("average")
     # traceEst.update_yaxes(
     #     title = 'cycles'
     # )
@@ -203,7 +216,7 @@ if __name__ == "__main__":
         fig.add_histogram(
             x = df['Delta'],
             name = label,
-            nbinsx = DEFAULT_NUM_BINS,
+            nbinsx = args.nbins,
             marker = marker,
             row = 1, col = 1,
             visible=False,
@@ -223,6 +236,8 @@ if __name__ == "__main__":
 
     plotHist(workloadAvg_df, "measured", marker=dict(color=TOMATOR_COLOR_PALE, line=dict(color='tomato', width=1), pattern_shape=''),)
     plotHist(workloadAvg_est, "estimated", marker=dict(color='rgba(193, 255, 162, 0.5)', line=dict(color='rgba(0,0,0,0)', width=1), pattern_shape='/'),)
+
+    saveImages("hist")
 
     fig.update_layout(
         updatemenus=[
@@ -298,7 +313,9 @@ if __name__ == "__main__":
 
     )
     # display(interactivePlot)
+    if args.interactive:
+        fig.show()
+    fig.write_html(objDir / "profile.html")
 
-    fig.show(renderer='browser')
 
 
