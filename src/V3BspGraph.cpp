@@ -701,9 +701,21 @@ DepGraphBuilder::splitIndependent(const std::unique_ptr<DepGraph>& graphp) {
 
     auto groups = groupCommits(graphp); /*groups vertices that must go to the same partition*/
     std::vector<std::unique_ptr<DepGraph>> partitionsp;
-    for (const auto group : groups) {
-        partitionsp.emplace_back(backwardTraverseAndCollect(graphp, group));
+    const int numGraphs = groups.size();
+    
 
+    std::vector<std::future<std::unique_ptr<DepGraph>>> results;
+
+    for (const auto& group : groups) {
+        results.emplace_back(V3ThreadPool::s().enqueue(
+            std::function<std::unique_ptr<DepGraph>()>([&]() -> std::unique_ptr<DepGraph> {
+                return backwardTraverseAndCollect(graphp, group);
+            })));
+    }
+    for (auto& res: results) {
+        UASSERT(res.valid(), "invalid future?");
+        res.wait();
+        partitionsp.emplace_back(std::move(res.get()));
         if (dumpGraph() >= 3) {
             partitionsp.back()->dumpDotFilePrefixed("partition_"
                                                     + std::to_string(partitionsp.size() - 1));
