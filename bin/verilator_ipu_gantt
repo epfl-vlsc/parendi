@@ -7,13 +7,16 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
+import plotly.io as pio
 
 
 if __name__ == "__main__":
 
+    TRACE_BAR_WIDTH = 1
+    DEFAULT_NUM_BINS = 10
     parser = argparse.ArgumentParser("plot IPU profile")
     parser.add_argument("obj_dir", metavar="OBJ_DIR", help="object directory (verilator output given by --Mdir)", default="obj_dir")
-    parser.add_argument('-n', metavar="N", help="number of traces to show", default='20', type=int)
+    parser.add_argument('-n', '--num', metavar="N", help="number of traces to show", default='5', type=int)
 
     args = parser.parse_args()
 
@@ -66,9 +69,8 @@ if __name__ == "__main__":
     with open(postWorkloadPath, 'r') as postfp, open(preExchangePath, 'r') as xfp, open(preWorkloadPath, 'r') as prefp:
         n = 0
         for (ex, pre, post) in zip(xfp.readlines(), prefp.readlines(), postfp.readlines()):
-            if n >= args.n:
+            if n >= args.num:
                 break
-            n += 1
             et = ex.split()
             pot = post.split()
             pret = pre.split()
@@ -78,21 +80,23 @@ if __name__ == "__main__":
                 p0 = int(pret[tiles])
                 p1 = int(pot[tiles])
 
-                ed = (int(et[tiles]), p0 - e0)
-                wd = (int(pret[tiles]), p1 - p0)
+                ed = (n, int(et[tiles]), p0 - e0)
+                wd = (n, int(pret[tiles]), p1 - p0)
                 exchange[tiles].append(ed)
                 workload[tiles].append(wd)
-    minTs = np.min([ts[0][0] for ts in exchange])
+
+            n += 1
+    minTs = np.min([ts[0][1] for ts in exchange])
 
     # zero out the offset
-    gantt_df = pd.DataFrame()
+
     for tile in range(numTiles):
-        exchange[tile] = [(s - minTs, d) for (s, d) in exchange[tile]]
-        workload[tile] = [(s - minTs, d) for (s, d) in workload[tile]]
+        exchange[tile] = [(n, s - minTs, d) for (n, s, d) in exchange[tile]]
+        workload[tile] = [(n, s - minTs, d) for (n, s, d) in workload[tile]]
 
 
-    def asDfRow(r, tile, t):
-        return dict(Tile = tile, Start = r[0], Finish = (r[0] + r[1]), Resource = t)
+    def asDfRow(n, s, d, tile, t):
+        return dict(N = n, Tile = tile, Start = s, Duration = d, Resource = t)
 
     fig = make_subplots(rows = 1, cols = 1)
     fig.update_layout(
@@ -104,10 +108,10 @@ if __name__ == "__main__":
 
     def makeDf(data, label):
         df =  pd.DataFrame(
-            [asDfRow(r, tile, label) for tile in range(numTiles) for r in data[tile]]
+            [asDfRow(n, s, d, tile, label) for tile in range(numTiles) for (n, s, d) in data[tile]]
         )
-        df["Duration"] = df["Finish"] - df["Start"]
-        return df
+        return df.sort_values(by = ["N", "Tile"])
+
 
     def plot(label: str, color: str, df: pd.DataFrame):
 
@@ -117,7 +121,8 @@ if __name__ == "__main__":
             base = df["Start"],
             orientation = "h",
             showlegend=True,
-            marker_color=color,
+            marker =  dict(color = color, line=dict(color=color, width = 2)),
+            width = TRACE_BAR_WIDTH,
             name = label,
             customdata=df["Duration"],
             col = 1, row = 1
@@ -156,10 +161,15 @@ if __name__ == "__main__":
     # traceAvg.update_xaxes(title = 'tile')
     # traceAvg.update_yaxes(title = 'cycles')
     # print(workloadAvg_est)
+    with open(objDir / "workloadDf.txt", 'w') as fp:
+        fp.write(workload_df.to_string())
+    with open(objDir / "exchangeDf.txt", 'w') as fp:
+        fp.write(exchange_df.to_string())
+
     # plot estimated value
     error = [(real - est) / est * 100 for (est, real) in zip(workloadAvg_est['Delta'].tolist(), workloadAvg_df['Delta'].tolist())]
 
-    print(f"Error stats:\n\tmean {np.mean(error):0.1f} std {np.std(error):0.1f} median {np.median(error):0.1f}\n\tmax {np.max(error):0.1f} min {np.min(error):0.1f}")
+    print(f"Error stats (%):\n\tmean {np.mean(error):0.1f} std {np.std(error):0.1f} median {np.median(error):0.1f}\n\tmax {np.max(error):0.1f} min {np.min(error):0.1f}")
     worstAvgs = sorted(zip(workloadAvg_df['Delta'], workloadAvg_df['Tile']), key = lambda d: -d[0])
     print("Top 10 cycles:")
     for ((d, t), i) in zip(worstAvgs, range(10)):
@@ -209,7 +219,7 @@ if __name__ == "__main__":
 
     # interactivePlot = widgets.interactive(plotHist, nbins=binsSlider)
 
-    plotHist(10)
+    plotHist(DEFAULT_NUM_BINS)
 
     fig.update_layout(
         updatemenus=[
@@ -248,7 +258,7 @@ if __name__ == "__main__":
                                 'yaxis' : {'title' : 'cycles'},
                                 'sliders' : [
                                     {
-                                        'active': 10 - 1, #default value,
+                                        'active': DEFAULT_NUM_BINS - 1, #default value,
                                         'yanchor': 'top',
                                         'xanchor': 'left',
                                         'currentvalue': {
@@ -285,6 +295,7 @@ if __name__ == "__main__":
 
     )
     # display(interactivePlot)
-    fig.show()
+
+    fig.show(renderer='browser')
 
 
