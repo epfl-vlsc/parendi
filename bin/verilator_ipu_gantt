@@ -237,7 +237,31 @@ if __name__ == "__main__":
     plotHist(workloadAvg_df, "measured", marker=dict(color=TOMATOR_COLOR_PALE, line=dict(color='tomato', width=1), pattern_shape=''),)
     plotHist(workloadAvg_est, "estimated", marker=dict(color='rgba(193, 255, 162, 0.5)', line=dict(color='rgba(0,0,0,0)', width=1), pattern_shape='/'),)
 
+
+
     saveImages("hist")
+    # def stepArg(i: int):
+    #     c, b = np.histogram(workloadAvg_df['Delta'], bins=i)
+    #     return {
+    #         'x': b,
+    #         'y': c,
+    #         'visible': [False, False, False, False, True, True]
+    #     }
+    def ecdf(d):
+        x = np.sort(d)
+        def result(v):
+            return np.searchsorted(x, v, side='right') / x.size
+        return result
+
+    def plotECDF(norm: bool):
+        x = np.sort(workloadAvg_df['Delta'])
+        ux = np.unique(x)
+        y = np.searchsorted(x, ux, side = 'right') / (x.size if norm else 1)
+        fig.add_scatter(x = y, y = ux, name='cdf', visible=False, marker_color="tomato")
+
+
+    plotECDF(True)
+
 
     fig.update_layout(
         updatemenus=[
@@ -245,7 +269,7 @@ if __name__ == "__main__":
                 "buttons": [
                     {
                         "args": [
-                            {"visible": [True, True, False, False, False, False]},
+                            {"visible": [True, True, False, False, False, False, False]},
                             {
                                 'xaxis' : {'title' : 'cycle'},
                                 'yaxis' : {'title' : 'tile'},
@@ -258,7 +282,7 @@ if __name__ == "__main__":
                     },
                     {
                         "args": [
-                            {"visible": [False, False, True, True, False, False]},
+                            {"visible": [False, False, True, True, False, False, False]},
                             {
                                 'xaxis' : {'title' : 'tile'},
                                 'yaxis' : {'title' : 'cycles'},
@@ -270,7 +294,7 @@ if __name__ == "__main__":
                     },
                     {
                         "args": [
-                            {"visible": [False, False, False, False, True, True]},
+                            {"visible": [False, False, False, False, True, True, False]},
                             {
                                 'xaxis' : {'title' : 'cycles'},
                                 'yaxis' : {'title' : 'count'},
@@ -292,7 +316,7 @@ if __name__ == "__main__":
                                         # 'y': 0,
                                         'steps': [{
                                             'args': [
-                                                        { 'nbinsx': int(i), "visible": [False, False, False, False, True, True]}
+                                                        { 'nbinsx': int(i), "visible": [False, False, False, False, True, True, False]}
                                                     ],
                                             'label': str(i),
                                             'value': i,
@@ -304,7 +328,19 @@ if __name__ == "__main__":
                         ],
                         "label": "Histogram",
                         "method": "update",
-                    }
+                    },
+                    {
+                        "args": [
+                            {"visible": [False, False, False, False, False, False, True]},
+                            {
+                                'xaxis' : {'title' : '$P$'},
+                                'yaxis' : {'title' : 'cycles'},
+                                'sliders': []
+                            }
+                        ],
+                        "label": "CDF",
+                        "method": "update",
+                    },
                 ],
                 "direction": "down",
                 "showactive": True,
@@ -312,6 +348,7 @@ if __name__ == "__main__":
         ]
 
     )
+
     # display(interactivePlot)
     if args.interactive:
         fig.show()
