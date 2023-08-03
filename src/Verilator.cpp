@@ -375,7 +375,6 @@ static void process() {
         // Make more delayed assignment to enable more parallelization oppurtunities with BSP
         // for poplar. This pass may have performance implications for single-thread mode
         // so should be optionally enabled for BSP only
-        // V3BspDly::mkDlys(v3Global.rootp()); /*should be after activeAll*/
 
         // Create tracing sample points, before we start eliminating signals
         if (v3Global.opt.trace()) V3TraceDecl::traceDeclAll(v3Global.rootp());

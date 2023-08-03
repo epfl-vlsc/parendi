@@ -256,6 +256,7 @@ private:
         set(IpuCostModel::BRANCH_PENALTY);
     }
     void visit(AstConst* nodep) override { set(0); }
+    void visit(AstCCast* nodep) override { set(0); }
 
 #undef VL_IPU_COST
     // default resolution, falls back to verilator's internal cost model
