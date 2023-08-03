@@ -30,6 +30,7 @@ namespace V3BspSched {
 namespace Resync {
 
 class ResyncVertex;
+class ResyncEdge;
 class CombVertex;
 class SeqVertex;
 class SeqReadVertex;
@@ -77,7 +78,7 @@ public:
         , m_index{i}
         , m_resyncRank{0}
         , m_sol{Utils::ResyncResolution::R_UNRESOLVED} {}
-    inline void addEdge(ResyncVertex* fromp, ResyncVertex* top, AstVarScope* const vscp);
+    inline ResyncEdge* addEdge(ResyncVertex* fromp, ResyncVertex* top, AstVarScope* const vscp);
     inline void cost(uint32_t v) { m_cost = v; }
     inline uint32_t cost() const { return m_cost; }
     inline std::unique_ptr<Utils::HeapNode>& heapNodep() { return m_heapNodep; }
@@ -101,6 +102,7 @@ public:
         using Arg = typename Traits::template arg<0>::type;
         for (V3GraphVertex *vtxp = verticesBeginp(), *nextp; vtxp; vtxp = nextp) {
             nextp = vtxp->verticesNextp();
+            UASSERT(dynamic_cast<ResyncVertex*>(vtxp), "baf vertex type");
             if (Arg const vp = dynamic_cast<Arg>(vtxp)) { fn(vp); }
         }
     }
@@ -146,7 +148,7 @@ public:
     CombVertex(ResyncGraph* graphp, const LogicWithActive& logicp, const uint32_t cost)
         : LogicVertex{graphp, cost}
         , m_logicp{logicp} {}
-    string name() const override { return "COMB"; }
+    string name() const override { return "COMB " + cvtToStr(cost()); }
     string dotShape() const override { return "oval"; }
     LogicWithActive logicp() const { return m_logicp; }
 
@@ -171,7 +173,7 @@ public:
         , m_logicsp{logicsp}
         , m_lvsp{lvsp} {}
 
-    string name() const override { return "SEQ"; }
+    string name() const override { return "SEQ " + cvtToStr(cost()); }
     string dotShape() const override { return "rect"; }
 
     const std::vector<LogicWithActive>& logicsp() const { return m_logicsp; }
@@ -208,7 +210,9 @@ public:
         : VarReadVertex{graphp, vscp}
         , m_writerp{writerp} {}
     string dotColor() const override { return "brown"; }
+    string name() const override { return "SeqRead " + VarReadVertex::name(); }
     SeqVertex* writerp() const { return m_writerp; }
+
     SeqReadVertex* clone(ResyncGraph* graphp) const override {
         return new SeqReadVertex{graphp, vscp(), writerp()};
     }
@@ -223,6 +227,7 @@ public:
         : VarReadVertex{graphp, vscp}
         , m_sentreep{sentreep} {}
     string dotColor() const override { return "red"; }
+    string name() const override { return "CombSeqRead " + VarReadVertex::name(); }
     AstSenTree* sentreep() const { return m_sentreep; }
     CombSeqReadVertex* clone(ResyncGraph* graphp) const override {
         return new CombSeqReadVertex{graphp, vscp(), sentreep()};
@@ -251,6 +256,7 @@ public:
     CombSeqVertex* clone(ResyncGraph* graphp) const override {
         return new CombSeqVertex{graphp, vscp(), sentreep()};
     }
+    string name() const override { return "CombSeq " + vscp()->prettyName(); }
 };
 class SeqCombVertex final : public ProxyVertex {
 private:
@@ -274,6 +280,8 @@ public:
     SeqCombVertex* clone(ResyncGraph* graphp) const override {
         return new SeqCombVertex{graphp, cost(), sentreep(), logicsp(), lvsp()};
     }
+
+    string name() const override { return "SeqComb " + cvtToStr(cost()); }
 };
 
 class CombCombVertex final : public ProxyVertex {
@@ -292,6 +300,9 @@ public:
     CombCombVertex* clone(ResyncGraph* graphp) const override {
         return new CombCombVertex{graphp, logicp(), sentreep(), cost()};
     }
+    string name() const override {
+        return "CombComb " + cvtToStr(cost());
+    }
 };
 
 class ResyncEdge final : public V3GraphEdge {
@@ -306,8 +317,9 @@ public:
     string dotLabel() const override final { return m_vscp ? m_vscp->prettyName() : ""; }
     AstVarScope* vscp() const { return m_vscp; }
 };
-inline void ResyncGraph::addEdge(ResyncVertex* fromp, ResyncVertex* top, AstVarScope* vscp) {
-    new ResyncEdge{this, fromp, top, vscp};
+inline ResyncEdge* ResyncGraph::addEdge(ResyncVertex* fromp, ResyncVertex* top,
+                                        AstVarScope* vscp) {
+    return new ResyncEdge{this, fromp, top, vscp};
 }
 
 inline bool Utils::Key::operator<(const Utils::Key& other) const {
