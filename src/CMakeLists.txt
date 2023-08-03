@@ -47,7 +47,6 @@ set(HEADERS
     V3Broken.h
     V3BspDifferential.h
     V3BspDpi.h
-    V3BspDly.h
     V3BspGraph.h
     V3BspIpuProfile.h
     V3BspMerger.h
@@ -206,7 +205,6 @@ set(COMMON_SOURCES
     V3Broken.cpp
     V3BspDifferential.cpp
     V3BspDpi.cpp
-    V3BspDly.cpp
     V3BspGraph.cpp
     V3BspIpuProfile.cpp
     V3BspMerger.cpp
