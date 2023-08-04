@@ -57,6 +57,7 @@ public:
         // as well
         for (int pix = 0; pix < depGraphp.size(); pix++) {
             auto& depp = depGraphp[pix];
+            if (dump() >= 70) { depp->dumpDotFilePrefixed("resync_dep_" + cvtToStr(pix)); }
             // toplogically sort dependence graph since we are clumping sequential vertices
             depp->rank();
             depp->sortVertices();
@@ -106,7 +107,7 @@ public:
         }
 
         // do we have def -> AssignPre?
-        auto fromAssignPre = [](ConstrDefVertex* defp) {
+        auto toAssignPre = [](ConstrDefVertex* defp) {
             if (defp->outSize1()) {
                 CompVertex* const succp = dynamic_cast<CompVertex*>(defp->outBeginp()->top());
                 if (VN_IS(succp->nodep(), AssignPre)) {
@@ -117,7 +118,7 @@ public:
             return false;
         };
         // do we have AssignPre -> def?
-        auto toAssignPre = [](ConstrDefVertex* defp) {
+        auto fromAssignp = [](ConstrDefVertex* defp) {
             if (defp->inSize1()) {
                 CompVertex* const prevp = dynamic_cast<CompVertex*>(defp->inBeginp()->fromp());
                 if (VN_IS(prevp->nodep(), AssignPre)) {
@@ -154,6 +155,8 @@ public:
             const auto& graphp = graphsp[pix];
             SeqVertex* const sinkp = sinksp[pix];
 
+            std::unordered_set<AstVarScope*> lvSetp{sinkp->lvsp().begin(), sinkp->lvsp().end()};
+
             for (V3GraphVertex* vtxp = depp->verticesBeginp(); vtxp;
                  vtxp = vtxp->verticesNextp()) {
                 ConstrDefVertex* const defp = dynamic_cast<ConstrDefVertex*>(vtxp);
@@ -162,25 +165,28 @@ public:
                     // is it dead?
                     continue;
                 }
-                if (toAssignPre(defp) || fromAssignPre(defp)) {
-                    // Do not consider them "combinational data dependence"
-                    continue;
-                }
+                // if (toAssignPre(defp) || fromAssignPre(defp)) {
+                //     // Do not consider them "combinational data dependence"
+                //     continue;
+                // }
                 ResyncVertex* newp = nullptr;
                 SeqVertex* const seqp = getSeqp(defp->vscp());
+
                 if (seqp) {
                     // variable is written by sequential logic, the only acceptable
-                    // predecessor is an AssignPre (ruled out above)
-                    UASSERT_OBJ(defp->inEmpty(), defp->vscp(), "did not expect predecessor");
+                    // predecessor is an AssignPre. We may as well really not need
+                    // this SeqReadVertex as lvs in sequential logic are handled
+                    // in special way.
+                    UASSERT_OBJ(defp->inEmpty() || defp->inSize1(), defp->vscp(),
+                                "did not expect predecessors");
                     SeqReadVertex* const readp
                         = new SeqReadVertex{graphp.get(), defp->vscp(), seqp};
-                    // link this graph to the producer
-                    seqp->consumersp().insert({graphp.get(), readp});
                     newp = readp;
                 } else if (!defp->inEmpty()) {
                     UASSERT_OBJ(defp->inSize1(), defp->vscp(), "expected single pred");
                     // can only be from comp logic, or AssignPre but that is rule out above.
                     CompVertex* const predp = dynamic_cast<CompVertex*>(defp->inBeginp()->fromp());
+
                     UASSERT_OBJ(!predp->domainp(), predp->nodep(), "did not expect clocked logic");
                     newp = getCombVertex(graphp.get(), predp);
                 }
@@ -193,13 +199,20 @@ public:
                 for (V3GraphEdge* edgep = defp->outBeginp(); edgep; edgep = edgep->outNextp()) {
                     CompVertex* const succp = dynamic_cast<CompVertex*>(edgep->top());
                     UASSERT(succp, "ill-constructed graph");
-                    if (succp->domainp()) {
+                    if (succp->domainp() && !lvSetp.count(defp->vscp())) {
                         // feeds into seq logic
                         graphp->addEdge(newp, sinkp, defp->vscp());
-                    } else {
+                    } else if (!succp->domainp()) {
                         // feeds into comb
                         graphp->addEdge(newp, getCombVertex(graphp.get(), succp), defp->vscp());
                     }
+                }
+                // dead, and LV feeding to the sink
+                if (newp->outEmpty()) { VL_DO_DANGLING(newp->unlinkDelete(graphp.get()), newp); }
+
+                if (SeqReadVertex* const readp = dynamic_cast<SeqReadVertex*>(newp)) {
+                    // Link this graph to the producer
+                    seqp->consumersp().insert({graphp.get(), readp});
                 }
             }
         }
@@ -268,9 +281,11 @@ private:
         std::unordered_map<ResyncVertex*, uint32_t> m_costCache;
         std::unordered_set<ResyncVertex*> m_pathExistsFromSeqp;
         SeqVertex* const m_seqp;
+        ResyncGraph* const m_graphp;
         const VertexByRank& m_byRank;
-        explicit CostComputer(SeqVertex* seqp, const VertexByRank& ranks)
-            : m_seqp{seqp}
+        explicit CostComputer(ResyncGraph* graphp, SeqVertex* seqp, const VertexByRank& ranks)
+            : m_graphp{graphp}
+            , m_seqp{seqp}
             , m_byRank{ranks} {
             m_costCache.clear();
             m_pathExistsFromSeqp.clear();
@@ -326,7 +341,7 @@ private:
                              outp = outp->outNextp()) {
                             if (outp->top()->rank() <= cutRank) {
                                 crossing = false;
-                                // vtxp ==> outp->top() needs to be sampled as well
+                                // vtxp --> outp->top() needs to be sampled as well
                                 break;
                             }
                         }
@@ -341,7 +356,7 @@ private:
         uint32_t maxCostBelow(uint32_t costHigherRanks) {
             uint32_t cBelow = 0;
             for (const auto& it : m_seqp->consumersp()) {
-                if (it.second->writerp() == m_seqp) {
+                if (it.first == m_graphp) {
                     // already accounted for in the maxCostAbove computation
                 } else {
                     // rsync to other graph, simply add the cost
@@ -356,7 +371,7 @@ private:
         graphp->rank();
         graphp->sortVertices();
 
-        if (dump() > 10) {
+        if (dump() >= 10) {
             graphp->dumpDotFilePrefixed("resync_graph_" + cvtToStr(graphp->index()));
         }
         VertexByRank verticesp = VertexByRank::build(graphp);
@@ -385,7 +400,7 @@ private:
         UINFO(8, "Analyzing graph " << graphp->index() << " with cost " << graphp->cost()
                                     << " and rank " << graphRank << endl);
         int costHigherRanks = seqp->cost();
-        CostComputer costModel{seqp, verticesp};
+        CostComputer costModel{graphp, seqp, verticesp};
 
         for (int r = graphRank - 1; r > 1; r--) {
             // Consider r as the resync point:
@@ -397,8 +412,8 @@ private:
             //    essentially adding to the execution time of other graphs that consume
             //    the values produced by seqp
             const uint32_t cBelow = costModel.maxCostBelow(costHigherRanks);
-            UINFO(10,
-                  "    at rank " << r << " cAbove = " << cAbove << " cBelow = " << cBelow << endl);
+            UINFO(10, "    at rank " << r << " cAbove = " << cAbove << " cBelow = " << cBelow
+                                     << " cHigher = " << costHigherRanks << endl);
             if (cBelow < bestCost && cAbove < bestCost) {
                 // Resync has benefits
                 bestRank = r;
@@ -468,9 +483,9 @@ private:
                     UASSERT(fromp && top, "bad types");
                     ResyncEdge* e1p = graphp->addEdge(fromp, substp.combSeqp, edgep->vscp());
                     ResyncEdge* e2p = graphp->addEdge(substp.combReadp, top, edgep->vscp());
-                    UINFO(10, "New edges " << cvtToHex(e1p) << " and " << cvtToHex(e2p) << endl);
+                    UINFO(80, "New edges " << cvtToHex(e1p) << " and " << cvtToHex(e2p) << endl);
                     VL_DO_DANGLING(edgep->unlinkDelete(), edgep);
-                    UINFO(10, "top = " << cvtToHex(top) << " fromp = " << cvtToHex(fromp) << endl);
+                    UINFO(80, "top = " << cvtToHex(top) << " fromp = " << cvtToHex(fromp) << endl);
                     UASSERT(dynamic_cast<ResyncVertex*>(top) && dynamic_cast<ResyncVertex*>(fromp),
                             "inconsistent graph");
                 }
@@ -558,7 +573,10 @@ private:
             }
             VL_DO_DANGLING(backp->unlinkDelete(graphp), backp);
         }
-        removeFromHeap(graphp);
+        if (graphp->heapNodep()) {
+            // might have been removed already, since resync to self is possible
+            removeFromHeap(graphp);
+        }
     }
     void doApply() {
 
@@ -611,6 +629,7 @@ private:
     using LogicCloneByDomain = std::unordered_map<AstSenTree*, AstNode*>;
     AstUser2Allocator<AstVarScope, VarScopeByDomain> m_newVscpByDomain;
     AstUser3Allocator<AstNode, LogicCloneByDomain> m_newLogicByDomain;
+
     // STATE:
     // AstVarScope::user1p()        -> pointer to new AstVarScope, clear on each graph
     // AstVarScope::user2u()        -> pointer to new AstVarScope per domain, clear on
@@ -637,6 +656,7 @@ private:
     struct LocalSubst {
         static void clearAll() { AstNode::user1ClearTree(); }
         static inline void set(AstVarScope* oldp, AstVarScope* newp) { oldp->user1p(newp); }
+        static inline void clear(AstVarScope* oldp) { oldp->user1p(nullptr); }
         static inline AstVarScope* get(AstVarScope* oldp) {
             return VN_CAST(oldp->user1p(), VarScope);
         }
@@ -736,6 +756,22 @@ private:
     }
 
     void cloneSeqComb(SeqCombVertex* vtxp) {
+        bool hasCloned = false;
+        bool hasUncloned = false;
+        for (const LogicWithActive& pair : vtxp->logicsp()) {
+            if (m_newLogicByDomain(pair.logicp).count(m_combSensep)) {
+                hasCloned = true;
+            } else {
+                hasUncloned = true;
+            }
+        }
+        UASSERT((!hasCloned && hasUncloned) || (!hasUncloned && hasCloned),
+                "inconsistent resync state");
+        if (hasCloned) {
+            // SeqCombVertex could have many duplicates in different graphs, avoid cloning it
+            // multiple times
+            return;  // do nothing, already cloned
+        }
         // Sequential made into combinational
         AstAlways* const newAlwaysp
             = new AstAlways{m_netlistp->fileline(), VAlwaysKwd::ALWAYS_COMB, nullptr, nullptr};
@@ -753,10 +789,18 @@ private:
                 AstAssign* newp
                     = new AstAssign{assignOldp->fileline(), assignOldp->lhsp()->unlinkFrBack(),
                                     assignOldp->rhsp()->unlinkFrBack()};
+                newAlwaysp->addStmtsp(new AstComment(assignOldp->fileline(),
+                                                     "seqcomb::" + assignOldp->prettyTypeName()));
                 newAlwaysp->addStmtsp(newp);
+                // UINFO(9, "Deleting " << assignOldp << endl);
+                UINFO(4, "    Morphing pre/post assignment " << assignOldp << endl);
+                // A bit sketchy, since pair.logic is no longer valid
+                m_newLogicByDomain(pair.logicp).emplace(m_combSensep, newAlwaysp);
                 VL_DO_DANGLING(assignOldp->unlinkFrBack()->deleteTree(), assignOldp);
             } else if (AstNodeProcedure* blockp = VN_CAST(pair.logicp, NodeProcedure)) {
                 newAlwaysp->addStmtsp(blockp->stmtsp()->unlinkFrBackWithNext());
+                // a bit sketchy, do not use the map key later
+                m_newLogicByDomain(pair.logicp).emplace(m_combSensep, newAlwaysp);
                 VL_DO_DANGLING(blockp->unlinkFrBack()->deleteTree(), blockp);
             } else {
                 UASSERT_OBJ(false, pair.logicp,
@@ -773,13 +817,18 @@ private:
             UASSERT(vtxp->sentreep(), "something is up, resync logic with multiple domains?");
             auto it = m_newVscpByDomain(edgep->vscp()).find(vtxp->sentreep());
             if (it != m_newVscpByDomain(edgep->vscp()).end()) {
+                UINFO(10, "    RV subst " << edgep->vscp()->prettyNameQ() << " -> "
+                                          << it->second->prettyNameQ() << endl);
                 LocalSubst::set(edgep->vscp(), it->second);
             }
         });
+        // for (AstVarScope* const lvp : vtxp->lvsp()) {
+        //     LocalSubst::clear(lvp);  // do not subst local productions
+        //     // there mig
+        // }
         // replace any RV that has a subst, potentially coming from CombSeqRead or CombComb
         applySubst(newAlwaysp);
 
-        LocalSubst::clearAll();
         fixBehavSeqComb(vtxp, newAlwaysp);
     }
 
@@ -788,6 +837,7 @@ private:
         // Create a clone of every LV in the transformed logic that replaced the original
         // instances in the initial/static initial logic
 
+        LocalSubst::clearAll();
         for (AstVarScope* const vscp : vtxp->lvsp()) {
             AstVarScope* initVscp = makeVscp(vscp);
             LocalSubst::set(vscp, initVscp);
@@ -878,9 +928,10 @@ private:
 
     void reconstruct(const std::unique_ptr<ResyncGraph>& graphp) {
 
-        if (dump() > 10) {
+        if (dump() >= 10) {
             graphp->dumpDotFilePrefixed("resync_post_" + cvtToStr(graphp->index()));
         }
+        UINFO(10, "Reconstructing graph " << graphp->index() << endl);
         LocalSubst::clearAll();
 
         // create new variables if needed
