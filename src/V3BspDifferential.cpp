@@ -38,7 +38,7 @@ struct UnpackUpdate {
     uint32_t diffCost = 0;
     struct {
         std::vector<AstNode*> recipesp;
-        std::vector<AstVarScope*> rvsp;  // ensure unique
+        std::vector<AstVarScope*> rvsp;  // ensure unique elements
         AstVarScope* condp = nullptr;
         AstVarScope* condInitp = nullptr;
     } subst;
@@ -82,10 +82,15 @@ private:
             iterateChildren(nodep);
         }
     }
-
-    void visit(AstNodeVarRef* vrefp) {
+    void visit(AstArraySel* aselp) override {
+        // get the base VarRef for this ArraySel
+        AstNode* const baseFromp = AstArraySel::baseFromp(aselp, false);
+        if (VN_IS(baseFromp, Const)) { return; }
+        const AstNodeVarRef* const vrefp = VN_CAST(baseFromp, NodeVarRef);
+        UASSERT_OBJ(vrefp, aselp, "No VarRef under ArraySel");
+        const bool lvalue = vrefp->access().isWriteOrRW();
         AstVar* const varp = vrefp->varp();
-        if (vrefp->access().isWriteOrRW() && m_updates.count(varp)) {
+        if (lvalue && m_updates.count(vrefp->varp())) {
             if (m_inDynamicBlock) {
                 // we can not accurately count the number of times the variable
                 // is updated (e.g., inside a while loop). So we don't consider it for optimization
@@ -101,6 +106,14 @@ private:
                                                    << ", not in an assignment" << endl);
                 m_updates.erase(varp);
             }
+        }
+    }
+    void visit(AstNodeVarRef* vrefp) {
+        AstVar* const varp = vrefp->varp();
+        if (vrefp->access().isWriteOrRW() && m_updates.count(varp)) {
+            // unpack variable is being updated as a whole, cannot do diff exchange
+            UINFO(4, "Will not be optimized: " << varp->prettyNameQ() << ", unpack array updated as a whole" << endl);
+            m_updates.erase(varp);
         }
     }
 
@@ -566,6 +579,7 @@ public:
                 sourceClassp->user1(VU_NONE);  // unmark
             }
             if (!marked(sourcep->varp())) { return; }
+
             UINFO(4, "class " << targetClassp->prettyNameQ() << " is a reader for "
                               << sourcep->varp()->prettyNameQ() << endl);
             targetClassp->user1(VU_READER);  // mark
