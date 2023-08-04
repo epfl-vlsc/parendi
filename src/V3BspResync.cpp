@@ -327,29 +327,17 @@ private:
 
         uint32_t maxCostAbove(int cutRank, uint32_t costHigherRanks) {
             uint32_t cs = 0;
-            for (int r = cutRank; r >= 1; r--) {
-                for (ResyncVertex* const vtxp : m_byRank.atRank(r)) {
-                    if (r == cutRank) {
-                        cs = std::max(cs, vertexCostAbove(vtxp, costHigherRanks));
-                    } else {
-                        // r < cutRank
-                        bool crossing = true;
-                        // Any vertex v with v.rank < cutRank may also require sampling.
-                        // So need to compute their cost as well. These are te vertices that have
-                        // and out edge (v, u) such that u.rank > cutRank
-                        for (V3GraphEdge* outp = vtxp->outBeginp(); outp;
-                             outp = outp->outNextp()) {
-                            if (outp->top()->rank() <= cutRank) {
-                                crossing = false;
-                                // vtxp --> outp->top() needs to be sampled as well
-                                break;
-                            }
-                        }
-                        if (crossing) {
-                            cs = std::max(cs, vertexCostAbove(vtxp, costHigherRanks));
-                        }
-                    }
-                }
+            for (ResyncVertex* const vtxp : m_byRank.atRank(cutRank + 1)) {
+                vtxp->foreachInEdge([&](ResyncEdge* iedgep) {
+                    UASSERT(iedgep->fromp()->rank() <= cutRank, "graph not ranked properly");
+                    // fromp -> vtxp defines a variable that needs to be sampled, anything
+                    // above this sampling point can also execute in parallel
+                    const uint32_t samplingCost
+                        = iedgep->vscp()->widthWords()
+                          * iedgep->vscp()->dtypep()->arrayUnpackedElements();
+                    const uint32_t costAbove = vertexCostAbove(vtxp, costHigherRanks);
+                    cs = std::max(cs, samplingCost + costAbove);
+                });
             }
             return cs;
         }
