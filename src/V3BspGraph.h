@@ -126,7 +126,7 @@ public:
     string dotShape() const override final { return "ellipse"; }
     virtual string nameSuffix() const = 0;
     string name() const override final {
-        return cvtToHex(m_vscp) + " " + nameSuffix() + "\\n " + m_vscp->name() + "\\n";
+        return cvtToHex(m_vscp) + " " + nameSuffix() + "\\n " + m_vscp->prettyName() + "\\n";
     }
     // LCOV_EXCL_STOP
 };
