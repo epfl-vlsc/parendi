@@ -1671,7 +1671,9 @@ static inline QData VL_SHIFTL_QQQ(int obits, int, int, QData lhs, QData rhs) VL_
     if (VL_UNLIKELY(rhs >= VL_QUADSIZE)) return 0;
     return VL_CLEAN_QQ(obits, obits, lhs << rhs);
 }
-
+static inline QData VL_SHIFTL_QQI(int obits, int, int, QData lhs, IData rhs) VL_MT_SAFE {
+    return lhs << rhs;
+}
 // EMIT_RULE: VL_SHIFTR:  oclean=lclean; rclean==clean;
 // Important: Unlike most other funcs, the shift might well be a computed
 // expression.  Thus consider this when optimizing.  (And perhaps have 2 funcs?)
@@ -1741,6 +1743,10 @@ static inline IData VL_SHIFTR_IIQ(int obits, int, int, IData lhs, QData rhs) VL_
 static inline QData VL_SHIFTR_QQQ(int obits, int, int, QData lhs, QData rhs) VL_PURE {
     if (VL_UNLIKELY(rhs >= VL_QUADSIZE)) return 0;
     return VL_CLEAN_QQ(obits, obits, lhs >> rhs);
+}
+
+static inline QData VL_SHIFTR_QQI(int obits, int, int, QData lhs, IData rhs) VL_PURE {
+    return lhs >> rhs;
 }
 
 // EMIT_RULE: VL_SHIFTRS:  oclean=false; lclean=clean, rclean==clean;
