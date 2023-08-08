@@ -422,57 +422,6 @@ private:
         for (AstNodeExpr* argp = callp->argsp(); argp; argp = delegateArg(stmtp, argp)) {}
     }
 
-    std::pair<AstDelegate*, bool> mkDelegate(AstNodeStmt* const stmtp, AstCCall* callp) {
-        UASSERT(stmtp, "expected statement");
-
-        UINFO(3, "Replacing call " << callp->name() << endl);
-        bool needReEntry = true;
-        AstDelegate* delegatep = nullptr;
-        if (stmtp && callp) {
-            // DPI call
-            UASSERT_OBJ(VN_IS(stmtp, StmtExpr), stmtp, "Expected AstStmtExpr around DPI wrapper");
-            UASSERT_OBJ(VN_AS(stmtp, StmtExpr)->exprp() == callp, stmtp,
-                        "Expected AstCCall child");
-            delegatep = new AstDelegate{stmtp->fileline(), callp->funcp()->name(),
-                                        callp->argsp()->cloneTree(true)};
-            delegateDpi(callp, stmtp);
-            needReEntry = true;
-        } else if (VN_IS(stmtp, Stop) || VN_IS(stmtp, Finish)) {
-            // delegateTermination(stmtp, dpiPoint, exitLabelp);
-            delegatep = new AstDelegate{stmtp->fileline(), stmtp->prettyTypeName()};
-            needReEntry = false;
-        } else if (auto const dispp = VN_CAST(stmtp, Display)) {
-            delegatep = new AstDelegate{
-                stmtp->fileline(), "DISPLAY(\"" + dispp->fmtp()->text() + "\")",
-                dispp->fmtp()->exprsp() ? dispp->fmtp()->exprsp()->cloneTree(true) : nullptr};
-            delegateDisplay(dispp);
-            needReEntry = false;
-        } else if (auto const readWriteMemp = VN_CAST(stmtp, NodeReadWriteMem)) {
-            delegatep = new AstDelegate{stmtp->fileline(), readWriteMemp->prettyTypeName()};
-            delegatep->addArgsp(readWriteMemp->filenamep()->cloneTree(false));
-            delegatep->addArgsp(readWriteMemp->memp()->cloneTree(false));
-
-            delegateExpr(readWriteMemp, readWriteMemp->filenamep());
-            delegateExpr(readWriteMemp, readWriteMemp->memp());
-
-            if (readWriteMemp->lsbp()) {
-                delegatep->addArgsp(readWriteMemp->lsbp()->cloneTree(false));
-                delegateExpr(readWriteMemp, readWriteMemp->lsbp());
-            }
-            if (readWriteMemp->lsbp()) {
-                delegatep->addArgsp(readWriteMemp->msbp()->cloneTree(false));
-                delegateExpr(readWriteMemp, readWriteMemp->msbp());
-            }
-            needReEntry = true;
-
-        } else {
-            // error?
-            UASSERT_OBJ(false, stmtp,
-                        "Can not handle delegation of node " << stmtp->prettyTypeName() << endl);
-        }
-        return {delegatep, needReEntry};
-    }
-
     void injectReEntry(AstCFunc* cfuncp) {
         UASSERT_OBJ(m_scopep, cfuncp, "expected scope");
         UINFO(3,
@@ -504,72 +453,92 @@ private:
             m_classp->fileline(),
             new AstNot{m_classp->fileline(),
                        new AstVarRef{m_classp->fileline(), m_dpiKit.reEntryp, VAccess::READ}},
-            nullptr, nullptr};
-        auto mkDpiReset = [&]() {
-            return new AstAssign{m_classp->fileline(),
-                          new AstVarRef{m_classp->fileline(), m_dpiKit.dpiPoint, VAccess::WRITE},
-                          new AstConst{m_classp->fileline(), AstConst::WidthedValue{},
-                                       m_dpiKit.dpiPoint->width(), 0}};
-        };
+            new AstJumpGo{m_classp->fileline(), startLabelp}};
 
-        jumpControlp->addThensp(mkDpiReset());
-        jumpControlp->addThensp(new AstJumpGo{m_classp->fileline(), startLabelp});
         AstIf* lastIfp = jumpControlp;
         int dpiIndex = 0;
         AstJumpBlock* lastJBlockp = jblockStartp;
         AstVarScope* instVscp = m_records.getInst(m_classp);
         UASSERT_OBJ(instVscp, m_classp, "Could not find instance!");
         for (const auto& dpiCallp : m_dpiKit.callsp) {
-            dpiIndex++;
             AstNodeStmt* const stmtp = dpiCallp.first;
             AstCCall* const callp = dpiCallp.second;
-            const auto delegatePair = mkDelegate(stmtp, callp);
-            const bool needReEntry = delegatePair.second;
-            AstDelegate* const delegatep = delegatePair.first;
+            UASSERT(stmtp, "expected statement");
 
+            UINFO(3, "Replacing call " << callp->name() << endl);
+            bool needReEntry = true;
+            AstDelegate* delegatep = nullptr;
+            if (stmtp && callp) {
+                // DPI call
+                UASSERT_OBJ(VN_IS(stmtp, StmtExpr), stmtp,
+                            "Expected AstStmtExpr around DPI wrapper");
+                UASSERT_OBJ(VN_AS(stmtp, StmtExpr)->exprp() == callp, stmtp,
+                            "Expected AstCCall child");
+                delegatep = new AstDelegate{stmtp->fileline(), callp->funcp()->name(),
+                                            callp->argsp()->cloneTree(true)};
+                delegateDpi(callp, stmtp);
+            } else if (VN_IS(stmtp, Stop) || VN_IS(stmtp, Finish)) {
+                // delegateTermination(stmtp, dpiPoint, exitLabelp);
+                delegatep = new AstDelegate{stmtp->fileline(), stmtp->prettyTypeName()};
+                needReEntry = false;
+            } else if (auto const dispp = VN_CAST(stmtp, Display)) {
+                delegatep = new AstDelegate{
+                    stmtp->fileline(), "DISPLAY(\"" + dispp->fmtp()->text() + "\")",
+                    dispp->fmtp()->exprsp() ? dispp->fmtp()->exprsp()->cloneTree(true) : nullptr};
+                delegateDisplay(dispp);
+            } else if (auto const readWriteMemp = VN_CAST(stmtp, NodeReadWriteMem)) {
+                delegatep = new AstDelegate{stmtp->fileline(), readWriteMemp->prettyTypeName()};
+                delegatep->addArgsp(readWriteMemp->filenamep()->cloneTree(false));
+                delegatep->addArgsp(readWriteMemp->memp()->cloneTree(false));
 
+                delegateExpr(readWriteMemp, readWriteMemp->filenamep());
+                delegateExpr(readWriteMemp, readWriteMemp->memp());
 
-            auto dpiBitSel = [&](VAccess access, int lsb) {
-                return new AstSel{stmtp->fileline(),
-                                  new AstVarRef{stmtp->fileline(), m_dpiKit.dpiPoint, access}, lsb,
-                                  1};
-            };
-
-            AstAssign* const dpiSetp
-                = new AstAssign{stmtp->fileline(), dpiBitSel(VAccess::WRITE, 0),
-                                new AstConst{stmtp->fileline(), AstConst::BitTrue{}, true}};
-            dpiSetp->addNext(
-                new AstAssign{stmtp->fileline(), dpiBitSel(VAccess::WRITE, dpiIndex),
-                              new AstConst{stmtp->fileline(), AstConst::BitTrue{}, true}});
-
+                if (readWriteMemp->lsbp()) {
+                    delegatep->addArgsp(readWriteMemp->lsbp()->cloneTree(false));
+                    delegateExpr(readWriteMemp, readWriteMemp->lsbp());
+                }
+                if (readWriteMemp->lsbp()) {
+                    delegatep->addArgsp(readWriteMemp->msbp()->cloneTree(false));
+                    delegateExpr(readWriteMemp, readWriteMemp->msbp());
+                }
+            } else {
+                // error?
+                UASSERT_OBJ(false, stmtp,
+                            "Can not handle delegation of node " << stmtp->prettyTypeName()
+                                                                 << endl);
+            }
+            V3Number dpiPoint{stmtp->fileline(), m_dpiKit.dpiPoint->width(), 0};
             // dpiPoint is bit vector whose LSB signifies that there is a DPI
             // call and the rest of the bits are used as DPI identifiers
             // dpiPoint[0] --> dpi enabled
             // dpiPoint[1 + dpiIndex] -> dpi id (one-hot)
+            dpiPoint.setBit(0, 1);
+            dpiPoint.setBit(++dpiIndex, 1);
 
+            AstAssign* const dpiSetp = new AstAssign{
+                stmtp->fileline(),
+                new AstVarRef{stmtp->fileline(), m_dpiKit.dpiPoint, VAccess::WRITE},
+                new AstConst{stmtp->fileline(), dpiPoint}};
             stmtp->replaceWith(dpiSetp);
-            dpiSetp->nextp()->addNextHere(delegatep);
+            AstJumpGo* const goExitp = new AstJumpGo{stmtp->fileline(), exitLabelp};
+            dpiSetp->addNextHere(goExitp);
+            dpiSetp->addHereThisAsNext(delegatep);
             // link the stmtp to the host function
-            auto dpiMemSelBit = [&](int lsb) {
-                AstMemberSel* const dpiMemSelp = new AstMemberSel{
-                    stmtp->fileline(), new AstVarRef{stmtp->fileline(), instVscp, VAccess::READ},
-                    VFlagChildDType{}, m_dpiKit.dpiPoint->varp()->name()};
-                dpiMemSelp->dtypeFrom(m_dpiKit.dpiPoint->varp());
-                dpiMemSelp->varp(m_dpiKit.dpiPoint->varp());
-                return new AstSel{dpiMemSelp->fileline(), dpiMemSelp, lsb, 1};
-            };
-            m_dpiHandlep->addStmtsp(
-                new AstIf{stmtp->fileline(),
-                          new AstAnd{stmtp->fileline(), dpiMemSelBit(0), dpiMemSelBit(dpiIndex)},
-                          stmtp, nullptr});
+            AstMemberSel* const dpiSelp = new AstMemberSel{
+                stmtp->fileline(), new AstVarRef{stmtp->fileline(), instVscp, VAccess::READ},
+                VFlagChildDType{}, m_dpiKit.dpiPoint->varp()->name()};
+            dpiSelp->dtypeFrom(m_dpiKit.dpiPoint->varp());
+            dpiSelp->varp(m_dpiKit.dpiPoint->varp());
+            m_dpiHandlep->addStmtsp(new AstIf{
+                stmtp->fileline(),
+                new AstEq{stmtp->fileline(), dpiSelp, new AstConst{stmtp->fileline(), dpiPoint}},
+                stmtp, nullptr});
 
             if (!needReEntry) {
                 // $finish and $stop terminate execution and do not need rentry points
                 continue;
             }
-
-            AstJumpGo* const goExitp = new AstJumpGo{stmtp->fileline(), exitLabelp};
-            delegatep->addNextHere(goExitp);
 
             AstJumpBlock* const jblockp = new AstJumpBlock{stmtp->fileline(), nullptr};
             AstJumpLabel* const labelp = new AstJumpLabel{stmtp->fileline(), jblockp};
@@ -580,7 +549,11 @@ private:
 
             goExitp->addNextHere(labelp);
 
-            labelp->addNextHere(mkDpiReset());
+            AstAssign* const dpiResetp = new AstAssign{
+                stmtp->fileline(),
+                new AstVarRef{stmtp->fileline(), m_dpiKit.dpiPoint, VAccess::WRITE},
+                new AstConst{stmtp->fileline(), AstConst::WidthedValue{}, dpiPoint.width(), 0}};
+            labelp->addNextHere(dpiResetp);
 
             labelp->addNextHere(new AstComment{
                 labelp->fileline(),
@@ -588,17 +561,15 @@ private:
                     + (callp ? "DPI " + callp->funcp()->name() : stmtp->prettyTypeName())});
 
             // entry point calculation:
-
             AstIf* const ifp = new AstIf{
                 stmtp->fileline(),
-                new AstAnd{stmtp->fileline(),
-                          dpiBitSel(VAccess::READ, 0),
-                          dpiBitSel(VAccess::READ, dpiIndex)},
+                new AstEq{stmtp->fileline(),
+                          new AstVarRef{stmtp->fileline(), m_dpiKit.dpiPoint, VAccess::READ},
+                          new AstConst{stmtp->fileline(), dpiPoint}},
                 new AstJumpGo{stmtp->fileline(), labelp}, nullptr};
             lastIfp->addElsesp(ifp);
             lastIfp = ifp;
         }
-        lastIfp->addElsesp(mkDpiReset());
         lastIfp->addElsesp(new AstJumpGo{m_classp->fileline(), exitLabelp});
         lastJBlockp->addStmtsp(jumpControlp);
         lastJBlockp->addStmtsp(startLabelp);
