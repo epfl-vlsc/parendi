@@ -28,6 +28,8 @@
 #include "V3BspSched.h"
 #include "V3Const.h"
 #include "V3Dead.h"
+#include "V3EmitV.h"
+#include "V3File.h"
 #include "V3InstrCount.h"
 #include "V3PairingHeap.h"
 #include "V3Stats.h"
@@ -365,6 +367,13 @@ private:
         VertexByRank verticesp = VertexByRank::build(graphp);
 
         SeqVertex* seqp = dynamic_cast<SeqVertex*>(verticesp.back().front());
+        // if (std::any_of(seqp->consumersp().begin(), seqp->consumersp().end(),
+        //                 [&](const auto& p) { return p.first == graphp; })) {
+        //     UINFO(5,
+        //           "Path to self " << graphp->index() << " with cost " << graphp->cost() << endl);
+        //     removeFromHeap(graphp);
+        //     return;
+        // }
         if (seqp->unopt()) {
             UINFO(5, "Unoptimizable partition " << graphp->index() << " with cost "
                                                 << graphp->cost() << endl);
@@ -607,6 +616,8 @@ private:
     std::vector<std::unique_ptr<ResyncGraph>>& m_graphsp;
     V3Sched::LogicClasses& m_logicClasses;
 
+    std::vector<AstNode*> m_dbgNewsp;
+    inline void pushDbgNew(AstNode* nodep) { m_dbgNewsp.push_back(nodep); }
     AstSenTree* m_combSensep = nullptr;
     AstSenTree* m_initialSensep = nullptr;
     const VNUser1InUse m_user1InUse;
@@ -633,6 +644,9 @@ private:
         oldp->scopep()->modp()->addStmtsp(varp);
         AstVarScope* const newp = new AstVarScope{flp, oldp->scopep(), varp};
         newp->scopep()->addVarsp(newp);
+        pushDbgNew(varp);
+        pushDbgNew(newp);
+
         return newp;
     }
     inline AstVarRef* mkVRef(AstVarScope* const vscp, VAccess access) {
@@ -692,6 +706,9 @@ private:
             AstActive* const newActivep = new AstActive{flp, "resync::combseq", sentreep};
             newActivep->addStmtsp(newAlwaysp);
             oldVscp->scopep()->addBlocksp(newActivep);
+
+            pushDbgNew(newActivep);
+
         } else {
             // sequential version exists
             AstVarScope* const newVscp = m_newVscpByDomain(oldVscp)[sentreep];
@@ -719,6 +736,10 @@ private:
                 m_newVscpByDomain(oldVscp).emplace(vtxp->sentreep(), newVscp);
                 UINFO(8, "Creating new comb signal " << newVscp->prettyNameQ() << " for "
                                                      << oldVscp->prettyNameQ() << endl);
+            } else {
+                AstVarScope* const newVscp = m_newVscpByDomain(oldVscp)[vtxp->sentreep()];
+                UINFO(8, "Using cached comb lv " << newVscp << endl);
+                LocalSubst::set(oldVscp, newVscp);
             }
         });
     }
@@ -731,6 +752,8 @@ private:
             UINFO(8, "Reconstructing 'pushed-down' combinational logic "
                          << vtxp->logicp().logicp << " under " << vtxp->logicp().activep << endl);
             AstNode* const newp = vtxp->logicp().logicp->cloneTree(false);
+
+            pushDbgNew(newp);
 
             m_newLogicByDomain(vtxp->logicp().logicp).emplace(vtxp->sentreep(), newp);
 
@@ -767,6 +790,9 @@ private:
             = new AstActive{m_netlistp->fileline(), "resync::seqcomb", m_combSensep};
         m_netlistp->topScopep()->scopep()->addBlocksp(newActivep);
         newActivep->addStmtsp(newAlwaysp);
+
+        pushDbgNew(newActivep);
+
         for (const LogicWithActive& pair : vtxp->logicsp()) {
             UINFO(8, "Constructing comb from seq " << pair.logicp << endl);
             if (VN_IS(pair.logicp, AssignPost) || VN_IS(pair.logicp, AssignPre)) {
@@ -843,10 +869,10 @@ private:
 
         AstActive* const firstActivep = new AstActive{flp, "resync::first", m_initialSensep};
         scopep->addBlocksp(firstActivep);
+        pushDbgNew(firstActivep);
         AstInitial* const initBlockp = new AstInitial{flp, nullptr};
         firstActivep->addStmtsp(initBlockp);
         initBlockp->addStmtsp(new AstAssign{flp, mkLV(firstVscp), new AstConst{flp, 1U}});
-
         // create a new variable for each variable that was commited in the original
         // sequential block:
         // for each vscp commit create newVscp
@@ -882,6 +908,7 @@ private:
 
         AstActive* const seqActivep = new AstActive{flp, "resync::seqseq", vtxp->sentreep()};
         scopep->addBlocksp(seqActivep);
+        pushDbgNew(seqActivep);
         AstAlways* const seqAlwaysp = new AstAlways{flp, VAlwaysKwd::ALWAYS_FF, nullptr, nullptr};
         seqActivep->addStmtsp(seqAlwaysp);
 
@@ -915,7 +942,11 @@ private:
     }
 
     void reconstruct(const std::unique_ptr<ResyncGraph>& graphp) {
-
+        // re-rank and re-sort the graph, since new elements have been added that might have broken
+        // the order
+        graphp->rank();
+        graphp->sortVertices();
+        // the code below assumes topological order (do not delete above)
         if (dump() >= 10) {
             graphp->dumpDotFilePrefixed("resync_post_" + cvtToStr(graphp->index()));
         }
@@ -980,6 +1011,20 @@ public:
             VL_DANGLING(graphp);
         }
         graphsp.clear();
+
+        if (dump() >= 20) {
+            std::unique_ptr<std::ofstream> ofsp{
+                V3File::new_ofstream(v3Global.debugFilename("newNodes.v"))};
+            std::unique_ptr<std::ofstream> ofsp2{
+                V3File::new_ofstream(v3Global.debugFilename("newNodes.tree"))};
+            // const std::string treeFileName = v3Global.debugFilename("newNodes.tree");
+            for (AstNode* const nodep : m_dbgNewsp) {
+                V3EmitV::verilogForTree(nodep, *ofsp);
+                nodep->dumpTree(*ofsp2);
+            }
+            ofsp->close();
+            ofsp2->close();
+        }
     }
 };
 
