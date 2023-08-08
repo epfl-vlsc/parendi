@@ -565,6 +565,12 @@ poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name
         poplar::UNSIGNED_INT,
         {std::max(size, 2u) /*pad single-word tensors to 8 bytes to optimize on-tile copies*/},
         name);
+    if (size > 1) {
+        std::vector<uint32_t> zeros(size);
+        graph->setInitialValue(t, poplar::ArrayRef(zeros));
+    } else {
+        graph->setInitialValue(t, 0u);
+    }
     tensors.emplace(name, t);
     return t;
 #else

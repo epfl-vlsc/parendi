@@ -633,7 +633,7 @@ private:
         AstVarScope* const vscp = new AstVarScope{varp->fileline(), m_cfuncp->scopep(), varp};
         m_cfuncp->scopep()->addVarsp(vscp);
         m_stmtp->addHereThisAsNext(varp);
-        if (vrefp->access().isReadOrRW()) {
+        {
             const auto handle = m_parent.m_handles(memselp->varp()).hostRead;
             UASSERT_OBJ(!handle.empty(), vrefp, "empty read handle");
             // MEMBERSEL cls.var becomes ctx.getHostData<dtype>(var, dtype{})
@@ -684,7 +684,7 @@ public:
 };
 
 void PoplarComputeGraphBuilder::patchHostFuncCall(AstCFunc* cfuncp) {
-    // go through all the statements within this functin and replace MemberSel
+    // go through all the statements within this function and replace MemberSel
     // nodes:
     // CFunc:
     //    ...
@@ -693,7 +693,7 @@ void PoplarComputeGraphBuilder::patchHostFuncCall(AstCFunc* cfuncp) {
     // CFunc:
     //    ...
     //    var arv = getHostData(...)
-    //    var blv
+    //    var blv = getHostData(...)
     //    Stmt(blv, arv)
     //    setHostData(blv)
     PoplarHostHandleHardenVisitor{cfuncp, *this};

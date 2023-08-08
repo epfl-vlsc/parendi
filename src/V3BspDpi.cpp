@@ -97,13 +97,10 @@ public:
         netlist.append(s);
     }
     void setInst(AstClass* const classp, AstVarScope* const vscp) {
-        if (!vscp) {
-            UASSERT_OBJ(vscp, classp, "no instance for " << classp->name() << endl);
-        }
-        if (!classp) {
-            UASSERT_OBJ(classp, vscp, "not class for instance " << vscp << endl);
-        }
-        // UASSERT(classp && vscp, "expected non-null arguments but got " << classp << " and " << vscp << endl);
+        if (!vscp) { UASSERT_OBJ(vscp, classp, "no instance for " << classp->name() << endl); }
+        if (!classp) { UASSERT_OBJ(classp, vscp, "not class for instance " << vscp << endl); }
+        // UASSERT(classp && vscp, "expected non-null arguments but got " << classp << " and " <<
+        // vscp << endl);
         instances[classp] = vscp;
     }
 
@@ -360,7 +357,9 @@ private:
             // but we need to add extra flags to it
             VBspFlag flag = argVRefp->varp()->bspFlag();
             if (argVRefp->access().isWriteOnly()) {
-                flag.append(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_HOSTWRITE);
+                flag.append(VBspFlag::MEMBER_INPUT)
+                    .append(VBspFlag::MEMBER_HOSTWRITE)
+                    .append(VBspFlag::MEMBER_HOSTREAD);
             } else if (argVRefp->access().isWriteOrRW()) {
                 if (flag.hasLocal()) flag = {VBspFlag::MEMBER_NA};
                 flag.append(VBspFlag::MEMBER_INPUT)
@@ -626,9 +625,6 @@ private:
     void visit(AstFinish* finishp) override { m_dpiKit.callsp.emplace_back(finishp, nullptr); }
     void visit(AstStop* stopp) override { m_dpiKit.callsp.emplace_back(stopp, nullptr); }
 
-    void visit(AstReadMemProxy* memp) override {
-        // skip
-    }
     void visit(AstNodeReadWriteMem* rwMemp) override {
         m_dpiKit.callsp.emplace_back(rwMemp, nullptr);
     }

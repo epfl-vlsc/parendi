@@ -41,25 +41,6 @@ private:
     // const bool m_slow;
     V3UniqueNames m_uniqueNames;
     bool m_usesSupervisor = false;
-    // hacky override
-    void visit(AstReadMemProxy* nodep) override {
-        puts(nodep->cFuncPrefixp());
-        puts("(");
-        UASSERT_OBJ(!nodep->lsbp() && !nodep->msbp(), nodep, "can not do start/end address!");
-        const AstVarRefView* const viewp = VN_CAST(nodep->memp(), VarRefView);
-        const AstVarRefView* const hviewp = VN_CAST(nodep->filenamep(), VarRefView);
-        if (!viewp || !hviewp) { nodep->v3error(nodep->verilogKwd() << " expected VarRefView"); }
-        AstVarRef* const vrefp = viewp->vrefp();
-        AstVarRef* const hvrefp = hviewp->vrefp();
-        uint32_t const numWords = vrefp->varp()->dtypeSkipRefp()->widthWords()
-                                  * vrefp->varp()->dtypep()->arrayUnpackedElements();
-        puts(cvtToStr(numWords));
-        puts(", ");
-        iterateAndNextNull(nodep->filenamep());
-        puts(", ");
-        iterateAndNextNull(nodep->memp());
-        puts(");\n");
-    }
 
     void maybeOpenNextFile() {
         if (!m_ofp || splitNeeded()) {
