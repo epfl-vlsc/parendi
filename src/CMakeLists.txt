@@ -48,7 +48,6 @@ set(HEADERS
     V3BspDifferential.h
     V3BspDpi.h
     V3BspGraph.h
-    V3BspIpuProfile.h
     V3BspMerger.h
     V3BspModules.h
     V3BspNetlistGraph.h
@@ -206,7 +205,6 @@ set(COMMON_SOURCES
     V3BspDifferential.cpp
     V3BspDpi.cpp
     V3BspGraph.cpp
-    V3BspIpuProfile.cpp
     V3BspMerger.cpp
     V3BspModules.cpp
     V3BspPliCheck.cpp

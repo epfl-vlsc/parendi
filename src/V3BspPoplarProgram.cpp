@@ -22,7 +22,6 @@
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3BspDpi.h"
-#include "V3BspIpuProfile.h"
 #include "V3BspModules.h"
 #include "V3BspPlusArgs.h"
 #include "V3EmitCBase.h"
@@ -708,9 +707,6 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
 
     // delegate all dpi calls to the host
     V3BspDpi::delegateAll(nodep);
-
-    // optionally instrument the top compute function
-    V3BspIpuProfile::instrument(nodep);
 
     { PoplarLegalizeFieldNamesVisitor{nodep}; }
     V3Global::dumpCheckGlobalTree("bspLegal", 0, dumpTree() >= 1);
