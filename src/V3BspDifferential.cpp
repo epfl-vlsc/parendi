@@ -112,7 +112,8 @@ private:
         AstVar* const varp = vrefp->varp();
         if (vrefp->access().isWriteOrRW() && m_updates.count(varp)) {
             // unpack variable is being updated as a whole, cannot do diff exchange
-            UINFO(4, "Will not be optimized: " << varp->prettyNameQ() << ", unpack array updated as a whole" << endl);
+            UINFO(4, "Will not be optimized: " << varp->prettyNameQ()
+                                               << ", unpack array updated as a whole" << endl);
             m_updates.erase(varp);
         }
     }
@@ -150,7 +151,7 @@ private:
     void visit(AstVarRef* vrefp) override {
 
         AstVarScope* const substp = VN_CAST(vrefp->varScopep()->user3p(), VarScope);
-        UASSERT_OBJ(substp, vrefp, "no subst");
+        UASSERT_OBJ(substp, vrefp, "no subst for " << vrefp->prettyNameQ() << endl);
         vrefp->name(substp->varp()->name());
         vrefp->varp(substp->varp());
         // UINFO(3, "Set vscp " << substp << endl);
@@ -213,6 +214,7 @@ private:
     // STATE:
     // AstClass::user1()         -> needs visiting
     // AstVar::user1()           -> true if is class member var
+    // AstNodeAssign::user1()    -> already processed
     // AstVar::user2p()          -> AstVar in the sender
     // AstClass::user2p()        -> AstVarScope that instantiates it in the top module
     // AstVarScope::user3p()     -> substitution AstVarScope, clear on cfuncp
@@ -290,7 +292,7 @@ private:
             scratchpad.subst.condp->user3p(condVscp);
             for (AstVarScope* const rvSourcep : scratchpad.subst.rvsp) {
 
-                // TODO: we may already have this cloned this variable here, optimize it
+                // TODO: we may already have this variable clone here, so optimize it...
                 AstVar* const cloneVarp = new AstVar{rvSourcep->fileline(), VVarType::MEMBER,
                                                      m_newNames.get(rvSourcep->varp()->name()),
                                                      rvSourcep->varp()->dtypep()};
@@ -408,6 +410,7 @@ private:
                                                 m_newNames.get("en"), condDTypep};
             condVarp->lifetime(VLifetime::STATIC);
             condVarp->bspFlag({VBspFlag::MEMBER_OUTPUT});
+            condVarp->user1(true);
             AstVarScope* const condVscp
                 = new AstVarScope{vrefp->fileline(), vrefp->varScopep()->scopep(), condVarp};
             condVscp->scopep()->addVarsp(condVscp);
@@ -444,32 +447,64 @@ private:
                 m_initComputep->addStmtsp(initClearp);
             }
         }
-        // find the parent statement (should be NodAssign)
-        AstNode* parentp = aselp;
-        while (!VN_IS(parentp, NodeStmt) && parentp) { parentp = parentp->backp(); }
-        UASSERT_OBJ(parentp, aselp, "no parent stmt");
+        AstNodeAssign* const parentAssignp = [aselp]() {
+            // find the parent statement (should be NodeAssign)
+            AstNode* parentp = aselp;
+            while (!VN_IS(parentp, NodeStmt) && parentp) { parentp = parentp->backp(); }
+            UASSERT_OBJ(parentp, aselp, "no parent stmt");
+            return VN_AS(parentp, NodeAssign);
+        }();
+        if (parentAssignp->user1()) {
+            return; // already processed
+        }
+        parentAssignp->user1(true);
+        // if rhs is not simple varref, make it. Pathologically the rhs could be ArraySel itself,
+        // so we may end up copying the whole array on the rhs if we don't "capture" its selection here.
+        if (!VN_IS(parentAssignp->rhsp(), VarRef)) {
+            UINFO(4, "Making rhs of assign a varref " << parentAssignp << endl);
+            AstVar* rhsVarp = new AstVar{parentAssignp->rhsp()->fileline(), VVarType::MEMBER,
+                                         m_newNames.get(parentAssignp->rhsp()),
+                                         parentAssignp->rhsp()->dtypep()};
+            rhsVarp->bspFlag({VBspFlag::MEMBER_OUTPUT, VBspFlag::MEMBER_LOCAL});
+            rhsVarp->lifetime(VLifetime::STATIC);
+            rhsVarp->user1(true);  // is a member
+            vrefp->varScopep()->scopep()->modp()->addStmtsp(rhsVarp);
+            AstVarScope* const rhsVscp
+                = new AstVarScope{rhsVarp->fileline(), vrefp->varScopep()->scopep(), rhsVarp};
+            vrefp->varScopep()->scopep()->addVarsp(rhsVscp);
+            AstAssign* const rhsAssignp
+                = new AstAssign{parentAssignp->fileline(),
+                                new AstVarRef{rhsVscp->fileline(), rhsVscp, VAccess::WRITE},
+                                parentAssignp->rhsp()->unlinkFrBack()};
+            parentAssignp->addHereThisAsNext(rhsAssignp);
+            parentAssignp->rhsp(new AstVarRef{rhsVarp->fileline(), rhsVscp, VAccess::READ});
+        }
         // insert
         // condVcsp[ith] = 1'b1;
         // right after parentp
-        AstAssign* const assignp = new AstAssign{
+        AstAssign* const condAssignp = new AstAssign{
             vrefp->fileline(),
             new AstSel{vrefp->fileline(),
                        new AstVarRef{vrefp->fileline(), scratchpad.subst.condp, VAccess::WRITE},
                        static_cast<int>(scratchpad.subst.recipesp.size()), 1},
             new AstConst{vrefp->fileline(), AstConst::WidthedValue{}, 1, 1}};
-        parentp->addNextHere(assignp);
-        scratchpad.subst.recipesp.push_back(parentp);
+
+        parentAssignp->addNextHere(condAssignp);
+
+        scratchpad.subst.recipesp.push_back(parentAssignp);
         // any VarRef under parentp that is an RV should be captured as a class member
         scratchpad.origVscp = vrefp->varScopep();
-        parentp->foreach([&](AstNodeVarRef* rvp) {
+        parentAssignp->foreach([&](AstNodeVarRef* rvp) {
             if (rvp->access().isWriteOrRW() && rvp != vrefp) {
-                parentp->v3fatal("Multiple LVs " << rvp->varp()->prettyNameQ() << " and "
-                                                 << vrefp->varp()->prettyNameQ() << endl);
-            } else if (rvp->access().isReadOrRW() && rvp != vrefp && !rvp->varp()->user1()) {
-                UINFO(3, "Promoting " << rvp->varp()->prettyNameQ() << " to member " << endl);
-                rvp->varp()->user1(true);
+                parentAssignp->v3fatal("Multiple LVs " << rvp->varp()->prettyNameQ() << " and "
+                                                       << vrefp->varp()->prettyNameQ() << endl);
+            } else if (rvp->access().isReadOrRW() && rvp != vrefp) {
+                if (!rvp->varp()->user1()) {  // not a class member, should be made one
+                    UINFO(3, "Promoting " << rvp->varp()->prettyNameQ() << " to member " << endl);
+                    rvp->varp()->user1(true);
+                    vrefp->varScopep()->scopep()->modp()->addStmtsp(rvp->varp()->unlinkFrBack());
+                }
                 scratchpad.subst.rvsp.push_back(rvp->varScopep());
-                vrefp->varScopep()->scopep()->modp()->addStmtsp(rvp->varp()->unlinkFrBack());
             }
         });
     }
