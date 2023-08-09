@@ -202,7 +202,7 @@ void schedule(AstNetlist* netlistp) {
     if (v3Global.opt.fIpuRetime()) {
         Retiming::retimeAll(netlistp);
         // V3Stats::statsStage("bspRetime");
-    } else if (v3Global.opt.fIpuResync()) {
+    } else if (v3Global.opt.fIpuResync() && v3Global.opt.resyncThreshold() > 0.0) {
         Resync::resyncAll(netlistp);
         // V3Stats::statsStage("bspResync");
     }

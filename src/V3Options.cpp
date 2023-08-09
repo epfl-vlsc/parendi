@@ -1228,7 +1228,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-fipu-diff-exchange", FOnOff, &m_fIpuDiffExchange);
     DECL_OPTION("-fsplit-extra-wide", FOnOff, &m_fSplitExtraWide);
     DECL_OPTION("-fipu-resync", FOnOff, &m_fIpuResync);
-    
+
     DECL_OPTION("-G", CbPartialMatch, [this](const char* optp) { addParameter(optp, false); });
     DECL_OPTION("-gate-stmts", Set, &m_gateStmts);
     DECL_OPTION("-gdb", CbCall, []() {});  // Processed only in bin/verilator shell
@@ -1611,10 +1611,10 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-diff-exchange-threshold", CbVal, [this](const char* valp) {
         m_diffExchangeThreshold = std::atoi(valp);
     });
-    DECL_OPTION("-ipu-profile", CbVal, [this, fl](const char* valp) {
-        m_ipu_profile = std::atoi(valp);
-        if (m_ipu_profile <= 0 || m_ipu_profile > (1 << 16)) {
-            fl->v3fatal("Bad value for --ipu-profile " << m_ipu_profile << endl);
+    DECL_OPTION("-resync-threshold", CbVal, [this, fl](const char* valp) {
+        m_resyncThreshold = std::atof(valp);
+        if (m_resyncThreshold > 1.0 || m_resyncThreshold < 0.0) {
+            fl->v3fatal("--resync-threshold should be >= 0.0 and =< 1.0 but was given " << valp << endl);
         }
     });
     DECL_OPTION("-Wwarn-", CbPartialMatch, [this, fl, &parser](const char* optp) {

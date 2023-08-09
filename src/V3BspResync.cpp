@@ -179,7 +179,7 @@ public:
             for (V3GraphVertex* vtxp = depp->verticesBeginp(); vtxp;
                  vtxp = vtxp->verticesNextp()) {
                 ConstrDefVertex* const defp = dynamic_cast<ConstrDefVertex*>(vtxp);
-                nVtx ++;
+                nVtx++;
                 if (!defp) continue;
                 if (defp->outEmpty()) {
                     // is it dead?
@@ -235,7 +235,6 @@ public:
                     // Link this graph to the producer
                     seqp->consumersp().insert({graphp.get(), readp});
                 }
-
             }
             const uint64_t timeEnd = V3Os::timeUsecs();
             UINFO(4, "Took graph "
@@ -609,6 +608,16 @@ private:
             removeFromHeap(graphp);
         }
     }
+
+    uint32_t findThreshold(uint32_t maxCost) const {
+        const double frac = std::min(1.0, std::max(1.0 - v3Global.opt.resyncThreshold(), 0.0));
+        const double costD = static_cast<double>(maxCost);
+        if (frac == 0.0) {
+            return 0;
+        } else {
+            return static_cast<uint32_t>(costD * frac);
+        }
+    }
     void doApply() {
 
         // insert all graphs into the heap
@@ -618,7 +627,8 @@ private:
             return;
         } else {
             m_statsCostBefore = m_heap.max()->key().graphp->cost();
-            m_resyncThreshold = m_heap.max()->key().graphp->cost() / 2;
+
+            m_resyncThreshold = findThreshold(m_heap.max()->key().graphp->cost());
             UINFO(3, "Will try to resync partitions with cost higher than " << m_resyncThreshold
                                                                             << endl);
         }
@@ -648,7 +658,55 @@ public:
     inline void apply() { doApply(); }
     inline bool changed() { return m_changed; }
 };
+class ResyncAssignUnroller final : public VNVisitor {
+private:
+    AstAssign* m_topp = nullptr;
+    AstArraySel* mkSel(AstNodeExpr* exprp, int index) const {
+        return new AstArraySel{exprp->fileline(), exprp->cloneTree(false), index};
+    }
+    void visit(AstAssign* nodep) override {
 
+        AstNodeDType* const dtp = nodep->lhsp()->dtypep()->skipRefp();
+
+        if (const AstUnpackArrayDType* const arrayp = VN_CAST(dtp, UnpackArrayDType)) {
+            AstAssign* unrolledp = nullptr;
+            const int numElems = arrayp->elementsConst();
+            for (int ix = 0; ix < numElems; ix++) {
+                AstAssign* const newp = new AstAssign{nodep->fileline(), mkSel(nodep->lhsp(), ix),
+                                                      mkSel(nodep->rhsp(), ix)};
+                unrolledp = AstNode::addNext(unrolledp, newp);
+
+            }
+            nodep->replaceWith(unrolledp);
+            VL_DO_DANGLING(nodep->deleteTree(), nodep);
+            return;
+        }
+        iterateChildren(nodep);
+    }
+    void visit(AstNode* nodep) override { iterateChildren(nodep); }
+
+    explicit ResyncAssignUnroller(AstVarScope* lhsp, AstVarScope* rhsp) {
+        AstAssign* assignp = new AstAssign{lhsp->fileline(),
+                                           new AstVarRef{lhsp->fileline(), lhsp, VAccess::WRITE},
+                                           new AstVarRef{rhsp->fileline(), rhsp, VAccess::READ}};
+        if (VN_IS(lhsp->dtypep()->skipRefp(), UnpackArrayDType)) {
+            AstIf* ifp = new AstIf{assignp->fileline(), new AstConst{assignp->fileline(), 1},
+                                   assignp, nullptr};
+            iterate(ifp);
+            m_topp = VN_AS(ifp->thensp()->unlinkFrBackWithNext(), Assign);
+            VL_DO_DANGLING(ifp->deleteTree(), ifp);
+        } else {
+            m_topp = assignp;
+        }
+    }
+
+public:
+    // create an assignment between lhsp and rhsp, unroll the assignment if the
+    // lhsp and rhsp are unpack.
+    static AstAssign* unrolled(AstVarScope* lhsp, AstVarScope* rhsp) {
+        return ResyncAssignUnroller{lhsp, rhsp}.m_topp;
+    }
+};
 class ResyncVisitor final : VNVisitor {
 private:
     V3UniqueNames m_newNames;
@@ -740,7 +798,7 @@ private:
             FileLine* flp = oldVscp->fileline();
             UINFO(8, "creating sampler " << newVscp->prettyNameQ() << " for "
                                          << oldVscp->prettyNameQ() << endl);
-            AstAssign* const assignp = new AstAssign{flp, mkLV(newVscp), mkRV(oldVscp)};
+            AstAssign* const assignp = ResyncAssignUnroller::unrolled(newVscp, oldVscp);
             AstAlways* const newAlwaysp
                 = new AstAlways{flp, VAlwaysKwd::ALWAYS_FF, nullptr, assignp};
             AstActive* const newActivep = new AstActive{flp, "resync::combseq", sentreep};
@@ -790,7 +848,7 @@ private:
         AstNode* newp = nullptr;
         if (!m_newLogicByDomain(vtxp->logicp().logicp).count(vtxp->sentreep())) {
             UINFO(10, "Reconstructing 'pushed-down' combinational logic "
-                         << vtxp->logicp().logicp << " under " << vtxp->logicp().activep << endl);
+                          << vtxp->logicp().logicp << " under " << vtxp->logicp().activep << endl);
             AstNode* const newp = vtxp->logicp().logicp->cloneTree(false);
 
             pushDbgNew(newp);
@@ -840,6 +898,8 @@ private:
                 // otherwise)
                 AstNodeAssign* assignOldp = VN_AS(pair.logicp, NodeAssign);
                 // rewrite as vanilla Assign
+                UASSERT_OBJ(!VN_IS(assignOldp->lhsp()->dtypep()->skipRefp(), UnpackArrayDType),
+                            assignOldp, "did not expect UnpackArray as lhsp in AssignPost/Pre");
                 AstAssign* newp
                     = new AstAssign{assignOldp->fileline(), assignOldp->lhsp()->unlinkFrBack(),
                                     assignOldp->rhsp()->unlinkFrBack()};
@@ -960,9 +1020,12 @@ private:
             AstVarScope* const newVscp = makeVscp(vscp);
             AstVarScope* const initVscp = LocalSubst::get(vscp);
             UASSERT_OBJ(initVscp, vscp, "initVscp not found");
-            ifp->addThensp(new AstAssign{flp, mkLV(vscp), mkRV(initVscp)});
-            ifp->addElsesp(new AstAssign{flp, mkLV(vscp), mkRV(newVscp)});
-            seqAlwaysp->addStmtsp(new AstAssign{flp, mkLV(newVscp), mkRV(vscp)});
+            ifp->addThensp(ResyncAssignUnroller::unrolled(vscp, initVscp));
+            ifp->addElsesp(ResyncAssignUnroller::unrolled(vscp, newVscp));
+            // ifp->addThensp(new AstAssign{flp, mkLV(vscp), mkRV(initVscp)});
+            // ifp->addElsesp(new AstAssign{flp, mkLV(vscp), mkRV(newVscp)});
+            // seqAlwaysp->addStmtsp(new AstAssign{flp, mkLV(newVscp), mkRV(vscp)});
+            seqAlwaysp->addStmtsp(ResyncAssignUnroller::unrolled(newVscp, vscp));
         }
 
         ifp->addElsesp(newAlwaysp->stmtsp()->unlinkFrBackWithNext());

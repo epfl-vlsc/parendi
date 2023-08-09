@@ -311,7 +311,7 @@ private:
     int         m_workers = 6;      // main poplar switch: --workers
     int         m_maxUnpackCopies = 4096;   // main poplar switch: --max-unpack-copies
     int         m_diffExchangeThreshold = 16; // main poplar switch: --diff-exchange-threshold
-    int         m_ipu_profile = 0;    // main poplar switch: --ipu-profile
+    double      m_resyncThreshold = 0.8; // main poplar switch: --resync-threshold
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
     VTimescale  m_timeDefaultUnit;  // main switch: --timescale
@@ -546,7 +546,7 @@ public:
     int workers(int w) { return m_workers = w; }
     int maxUnpackCopies() const VL_MT_SAFE { return m_maxUnpackCopies; }
     int diffExchangeThreshold() const VL_MT_SAFE { return m_diffExchangeThreshold; }
-    int ipuProfile() const VL_MT_SAFE { return m_ipu_profile; }
+    double resyncThreshold() const VL_MT_SAFE { return m_resyncThreshold; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }
     VTimescale timeOverridePrec() const { return m_timeOverridePrec; }
