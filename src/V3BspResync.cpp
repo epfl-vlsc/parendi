@@ -31,6 +31,7 @@
 #include "V3EmitV.h"
 #include "V3File.h"
 #include "V3InstrCount.h"
+#include "V3Os.h"
 #include "V3PairingHeap.h"
 #include "V3Stats.h"
 #include "V3UniqueNames.h"
@@ -55,6 +56,8 @@ public:
         // list of all sink nodes (i.e., SeqVertex*)
         std::vector<SeqVertex*> sinksp;
 
+        std::unordered_map<AstNode*, uint32_t> cachedCount;
+
         // Build a resync graph for each dep graph. Add a single sink SeqVertex* to it
         // as well
         for (int pix = 0; pix < depGraphp.size(); pix++) {
@@ -77,6 +80,7 @@ public:
                     lvsp.push_back(commitp->vscp());
                 }
                 CompVertex* const compVtxp = dynamic_cast<CompVertex*>(vtxp);
+
                 if (compVtxp && compVtxp->domainp()) {
                     // seq logic
                     logicsp.emplace_back(compVtxp->nodep(), compVtxp->activep());
@@ -96,6 +100,10 @@ public:
                         // PLI/DPI cannot be resynchronized
                         unopt = true;
                     }
+                } else if (compVtxp && !cachedCount.count(compVtxp->nodep())) {
+                    // count the number of instructions in the comb logic and cache it
+                    const uint32_t cost = V3InstrCount::count(compVtxp->nodep(), false);
+                    cachedCount.emplace(compVtxp->nodep(), cost);
                 }
             }
             UASSERT(!logicsp.empty(), "empty seq?");
@@ -131,18 +139,6 @@ public:
             return false;
         };
 
-        // cache of all new CombVertex vertices that are being built
-        std::unordered_map<AnyVertex*, CombVertex*> newCombsp;
-        auto getCombVertex = [&](ResyncGraph* graphp, CompVertex* oldp) {
-            if (!newCombsp.count(oldp)) {
-                CombVertex* const newp
-                    = new CombVertex{graphp, LogicWithActive{oldp->nodep(), oldp->activep()},
-                                     V3InstrCount::count(oldp->nodep(), false)};
-                newCombsp.emplace(oldp, newp);
-            }
-            return newCombsp[oldp];
-        };
-
         auto getSeqp = [&](AstVarScope* vscp) -> SeqVertex* {
             auto it = writersp.find(vscp);
             if (it == writersp.end()) {
@@ -153,15 +149,37 @@ public:
         };
         // complete the ResyncGraph by adding combinational logic and edges to it
         for (int pix = 0; pix < depGraphp.size(); pix++) {
+            const uint64_t timeStart = V3Os::timeUsecs();
             const auto& depp = depGraphp[pix];
             const auto& graphp = graphsp[pix];
             SeqVertex* const sinkp = sinksp[pix];
 
-            std::unordered_set<AstVarScope*> lvSetp{sinkp->lvsp().begin(), sinkp->lvsp().end()};
+            // cache of all new vertices, needed since we may hit the same vertex multiple times
+            std::unordered_map<AnyVertex*, CombVertex*> newCombsp;
 
+            auto getCombVertex = [&](CompVertex* oldp) {
+                CombVertex* newp = nullptr;
+                if (!newCombsp.count(oldp)) {
+                    UASSERT_OBJ(cachedCount.count(oldp->nodep()), oldp->nodep(),
+                                "cost not computed");
+                    newp = new CombVertex{graphp.get(),
+                                          LogicWithActive{oldp->nodep(), oldp->activep()},
+                                          cachedCount[oldp->nodep()]};
+                    newCombsp.emplace(oldp, newp);
+
+                } else {
+                    newp = newCombsp[oldp];
+                }
+                return newp;
+            };
+
+            std::unordered_set<AstVarScope*> lvSetp{sinkp->lvsp().begin(), sinkp->lvsp().end()};
+            const uint64_t timeAfterLvs = V3Os::timeUsecs();
+            uint32_t nVtx = 0, nEdge = 0;
             for (V3GraphVertex* vtxp = depp->verticesBeginp(); vtxp;
                  vtxp = vtxp->verticesNextp()) {
                 ConstrDefVertex* const defp = dynamic_cast<ConstrDefVertex*>(vtxp);
+                nVtx ++;
                 if (!defp) continue;
                 if (defp->outEmpty()) {
                     // is it dead?
@@ -190,23 +208,24 @@ public:
                     CompVertex* const predp = dynamic_cast<CompVertex*>(defp->inBeginp()->fromp());
 
                     UASSERT_OBJ(!predp->domainp(), predp->nodep(), "did not expect clocked logic");
-                    newp = getCombVertex(graphp.get(), predp);
+                    newp = getCombVertex(predp);
                 }
                 if (!newp) {
                     UASSERT_OBJ(defp->inEmpty(), defp->vscp(), "expected no pred");
                     // def of var set by initial blocks, effectively constant
                     continue;
                 }
-                // connect predp -> defp -> succp as newp -> succp_as_newp
+                // connect predp -> defp -> succp as newp -> succp
                 for (V3GraphEdge* edgep = defp->outBeginp(); edgep; edgep = edgep->outNextp()) {
                     CompVertex* const succp = dynamic_cast<CompVertex*>(edgep->top());
+                    nEdge++;
                     UASSERT(succp, "ill-constructed graph");
                     if (succp->domainp() && !lvSetp.count(defp->vscp())) {
                         // feeds into seq logic
                         graphp->addEdge(newp, sinkp, defp->vscp());
                     } else if (!succp->domainp()) {
                         // feeds into comb
-                        graphp->addEdge(newp, getCombVertex(graphp.get(), succp), defp->vscp());
+                        graphp->addEdge(newp, getCombVertex(succp), defp->vscp());
                     }
                 }
                 // dead, and LV feeding to the sink
@@ -216,7 +235,14 @@ public:
                     // Link this graph to the producer
                     seqp->consumersp().insert({graphp.get(), readp});
                 }
+
             }
+            const uint64_t timeEnd = V3Os::timeUsecs();
+            UINFO(4, "Took graph "
+                         << pix << " " << std::fixed << std::setprecision(2)
+                         << static_cast<double>(timeEnd - timeStart) / 1000.0f << " ms and "
+                         << static_cast<double>(timeAfterLvs - timeStart) / 1000.0f << "ms"
+                         << " with size |V| = " << nVtx << " |V|x|E| = " << nEdge << endl);
         }
         // done, the graph may have redundant edges, between two vertex, but they have
         // different vscp() pointers, so do not remove them
@@ -236,6 +262,7 @@ private:
     VDouble0 m_statsUnableDisabled;
     VDouble0 m_statsCostAfter;
     VDouble0 m_statsCostBefore;
+    uint32_t m_resyncThreshold;
 
     inline void insertToHeap(ResyncGraph* graphp) {
         uint32_t c = 0;
@@ -365,12 +392,19 @@ private:
             graphp->dumpDotFilePrefixed("resync_graph_" + cvtToStr(graphp->index()));
         }
         VertexByRank verticesp = VertexByRank::build(graphp);
-
+        if (graphp->cost() < m_resyncThreshold) {
+            UINFO(5, "Will not resync small partition " << graphp->index() << " with cost "
+                                                        << graphp->cost() << endl);
+            m_statsUnoptDisabled++;
+            removeFromHeap(graphp);
+            return;
+        }
         SeqVertex* seqp = dynamic_cast<SeqVertex*>(verticesp.back().front());
         // if (std::any_of(seqp->consumersp().begin(), seqp->consumersp().end(),
         //                 [&](const auto& p) { return p.first == graphp; })) {
         //     UINFO(5,
-        //           "Path to self " << graphp->index() << " with cost " << graphp->cost() << endl);
+        //           "Path to self " << graphp->index() << " with cost " << graphp->cost() <<
+        //           endl);
         //     removeFromHeap(graphp);
         //     return;
         // }
@@ -394,7 +428,7 @@ private:
         int bestCost = maxCost;
         // from the bottom of the graph, crawl up rank-by-rank and find the best rank
         // to perform retiming. If cost starts increasing abort.
-        UINFO(8, "Analyzing graph " << graphp->index() << " with cost " << graphp->cost()
+        UINFO(3, "Analyzing graph " << graphp->index() << " with cost " << graphp->cost()
                                     << " and rank " << graphRank << endl);
         int costHigherRanks = seqp->cost();
         CostComputer costModel{graphp, seqp, verticesp};
@@ -578,16 +612,22 @@ private:
     void doApply() {
 
         // insert all graphs into the heap
+        UINFO(3, "Filling heap with " << m_allGraphsp.size() << " graphs " << endl);
         for (const auto& graphp : m_allGraphsp) { insertToHeap(graphp.get()); }
         if (m_heap.empty()) {
             return;
         } else {
             m_statsCostBefore = m_heap.max()->key().graphp->cost();
+            m_resyncThreshold = m_heap.max()->key().graphp->cost() / 2;
+            UINFO(3, "Will try to resync partitions with cost higher than " << m_resyncThreshold
+                                                                            << endl);
         }
         // Resync starting from the most costly one.
         // Once a graph is resynced, it will not be resynced again and all other graphs
         // that depend on it will also not be resynced
         while (!m_heap.empty()) { tryResync(m_heap.max()->key().graphp); }
+
+        UINFO(3, "Resynced graphs" << endl);
     }
 
 public:
@@ -712,7 +752,7 @@ private:
         } else {
             // sequential version exists
             AstVarScope* const newVscp = m_newVscpByDomain(oldVscp)[sentreep];
-            UINFO(8, "Using cached sampler " << newVscp->prettyNameQ() << endl);
+            UINFO(12, "Using cached sampler " << newVscp->prettyNameQ() << endl);
             LocalSubst::set(oldVscp, newVscp);
         }
     }
@@ -738,7 +778,7 @@ private:
                                                      << oldVscp->prettyNameQ() << endl);
             } else {
                 AstVarScope* const newVscp = m_newVscpByDomain(oldVscp)[vtxp->sentreep()];
-                UINFO(8, "Using cached comb lv " << newVscp << endl);
+                UINFO(12, "Using cached comb lv " << newVscp->prettyNameQ() << endl);
                 LocalSubst::set(oldVscp, newVscp);
             }
         });
@@ -749,7 +789,7 @@ private:
         // senseTree
         AstNode* newp = nullptr;
         if (!m_newLogicByDomain(vtxp->logicp().logicp).count(vtxp->sentreep())) {
-            UINFO(8, "Reconstructing 'pushed-down' combinational logic "
+            UINFO(10, "Reconstructing 'pushed-down' combinational logic "
                          << vtxp->logicp().logicp << " under " << vtxp->logicp().activep << endl);
             AstNode* const newp = vtxp->logicp().logicp->cloneTree(false);
 
@@ -794,7 +834,7 @@ private:
         pushDbgNew(newActivep);
 
         for (const LogicWithActive& pair : vtxp->logicsp()) {
-            UINFO(8, "Constructing comb from seq " << pair.logicp << endl);
+            UINFO(10, "Constructing comb from seq " << pair.logicp << endl);
             if (VN_IS(pair.logicp, AssignPost) || VN_IS(pair.logicp, AssignPre)) {
                 // cannot have AssignPost and AssignPre under Always (V3BspGraph fails
                 // otherwise)
@@ -807,7 +847,7 @@ private:
                                                      "seqcomb::" + assignOldp->prettyTypeName()));
                 newAlwaysp->addStmtsp(newp);
                 // UINFO(9, "Deleting " << assignOldp << endl);
-                UINFO(4, "    Morphing pre/post assignment " << assignOldp << endl);
+                UINFO(15, "    Morphing pre/post assignment " << assignOldp << endl);
                 // A bit sketchy, since pair.logic is no longer valid
                 m_newLogicByDomain(pair.logicp).emplace(m_combSensep, newAlwaysp);
                 VL_DO_DANGLING(assignOldp->unlinkFrBack()->deleteTree(), assignOldp);
@@ -1063,7 +1103,7 @@ void resyncAll(AstNetlist* netlistp) {
     if (ResyncLegalVisitor::allowed(netlistp)) {
         bool changed = false;
 
-        v3Global.dumpCheckGlobalTree("preresync", 0, dumpTree() >= 3);
+        // v3Global.dumpCheckGlobalTree("preresync", 0, dumpTree() >= 3);
         auto deps = V3BspSched::buildDepGraphs(netlistp);
         auto& depGraphsp = std::get<2>(deps);
         auto& regions = std::get<1>(deps);
@@ -1081,7 +1121,7 @@ void resyncAll(AstNetlist* netlistp) {
         }
 
         { ResyncVisitor{netlistp, resyncGraphsp, logicClasses}; }
-        v3Global.dumpCheckGlobalTree("postresync", 0, dumpTree() >= 3);
+        v3Global.dumpCheckGlobalTree("resync", 0, dumpTree() >= 3);
         V3Dead::deadifyAllScoped(netlistp);
 
     } else {
