@@ -64,19 +64,34 @@ protected:
     void visit(AstNode* nodep) override { iterateChildren(nodep); }
 };
 namespace {
-enum DpiSemantics {
-    DPI_NONE = 0,
-    DPI_STRICT = 1,
-    DPI_BUFFERED = 2,
+enum class DpiSemantics : int {
+    NONE = 0,
+    STRICT = 1,
+    BUFFERED = 2,
 };
 struct DpiInfo {
-    DpiSemantics semantics = DPI_NONE;
+    DpiSemantics semantics = DpiSemantics::NONE;
     uint32_t numCalls = 0;
     AstVarScope* reEntryp = nullptr;
     AstVarScope* dpiPointp = nullptr;
     void append(DpiSemantics s) {
-        semantics = static_cast<DpiSemantics>(semantics | s);
+        switch (semantics) {
+        case DpiSemantics::NONE: semantics = s; break;
+        case DpiSemantics::BUFFERED:
+            if (s == DpiSemantics::STRICT) { semantics = s; }
+            break;
+        default: break;
+        }
         numCalls++;
+    }
+    inline bool strictDpi() const {
+        return semantics == DpiSemantics::STRICT;
+    }
+    inline bool noDpi() const {
+        return semantics == DpiSemantics::NONE;
+    }
+    inline bool bufferedDpi() const {
+        return semantics == DpiSemantics::BUFFERED;
     }
 };
 struct DpiRecord {
@@ -143,13 +158,13 @@ private:
             || callp->funcp()->dpiTraceInit()) {
             callp->v3warn(E_UNSUPPORTED, "Unsupported DPI feature");
         } else if (callp->funcp()->dpiImportWrapper()) {
-            append(DPI_STRICT);
+            append(DpiSemantics::STRICT);
         }
     }
-    void visit(AstDisplay* nodep) override { append(DPI_BUFFERED); }
-    void visit(AstFinish* nodep) override { append(DPI_BUFFERED); }
-    void visit(AstStop* nodep) override { append(DPI_BUFFERED); }
-    void visit(AstNodeReadWriteMem* nodep) override { append(DPI_STRICT); }
+    void visit(AstDisplay* nodep) override { append(DpiSemantics::BUFFERED); }
+    void visit(AstFinish* nodep) override { append(DpiSemantics::BUFFERED); }
+    void visit(AstStop* nodep) override { append(DpiSemantics::BUFFERED); }
+    void visit(AstNodeReadWriteMem* nodep) override { append(DpiSemantics::STRICT); }
     // void visit(AstNodeReadWriteMem* nodep) override { append(DPI_STRICT); }
     void visit(AstVarScope* vscp) {
         auto const dtypep = VN_CAST(vscp->dtypep(), ClassRefDType);
@@ -227,7 +242,7 @@ private:
     void visit(AstVarScope* vscp) { vscp->varp()->user2p(vscp); }
     void visit(AstCFunc* cfuncp) override {
         if (!m_classp) { return; }
-        if (m_records.getInfo(m_classp).semantics != DPI_STRICT) {
+        if (m_records.getInfo(m_classp).semantics != DpiSemantics::STRICT) {
             // Do not need a closure.
             return;
         }
@@ -364,10 +379,11 @@ private:
         AstVarScope* const instVscp = m_records.getInst(m_classp);
         UASSERT_OBJ(instVscp, m_classp, "expected instance");
         AstVarScope* argVscp = nullptr;
-        if (m_records.getInfo(m_classp).semantics == DPI_STRICT && argVRefp) {
+        if (m_records.getInfo(m_classp).strictDpi() && argVRefp) {
             // already a variable, so no need to create another one
             // but we need to add extra flags to it
             VBspFlag flag = argVRefp->varp()->bspFlag();
+
             if (argVRefp->access().isWriteOnly()) {
                 flag.append(VBspFlag::MEMBER_INPUT)
                     .append(VBspFlag::MEMBER_HOSTWRITE)
@@ -542,7 +558,7 @@ private:
               "Injecting reentry point in " << m_classp->name() << "::" << cfuncp->name() << endl);
         const DpiInfo info = m_records.getInfo(m_classp);
         if (!cfuncp->stmtsp()) { return; }
-        if (info.semantics == DPI_NONE) {
+        if (info.noDpi()) {
             // simple case, guard the whole function body with the reEntry variable
             AstIf* const guardp
                 = new AstIf{m_classp->fileline(),
@@ -552,7 +568,7 @@ private:
                             cfuncp->stmtsp()->unlinkFrBackWithNext()};
             cfuncp->addStmtsp(guardp);
             return;
-        } else if (info.semantics == DPI_BUFFERED) {
+        } else if (info.bufferedDpi()) {
             injectReEntryBuffered(cfuncp);
             return;
         }
