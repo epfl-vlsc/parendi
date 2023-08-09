@@ -369,37 +369,7 @@ void VlPoplarContext::runReEntrant() {
 #endif
 }
 
-void VlPoplarContext::dumpCycleTrace(std::ostream& os) {
 
-    VlIpuProfileTraceVec trace = vprog->profileTrace();
-
-    os << "Cycle summary:" << std::endl;
-    uint32_t numTraces = 0;
-    for (const auto& desc : trace.m_desc) {
-        os << "\t@" << desc.second.m_tile << ", " << desc.second.m_worker << ", " << desc.first
-           << ": ";
-        os << (desc.second.m_total / static_cast<uint64_t>(desc.second.m_count)) << " ("
-           << desc.second.m_pred << ")  x" << desc.second.m_count << std::endl;
-        numTraces = std::max(desc.second.m_count, numTraces);
-    }
-    os << "Cycle trace: " << std::endl;
-    for (int i = 0; i < trace.m_traceSize; i++) {
-        os << "T[" << numTraces - i << "]" << std::endl;
-        const auto& t = trace.m_trace[i];
-        for (const auto& desc : trace.m_desc) {
-            os << "\t" << desc.first << ": ";
-            // if (i >= desc.second.m_count) {
-            //     os << "N/A";
-            // } else {
-            auto s = t[desc.second.m_index].first;
-            auto e = t[desc.second.m_index].second;
-            os << s << " " << e << " " << (e - s);
-            // }
-            os << std::endl;
-        }
-        os << "=================" << std::endl;
-    }
-}
 void VlPoplarContext::build() {
     // build the poplar graph
     using namespace poplar;
@@ -497,7 +467,6 @@ void VlPoplarContext::run() {
 #endif
             engine = std::make_unique<poplar::Engine>(exec, flags);
             engine->load(*device);
-            vprog->profileInit();
             vprog->plusArgs();
             vprog->plusArgsCopy();
             vprog->readMem();

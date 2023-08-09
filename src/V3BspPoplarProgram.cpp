@@ -517,10 +517,7 @@ private:
         for (AstCFunc* nodep : reachablep) { patchHostFuncCall(nodep); }
     }
 
-    void pathProfileTace() {
-        patchHostFuncCall(getFunc(m_netlistp->topModulep(), "profileTrace"));
-        patchHostFuncCall(getFunc(m_netlistp->topModulep(), "profileInit"));
-    }
+
     void patchHostFuncCall(AstCFunc* cfuncp);
 
     // create a vertex that ORs all the needInteraction signals. Ideally this
@@ -587,7 +584,6 @@ public:
             }
         });
         patchHostHandle();
-        pathProfileTace();
         // remove the computeSet funciton, not used
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
         getFunc(m_netlistp->topModulep(), "initComputeSet")->unlinkFrBack()->deleteTree();
