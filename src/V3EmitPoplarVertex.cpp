@@ -24,6 +24,8 @@
 #include "V3EmitCFunc.h"
 #include "V3EmitPoplar.h"
 #include "V3Global.h"
+#include "V3Stats.h"
+#include "V3ThreadPool.h"
 #include "V3UniqueNames.h"
 
 #include <algorithm>
@@ -41,13 +43,19 @@ private:
     // const bool m_slow;
     V3UniqueNames m_uniqueNames;
     bool m_usesSupervisor = false;
+    const bool m_multiThreaded = false;
+    std::vector<AstCFile*> m_newFilesp;
 
+    inline bool splitNeededAndEnabled() const {
+        return !m_multiThreaded && EmitCFunc::splitNeeded();
+    }
     void maybeOpenNextFile() {
-        if (!m_ofp || splitNeeded()) {
+        if (!m_ofp || splitNeededAndEnabled()) {
             if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
             openNextOutputFile("codelet");
         }
     }
+
     void openNextOutputFile(const string& subFileName) {
         UASSERT(!m_ofp, "Output file already open");
 
@@ -65,16 +73,16 @@ private:
         cfilep->slow(false);
         cfilep->source(true);
         cfilep->codelet(true);
-        v3Global.rootp()->addFilesp(cfilep);
+
+        // v3Global.rootp()->addFilesp(cfilep);
+        m_newFilesp.push_back(cfilep);
 
         m_ofp = new V3OutCFile{filename};
         // new AstCFile{}
         ofp()->putsHeader();
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// Poplar vertex implementation\n");
-        if (m_usesSupervisor) {
-            puts("#define VL_USES_IPU_SUPERVISOR\n");
-        }
+        if (m_usesSupervisor) { puts("#define VL_USES_IPU_SUPERVISOR\n"); }
         puts("#include <vlpoplar/verilated.h>\n");
         puts("#include <poplar/Vertex.hpp>\n");
         puts("#include \"" + topClassName() + "__structs.h\"\n");
@@ -133,8 +141,8 @@ private:
         }
     }
 
-public:
-    explicit EmitPoplarVertex(AstNetlist* netlistp) {
+    explicit EmitPoplarVertex(AstNetlist* netlistp)
+        : m_multiThreaded(false) {
         std::vector<const AstClass*> toEmitp;
         for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
             if (const AstClass* classp = VN_CAST(nodep, Class)) {
@@ -149,12 +157,69 @@ public:
             emitClass(classp);
         }
 
-        if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+        if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
+    }
+
+    // thread-safe emitter
+    explicit EmitPoplarVertex(AstNetlist* netlistp, const std::vector<const AstClass*>& toEmitp,
+                              bool useSupervisor, int threadIndex)
+        : m_usesSupervisor(useSupervisor)
+        , m_multiThreaded(true) VL_MT_SAFE {
+        openNextOutputFile("codelet_" + cvtToStr(threadIndex));
+        for (const AstClass* classp : toEmitp) { emitClass(classp); }
+        if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
+    }
+
+public:
+    static inline void emitAll(AstNetlist* netlistp) {
+        EmitPoplarVertex impl{netlistp};
+        for (AstCFile* cfilep : impl.m_newFilesp) { netlistp->addFilesp(cfilep); }
+    }
+
+    static inline void emitAllThreaded(AstNetlist* netlistp) {
+
+        std::vector<std::vector<const AstClass*>> toEmitp;
+        toEmitp.push_back({});
+        bool useSupervisor = false;
+        int nodeCount = 0;
+        for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
+            if (const AstClass* classp = VN_CAST(nodep, Class)) {
+                if (classp->flag().isBsp()) {
+                    if (classp->flag().isSupervisor()) { useSupervisor = true; }
+                    toEmitp.back().push_back(classp);
+                    nodeCount += classp->nodeCount();
+
+                    if (v3Global.opt.outputSplit() && nodeCount >= v3Global.opt.outputSplit()) {
+                        toEmitp.push_back({});
+                        nodeCount = 0;
+                    }
+                }
+            }
+        }
+        using EmitResult = std::vector<AstCFile*>;
+        std::vector<std::future<EmitResult>> results;
+        for (int tid = 0; tid < toEmitp.size(); tid++) {
+
+            auto future = V3ThreadPool::s().enqueue(std::function<EmitResult()>{[=, &toEmitp]() {
+                EmitPoplarVertex impl{netlistp, toEmitp[tid], useSupervisor, tid};
+                return impl.m_newFilesp;
+            }});
+            results.emplace_back(std::move(future));
+        }
+        for (auto& ft : results) {
+            UASSERT(ft.valid(), "invalid future");
+            ft.wait();
+            EmitResult res = ft.get();
+            for (AstCFile* cfilep : res) { netlistp->addFilesp(cfilep); }
+        }
     }
 };
 void V3EmitPoplar::emitVertex() {
     // Make parent module pointers available, enables user4
     const EmitCParentModule emitCParentModule;
     AstNetlist* netlistp = v3Global.rootp();
-    { EmitPoplarVertex{netlistp}; }
+
+    // EmitPoplarVertex::emitAll(netlistp);
+    EmitPoplarVertex::emitAllThreaded(netlistp);
+    V3Stats::statsStage("emitVertex");
 }

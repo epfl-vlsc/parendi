@@ -25,6 +25,7 @@
 #include "V3EmitPoplar.h"
 #include "V3Global.h"
 #include "V3Os.h"
+#include "V3Stats.h"
 #include "V3UniqueNames.h"
 
 #include <algorithm>
@@ -219,4 +220,5 @@ void V3EmitPoplar::emitProgram() {
     // find the classes that are derived from the V3BspModules::builtinBspCompute class
     UINFO(3, "Emitting program");
     { EmitPoplarProgram{netlistp}; }
+    V3Stats::statsStage("emitProgram");
 }
