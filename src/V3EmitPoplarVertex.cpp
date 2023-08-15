@@ -117,7 +117,7 @@ private:
                 // puts(vrefp->dtypep()->cType("", false, false));
                 // puts("> ");
                 puts(vrefp->nameProtect());
-                puts("; /* " + vrefp->origName() + " : " + vrefp->fileline()->ascii() + " */\n");
+                puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : " + vrefp->fileline()->ascii() + " */\n");
             }
         }
 
@@ -219,7 +219,7 @@ void V3EmitPoplar::emitVertex() {
     const EmitCParentModule emitCParentModule;
     AstNetlist* netlistp = v3Global.rootp();
 
-    // EmitPoplarVertex::emitAll(netlistp);
+
     EmitPoplarVertex::emitAllThreaded(netlistp);
     V3Stats::statsStage("emitVertex");
 }

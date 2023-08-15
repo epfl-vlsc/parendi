@@ -1236,7 +1236,7 @@ public:
         puts(">(");
         iterateChildren(nodep);
         puts("/*");
-        puts(nodep->vrefp()->varp()->origName());
+        puts(AstNode::dedotName(nodep->vrefp()->varp()->origName()));
         puts("*/");
         puts(")");
     }

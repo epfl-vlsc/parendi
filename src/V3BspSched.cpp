@@ -148,7 +148,10 @@ buildDepGraphs(AstNetlist* netlistp) {
     V3Sched::LogicClasses logicClasses = details::gatherLogicClasses(netlistp);
 
     auto unsupportedWhy = [](const auto& region, const string& reason) {
-        if (!region.empty()) { region.front().second->v3warn(E_UNSUPPORTED, "    " << reason); }
+        if (!region.empty()) {
+            region.front().second->v3warn(E_UNSUPPORTED, "    " << reason);
+            region.front().second->dumpTree("- Active computation: ");
+        }
     };
 
     // Step 3. check for comb cycles and error
@@ -171,7 +174,9 @@ buildDepGraphs(AstNetlist* netlistp) {
     unsupportedWhy(logicRegions.m_pre,
                    "Pre-active not supprted because as can only handle a single clock");
 
-    unsupportedWhy(logicRegions.m_act, "active region computation is not fully supported");
+    if (v3Global.opt.fIpuResync()) {
+        unsupportedWhy(logicRegions.m_act, "active region computation is not fully supported");
+    }
     V3Sched::LogicByScope& nbaLogic = logicRegions.m_nba;
     // Step 6. make a fine-grained dependence graph. This graph is different from
     // the V3Order graph in many ways but the most notably difference is wrt ordering
