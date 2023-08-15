@@ -1844,14 +1844,14 @@ private:
     void replaceSelExtend(AstSel* nodep) {
         // SEL(EXTEND(a, w2), l, w1) -> SEL(a, l, w1) or Const(0)
         AstExtend* const extp = VN_AS(nodep->fromp(), Extend);
-        if (static_cast<int>(nodep->lsbConst() >= extp->lhsp()->width())) {
+        if (nodep->lsbConst() >= extp->lhsp()->width()) {
             // SEL(EXTEND(a, w2), l, w1) -> 0
             AstConst* const newp
                 = new AstConst{nodep->fileline(), AstConst::DTyped{}, nodep->dtypep()};
             nodep->replaceWith(newp);
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
 
-        } else if (static_cast<int>(nodep->msbConst() < extp->lhsp()->width())) {
+        } else if (nodep->msbConst() < extp->lhsp()->width()) {
             // SEL(EXTEND(a, w2), l, w1) -> SEL(a, l, w1)
             nodep->fromp()->replaceWith(extp->lhsp()->unlinkFrBack());
             VL_DO_DANGLING(extp->deleteTree(), extp);
@@ -2353,6 +2353,18 @@ private:
         VL_DO_DANGLING(nodep->deleteTree(), nodep);
         return true;
     }
+
+
+    bool matchSelExtend(AstSel* nodep) {
+        if (!VN_IS(nodep->lsbp(), Const)) {
+            return false;
+        }
+        if (!VN_IS(nodep->widthp(), Const)) {
+            return false;
+        }
+        return VN_IS(nodep->fromp(), Extend);
+    }
+
     int operandConcatMove(AstConcat* nodep) {
         //    CONCAT under concat  (See moveConcat)
         // Return value: true indicates to do it; 2 means move to LHS
@@ -3566,7 +3578,7 @@ private:
     TREEOPV("AstReplicateN{$lhsp, $rhsp.isOne, $lhsp->width()==nodep->width()}", "replaceWLhs(nodep)");  // {1{lhs}}->lhs
     TREEOPV("AstReplicate{$lhsp.castReplicate, operandRepRep(nodep)}", "DONE");  // {2{3{lhs}}}->{6{lhs}}
     TREEOPV("AstConcat{operandConcatSame(nodep)}", "DONE");  // {a,a}->{2{a}}, {a,2{a}}->{3{a}, etc
-    TREEOPV("AstSel{$fromp.castExtend}", "replaceSelExtend(nodep)");
+    TREEOPV("AstSel{matchSelExtend(nodep)}", "replaceSelExtend(nodep)");
     // Next rule because AUTOINST puts the width of bits in
     // to pins, even when the widths are exactly the same across the hierarchy.
     TREEOPV("AstSel{matchSelRand(nodep)}",      "DONE");
