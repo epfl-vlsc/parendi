@@ -1171,11 +1171,12 @@ void resyncAll(AstNetlist* netlistp) {
         auto& depGraphsp = std::get<2>(deps);
         auto& regions = std::get<1>(deps);
         auto& logicClasses = std::get<0>(deps);
-        if (!regions.m_act.empty()) {
-            regions.m_act.front().second->v3fatalExit("Active regions prevent resync");
-            // do better than failing...
-            return;
-        }
+        // if (!regions.m_act.empty()) {
+        //     regions.m_act.front().second->v3fatalExit("Active regions prevent resync");
+        //     // do better than failing...
+        //     return;
+        // }
+
         auto resyncGraphsp = ResyncGraphBuilder::build(depGraphsp);
         {
             ResyncGraphTransformer resyncer{resyncGraphsp};
@@ -1184,6 +1185,9 @@ void resyncAll(AstNetlist* netlistp) {
         }
 
         { ResyncVisitor{netlistp, resyncGraphsp, logicClasses}; }
+        for (const auto& pair : regions.m_act) {
+            netlistp->topScopep()->scopep()->addBlocksp(pair.second);
+        }
         v3Global.dumpCheckGlobalTree("resync", 0, dumpTree() >= 3);
         V3Dead::deadifyAllScoped(netlistp);
 
