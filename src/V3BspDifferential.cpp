@@ -399,6 +399,14 @@ private:
         }
         UnpackUpdate& scratchpad = getScratchpad(vrefp->varp());
         UASSERT_OBJ(scratchpad.numUpdates, vrefp, "no write observed!");
+        if (scratchpad.numUpdates > scratchpad.dtypep->arrayUnpackedElements() / 2) {
+            UINFO(4, "Will not make differential update because there are too many updates: "
+                         << vrefp->varp()->prettyNameQ() << " is updated " << scratchpad.numUpdates
+                         << " times and has " << scratchpad.dtypep->arrayUnpackedElements()
+                         << " elements" << endl);
+            m_updates.erase(vrefp->varp());
+            return;
+        }
         // create the write condition
         if (!scratchpad.subst.condp) {
             m_statsNumOpt += 1;
@@ -455,11 +463,12 @@ private:
             return VN_AS(parentp, NodeAssign);
         }();
         if (parentAssignp->user1()) {
-            return; // already processed
+            return;  // already processed
         }
         parentAssignp->user1(true);
         // if rhs is not simple varref, make it. Pathologically the rhs could be ArraySel itself,
-        // so we may end up copying the whole array on the rhs if we don't "capture" its selection here.
+        // so we may end up copying the whole array on the rhs if we don't "capture" its selection
+        // here.
         if (!VN_IS(parentAssignp->rhsp(), VarRef)) {
             UINFO(4, "Making rhs of assign a varref " << parentAssignp << endl);
             AstVar* rhsVarp = new AstVar{parentAssignp->rhsp()->fileline(), VVarType::MEMBER,
