@@ -658,6 +658,12 @@ private:
                 refInfo.addTargetp(std::make_pair(instVscp, varp));
                 varp->bspFlag(
                     VBspFlag{}.append(VBspFlag::MEMBER_OUTPUT).append(VBspFlag::MEMBER_LOCAL));
+
+                // although local, we still mark this class as the source since
+                // it may feed into the active computation. We need to later check
+                // that there is no self-message when making copy operations.
+                refInfo.sourcep(std::make_pair(instVscp, varp));
+
                 V3Stats::addStatSum("BspModules, local variable", 1);
             } else if (refInfo.isOwned(graphp) && !refInfo.isLocal()) {
                 // variable is owed/produced here but also referenced
@@ -954,6 +960,10 @@ private:
             //                 || refInfo.producer() /* consumed implies produced*/,
             //             vscp, "consumed but not produced!");
             for (const auto& pair : refInfo.targetsp()) {
+                // if there is no source pointer, then the variable is probably
+                // constant after initialization or it is produced by the active region.
+                // In the latter case, since the active region is replicated in each class
+                // there is not need to copy anything
                 if (refInfo.sourcep().first
                     && refInfo.sourcep() != pair /*no need to send to self*/) {
                     // UASSERT(refInfo.sourcep() != pair, "Self message not allowed!");
