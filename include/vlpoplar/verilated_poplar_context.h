@@ -28,7 +28,6 @@
 #include <unordered_map>
 
 #include <boost/filesystem.hpp>
-#include <poplar/CycleCount.hpp>
 #include <poplar/DeviceManager.hpp>
 #include <poplar/Engine.hpp>
 #include <poplar/Graph.hpp>

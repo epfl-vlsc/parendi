@@ -120,7 +120,6 @@ void VlPoplarContext::buildReEntrant() {
                                              name + "::buffer");
             auto totCount = graph->addVariable(UNSIGNED_INT, {1}, name + "::totCount");
             graph->setInitialValue(buffer, 0u);
-
             graph->setInitialValue(totCount, 0u);
             graph->setTileMapping(vtx, i);
             graph->setTileMapping(buffer, i);
@@ -139,8 +138,8 @@ void VlPoplarContext::buildReEntrant() {
             // std::cout << "adding vertex " << i << std::endl;
         }
         auto func = graph->addHostFunction("cb_" + name,
-                                           poplar::ArrayRef{argSizes.data(), argSizes.size()}, {});
-        Call callback{func, poplar::ArrayRef{cbTensors.data(), cbTensors.size()}, {}};
+                                           poplar::ArrayRef{argSizes}, {});
+        Call callback{func, poplar::ArrayRef{cbTensors}, {}};
         Execute program{tsSet};
         return TsHandles{program, callback, ocount};
     };
@@ -305,6 +304,7 @@ void VlPoplarContext::runReEntrant() {
         uint32_t lastCount = 0;
         std::ofstream ofs;
         const std::string name;
+        std::mutex m_mutex;
         TimeTraceDump(const std::string& name)
             : name{name} {
             ofs = std::ofstream{std::string{OBJ_DIR} + "/" + name + ".txt", std::ios::out};
@@ -319,7 +319,9 @@ void VlPoplarContext::runReEntrant() {
             "cb_" + dump.name, 0,
             [&](poplar::ArrayRef<const void*> ins, poplar::ArrayRef<void*> /*unused*/) -> void {
                 // std::cout << "dumping " << dump.name << std::endl;
+                std::lock_guard<std::mutex> lk{dump.m_mutex};
                 const uint32_t count = *reinterpret_cast<const uint32_t*>(ins[0]);
+                // std::cout << dump.name << ": count is " << count << " and lastCount " << dump.lastCount << std::endl;
                 while (dump.lastCount != count) {
                     int j = dump.lastCount % VL_IPU_TRACE_BUFFER_SIZE;
                     for (int i = 0; i < VL_NUM_TILES_USED; i++) {
@@ -370,143 +372,6 @@ void VlPoplarContext::runReEntrant() {
 }
 
 
-void VlPoplarContext::build() {
-    // build the poplar graph
-    using namespace poplar;
-    using namespace poplar::program;
-
-    Sequence prog;
-    Sequence resetReq;
-    Sequence callbacks;
-    // handle any host calls invoked by the initial blocks
-    if (!interruptCond.valid()) {
-        std::cerr << "No interrupt!" << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-    auto zeroValue = graph->addConstant(UNSIGNED_INT, {1}, false, "false value");
-    graph->setTileMapping(zeroValue, 0);
-    resetReq.add(Copy(zeroValue, interruptCond[0]));  // need to clear the loop conditions
-    for (auto hreq : hostRequest) { resetReq.add(Copy(zeroValue, hreq[0])); }
-
-    auto withCycleCounter = [this, &callbacks](Program&& code, const std::string& n, bool en) {
-        Sequence wrapper;
-        wrapper.add(code);
-        if (en) {
-            auto t = cycleCount(*graph, wrapper, 0, SyncType::INTERNAL);
-            auto cb = graph->addHostFunction(n, {{UNSIGNED_INT, 2}}, {});
-            callbacks.add(Call(cb, {t}, {}));
-        }
-        return wrapper;
-    };
-    if (hasCompute) {
-        Sequence loopBody{
-            withCycleCounter(Execute{*workload}, "prof.exec", cfg.counters.exec),
-            withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync1", cfg.counters.sync1),
-            withCycleCounter(std::move(exchangeCopies), "prof.copy", cfg.counters.copy),
-            withCycleCounter(Sync{SyncType::INTERNAL}, "prof.sync2", cfg.counters.sync2)};
-        Sequence preCond = withCycleCounter(Execute{*condeval}, "prof.cond", cfg.counters.cond);
-        prog.add(resetReq);
-        prog.add(
-            withCycleCounter(RepeatWhileFalse{preCond, interruptCond[0], loopBody, "eval loop"},
-                             "prof.loop", cfg.counters.loop));
-        prog.add(callbacks);
-    }
-    Sequence initProg;
-    if (hasInit) { initProg.add(Execute(*initializer)); }
-    initProg.add(initCopies);
-    OptionFlags flags{};
-#ifdef POPLAR_INSTRUMENT
-    {
-        std::ifstream ifs(ROOT_NAME "_compile_options.json", std::ios::in);
-        readJSON(ifs, flags);
-        ifs.close();
-    }
-#endif
-    float lastProg = 0.0;
-    auto exec = compileGraph(*graph, {initProg, prog}, flags, [&lastProg](int step, int total) {
-        float newProg = static_cast<float>(step) / static_cast<float>(total) * 100.0;
-        if (newProg - lastProg >= 10.0f) {
-            std::cout << "Graph compilation: " << static_cast<int>(newProg) << "%" << std::endl;
-            lastProg = newProg;
-        }
-    });
-
-    std::ofstream execOut(ROOT_NAME ".graph.bin", std::ios::binary);
-    exec.serialize(execOut);
-}
-
-void VlPoplarContext::run() {
-    std::ofstream profile(OBJ_DIR "/" ROOT_NAME "_runtime.log", std::ios::out);
-    const auto simStartTime = std::chrono::high_resolution_clock::now();
-    auto timed = [](auto&& lazyValue) {
-        const auto t0 = std::chrono::high_resolution_clock::now();
-        lazyValue();
-        const auto t1 = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration<double>(t1 - t0).count();
-    };
-
-    auto measure = [&timed, &profile](auto&& lazyValue, const std::string& n) {
-        const auto t = timed(std::forward<decltype(lazyValue)>(lazyValue));
-        profile << n << ": " << std::fixed << std::setw(15) << std::setprecision(6) << t << "s"
-                << std::endl;
-    };
-
-    measure(
-        [this]() {
-            std::ifstream graphIn(OBJ_DIR "/" ROOT_NAME ".graph.bin", std::ios::binary);
-            auto exec = poplar::Executable::deserialize(graphIn);
-            graphIn.close();
-            poplar::OptionFlags flags{};
-#ifdef POPLAR_INSTRUMENT
-            {
-                std::ifstream ifs(OBJ_DIR "/" ROOT_NAME "_engine_options.json", std::ios::in);
-                poplar::readJSON(ifs, flags);
-                ifs.close();
-                std::cout << flags << std::endl;
-            }
-#endif
-            engine = std::make_unique<poplar::Engine>(exec, flags);
-            engine->load(*device);
-            vprog->plusArgs();
-            vprog->plusArgsCopy();
-            vprog->readMem();
-            vprog->readMemCopy();
-        },
-        "load");
-    measure([this]() { engine->run(INIT_PROGRAM); }, "init");
-
-    vprog->hostHandle();
-    int invIx = 0;
-
-    for (const auto p : {"cond", "exec", "sync1", "copy", "sync2", "loop"}) {
-        const std::string handle = std::string{"prof."} + p;
-        try {
-            engine->connectHostFunction(
-                handle, 0,
-                [handle /*copy*/, &profile](poplar::ArrayRef<const void*> v,
-                                            poplar::ArrayRef<void*> /*unused*/) -> void {
-                    profile << "\t" << handle << ": " << reinterpret_cast<const uint64_t*>(v[0])[0]
-                            << std::endl;
-                });
-        } catch (poplar::stream_connection_error& e) {
-            // skip
-        }
-    }
-
-    auto simLoopStart = std::chrono::high_resolution_clock::now();
-    while (!Verilated::gotFinish()) {
-        profile << "run " << invIx++ << std::endl;
-        measure([this]() { engine->run(EVAL_PROGRAM); }, "\twall");
-        vprog->hostHandle();
-    }
-    auto simEnd = std::chrono::high_resolution_clock::now();
-
-    profile << "sim: " << std::chrono::duration<double>(simEnd - simLoopStart).count() << "s"
-            << std::endl;
-    profile << "all: " << std::chrono::duration<double>(simEnd - simStartTime).count() << "s"
-            << std::endl;
-    profile.close();
-}
 
 void VlPoplarContext::addCopy(const std::string& from, const std::string& to, uint32_t size,
                               const std::string& kind) {

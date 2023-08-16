@@ -20,16 +20,15 @@ public:
     __attribute__((target("supervisor"))) void compute() {
         uint32_t l = -1, u = -1, l2 = -1;
         uint32_t cnt = totCount[0];
-
         do {
             l = __builtin_ipu_get_scount_l();
             u = __builtin_ipu_get_scount_u();
             l2 = __builtin_ipu_get_scount_l();
         } while (l2 < l);
         uint64_t ts = (static_cast<uint64_t>(u) << 32ull) | static_cast<uint64_t>(l);
-        buffer[cnt] = ts;
+        buffer[cnt % VL_IPU_TRACE_BUFFER_SIZE] = ts;
         cnt = cnt + 1;
-        totCount[0] = cnt % VL_IPU_TRACE_BUFFER_SIZE;
+        totCount[0] = cnt;
     }
 };
 
