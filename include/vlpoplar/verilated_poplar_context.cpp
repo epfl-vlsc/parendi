@@ -11,8 +11,16 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
-
-#define VL_NUM_TILES_PER_IPU 1472
+#include <poplar/CycleCount.hpp>
+#ifndef VL_NUM_TILES_USED
+#error "VL_NUM_TILES_USED is no defined!"
+#endif
+#ifndef VL_NUM_WORKERS_USED
+#error "VL_NUM_WORKERS_USED is not defined!"
+#endif
+#ifndef VL_IPU_TRACE_BUFFER_SIZE
+#error "VL_IPU_TRACE_BUFFER_SIZE is not defined!"
+#endif
 
 void VlPoplarContext::init(int argc, char* argv[]) {
 
@@ -34,7 +42,10 @@ void VlPoplarContext::init(int argc, char* argv[]) {
         std::exit(-1);
     }
 
-    cfg = parseArgs(argc, argv);
+#ifdef GRAPH_RUN
+    // for +args
+    Verilated::commandArgs(argc, argv);
+#endif
     auto manager = poplar::DeviceManager::createDeviceManager();
 
     auto devices = manager.getDevices(poplar::TargetType::IPU, requiredNumIpus);
@@ -100,54 +111,95 @@ void VlPoplarContext::buildReEntrant() {
 
 #ifdef VL_INSTRUMENT
     struct TsHandles {
-        Program program;
-        Call callback;
+        const std::string name;
+        Tensor ovf;
+        Tensor buffer;
         Tensor count;
-        explicit TsHandles(const Program& p, const Call& c, const Tensor& t)
-            : program{p}
-            , callback{c}
-            , count{t} {}
+        Program program;
+        std::unique_ptr<Call> m_callback;
+        const std::vector<Tensor> cbTensors;
+        const std::vector<std::tuple<Type, std::size_t>> argSizes;
+        explicit TsHandles(const std::unique_ptr<Graph>& graph, const std::string& name,
+                           const ComputeSet& cs, const Tensor& ovf, const Tensor& buffer,
+                           const Tensor& count)
+            : name(name)
+            , ovf{ovf}
+            , buffer{buffer}
+            , count{count} {
+            program = Sequence{Execute{cs}};
+            auto hfunc = graph->addHostFunction(
+                "cb_" + name,
+                {{UNSIGNED_INT, 1 + VL_NUM_TILES_USED * VL_IPU_TRACE_BUFFER_SIZE * 2}}, {});
+            Tensor arg = concat(count, buffer.flatten());
+            m_callback = std::make_unique<Call>(hfunc, poplar::ArrayRef<Tensor>{arg},
+                                                poplar::ArrayRef<Tensor>{});
+        }
+        Call& callback() const { return *m_callback; }
     };
-    auto createTsProgram = [&](const std::string& name) -> TsHandles {
+
+    graph->addCodelets("VlTimeStamp.gp");
+    auto createTsProgram = [&](const std::string& name) {
         auto tsSet = graph->addComputeSet(name);
-        graph->addCodelets("VlTimeStamp.gp");
         std::vector<std::tuple<Type, std::size_t>> argSizes;
         std::vector<Tensor> cbTensors;
+        cbTensors.clear();
+        argSizes.clear();
         Tensor ocount;
-        for (int i = 0; i < VL_NUM_TILES_USED; i++) {
+        Tensor countTotal;
+
+        Tensor buffer = graph->addVariable(
+            UNSIGNED_INT, {VL_NUM_TILES_USED, VL_IPU_TRACE_BUFFER_SIZE * 2}, name + "::buffer");
+
+        for (int tid = 0; tid < VL_NUM_TILES_USED; tid++) {
             auto vtx = graph->addVertex(tsSet, "VlTimeStamp");
-            auto buffer = graph->addVariable(UNSIGNED_LONGLONG, {VL_IPU_TRACE_BUFFER_SIZE},
-                                             name + "::buffer");
-            auto totCount = graph->addVariable(UNSIGNED_INT, {1}, name + "::totCount");
-            graph->setInitialValue(buffer, 0u);
+
+            auto totCount
+                = graph->addVariable(UNSIGNED_INT, {1}, name + "::totCount" + std::to_string(tid));
+            auto ovf
+                = graph->addVariable(UNSIGNED_INT, {1}, name + "::overflow" + std::to_string(tid));
+            std::vector<uint32_t> zeros;
+            zeros.resize(VL_IPU_TRACE_BUFFER_SIZE * 2);
+            std::fill(zeros.begin(), zeros.end(), 0ull);
+            graph->setInitialValue(buffer[tid], poplar::ArrayRef{zeros});
+            graph->setInitialValue(ovf, 0u);
             graph->setInitialValue(totCount, 0u);
-            graph->setTileMapping(vtx, i);
-            graph->setTileMapping(buffer, i);
-
-            graph->setTileMapping(totCount, i);
-            graph->connect(vtx["buffer"], buffer);
+            graph->setTileMapping(vtx, tid);
+            graph->setTileMapping(buffer[tid], tid);
+            graph->setTileMapping(ovf, tid);
+            graph->setTileMapping(totCount, tid);
+            graph->connect(vtx["buffer"], buffer[tid]);
             graph->connect(vtx["totCount"], totCount);
+            graph->connect(vtx["overflow"], ovf);
 
-            if (i == 0) {
-                ocount = totCount;
-                argSizes.push_back({UNSIGNED_INT, 1});
-                cbTensors.push_back(totCount);
+            if (tid == 0) {
+                ocount = ovf;
+                countTotal = totCount;
             }
-            argSizes.push_back({UNSIGNED_LONGLONG, VL_IPU_TRACE_BUFFER_SIZE});
-            cbTensors.push_back(buffer);
-            // std::cout << "adding vertex " << i << std::endl;
         }
-        auto func = graph->addHostFunction("cb_" + name,
-                                           poplar::ArrayRef{argSizes}, {});
-        Call callback{func, poplar::ArrayRef{cbTensors}, {}};
-        Execute program{tsSet};
-        return TsHandles{program, callback, ocount};
+
+        return std::make_unique<TsHandles>(graph, name, tsSet, ocount, buffer, countTotal);
     };
 
     auto tsPreExchange = createTsProgram("preExchange");
     auto tsPreWorkload = createTsProgram("preWorkload");
     auto tsPostWorkload = createTsProgram("postWorkload");
-
+    // Tensor zeroOutBuffer
+    //     = graph->addConstant(UNSIGNED_INT, {VL_NUM_TILES_USED, VL_IPU_TRACE_BUFFER_SIZE * 2},
+    //     0u);
+    // graph->setTileMapping(zeroOutBuffer, 0);
+    // initCopies.add(Copy(zeroOutBuffer, tsPreExchange->buffer));
+    // initCopies.add(Copy(zeroOutBuffer, tsPreWorkload->buffer));
+    // initCopies.add(Copy(zeroOutBuffer, tsPostWorkload->buffer));
+    {
+        std::vector<unsigned> tileSet;
+        for (int tid = 0; tid < VL_NUM_TILES_USED; tid++) { tileSet.push_back(tid); }
+        std::vector<Tensor> initTs
+            = cycleStamp(*graph, initCopies, tileSet, SyncType::EXTERNAL, "initTs");
+        Tensor initTsAll = concat(initTs);
+        auto hfunc
+            = graph->addHostFunction("cb_initTs", {{UNSIGNED_INT, VL_NUM_TILES_USED * 2}}, {});
+        initCopies.add(Call(hfunc, {initTsAll}, {}));
+    }
 #endif
 
     // clang-format off
@@ -163,33 +215,33 @@ void VlPoplarContext::buildReEntrant() {
             Sequence{
 #ifdef VL_INSTRUMENT
                 // timestamp
-                tsPreExchange.program,
+                tsPreExchange->program,
 #endif
                 exchangeCopies
 #ifdef VL_INSTRUMENT
                 // timestamp
-                , tsPreWorkload.program
+                , tsPreWorkload->program
 #endif
                 , Execute{*workload}
 #ifdef VL_INSTRUMENT
-                , tsPostWorkload.program,
+                , tsPostWorkload->program,
                 If {
-                    tsPostWorkload.count[0],
-                    Sequence{},
+                    tsPostWorkload->ovf[0],
                     Sequence{
-                        tsPreExchange.callback,
-                        tsPreWorkload.callback,
-                        tsPostWorkload.callback
-                    }
+                        tsPreExchange->callback(),
+                        tsPreWorkload->callback(),
+                        tsPostWorkload->callback()
+                    },
+                    Sequence{}
                 }
 #endif
             }
         }
 #ifdef VL_INSTRUMENT
         , Sequence{
-            tsPreExchange.callback,
-            tsPreWorkload.callback,
-            tsPostWorkload.callback
+            tsPreExchange->callback(),
+            tsPreWorkload->callback(),
+            tsPostWorkload->callback()
         }
 #endif
     };
@@ -310,9 +362,12 @@ void VlPoplarContext::runReEntrant() {
             ofs = std::ofstream{std::string{OBJ_DIR} + "/" + name + ".txt", std::ios::out};
         }
     };
+    std::vector<uint64_t> initTimeStamps;
+
     TimeTraceDump preExchange{"preExchange"};
     TimeTraceDump preWorkload{"preWorkload"};
     TimeTraceDump postWorkload{"postWorkload"};
+    TimeTraceDump initTsDump{"initTs"};
 
     auto attachCallback = [&](TimeTraceDump& dump) {
         engine->connectHostFunction(
@@ -320,17 +375,21 @@ void VlPoplarContext::runReEntrant() {
             [&](poplar::ArrayRef<const void*> ins, poplar::ArrayRef<void*> /*unused*/) -> void {
                 // std::cout << "dumping " << dump.name << std::endl;
                 std::lock_guard<std::mutex> lk{dump.m_mutex};
-                const uint32_t count = *reinterpret_cast<const uint32_t*>(ins[0]);
-                // std::cout << dump.name << ": count is " << count << " and lastCount " << dump.lastCount << std::endl;
-                while (dump.lastCount != count) {
+                const uint32_t* argp = reinterpret_cast<const uint32_t*>(ins[0]);
+                const uint32_t count = argp[0];
+                const uint64_t* bufferp = reinterpret_cast<const uint64_t*>(argp + 1);
+
+                while (dump.lastCount < count) {
                     int j = dump.lastCount % VL_IPU_TRACE_BUFFER_SIZE;
                     for (int i = 0; i < VL_NUM_TILES_USED; i++) {
-                        const uint64_t* bufferp = reinterpret_cast<const uint64_t*>(ins[1 + i]);
-                        if (!bufferp[j]) {
-                            std::cout << "got zero in " << dump.name << " tile " << i << " pos "
+                        uint64_t vl = bufferp[i * VL_IPU_TRACE_BUFFER_SIZE + j];
+                        if (!vl) {
+                            std::cout << "got zero in " << dump.name << " tile " << i << "pos "
                                       << j << std::endl;
                         }
-                        dump.ofs << bufferp[j] << "    ";
+                        // uint64_t its = initTimeStamps[i];
+
+                        dump.ofs << vl << "    ";
                     }
                     dump.ofs << std::endl;
                     dump.lastCount = dump.lastCount + 1;
@@ -340,6 +399,16 @@ void VlPoplarContext::runReEntrant() {
     attachCallback(preExchange);
     attachCallback(preWorkload);
     attachCallback(postWorkload);
+    engine->connectHostFunction(
+        "cb_initTs", 0,
+        [&](poplar::ArrayRef<const void*> ins, poplar::ArrayRef<void*> /*unused*/) -> void {
+            std::lock_guard<std::mutex> lk{initTsDump.m_mutex};
+            const uint64_t* tsp = reinterpret_cast<const uint64_t*>(ins[0]);
+            for (int tid = 0; tid < VL_NUM_TILES_USED; tid++) {
+                initTsDump.ofs << tsp[tid] << " ";
+            }
+            initTsDump.ofs << std::endl;
+        });
 #endif
     do {
         profile << "init " << invIndex << std::endl;
@@ -368,10 +437,10 @@ void VlPoplarContext::runReEntrant() {
     preExchange.ofs.close();
     preWorkload.ofs.close();
     postWorkload.ofs.close();
+    initTsDump.ofs.close();
+
 #endif
 }
-
-
 
 void VlPoplarContext::addCopy(const std::string& from, const std::string& to, uint32_t size,
                               const std::string& kind) {
@@ -477,61 +546,6 @@ void VlPoplarContext::isHostRequest(poplar::Tensor& tensor, bool isInterruptCond
     }
     hostRequest.push_back(tensor);
 #endif
-}
-
-RuntimeConfig parseArgs(int argc, char* argv[]) {
-
-    namespace opts = boost::program_options;
-
-    RuntimeConfig cfg;
-#ifdef GRAPH_COMPILE
-    opts::options_description opt_desc("Allowed options");
-    // clang-format off
-    opt_desc.add_options()
-    ("help,h", "show the help message and exit")
-    ("log,l",
-        opts::value<boost::filesystem::path>()->value_name("<file>"),
-        "redirect runtime logs to a file")
-    ("instrument-execute,e",
-        opts::bool_switch(&cfg.counters.exec)->default_value(false),
-        "instrument the execution phase")
-    ("instrument-sync1,s",
-        opts::bool_switch(&cfg.counters.sync1)->default_value(false),
-        "instrument the sync1 phase")
-    ("instrument-copy,c",
-        opts::bool_switch(&cfg.counters.copy)->default_value(false),
-        "instrument the copy phase")
-    ("instrument-sync2,S",
-        opts::bool_switch(&cfg.counters.sync2)->default_value(false),
-        "instrument the sync2 phase")
-    ("instrument-condition,C",
-        opts::bool_switch(&cfg.counters.cond)->default_value(false),
-        "instrument the condition evaluation")
-    ("instrument-loop,L",
-        opts::bool_switch(&cfg.counters.loop)->default_value(false),
-        "instrument the simulation loop");
-    // clang-format on
-    opts::variables_map vm;
-    try {
-        opts::store(opts::parse_command_line(argc, argv, opt_desc), vm);
-
-    } catch (opts::error& e) {
-        std::cerr << "Failed parsing arguments: " << e.what() << std::endl;
-        std::exit(-2);
-    }
-
-    if (vm.count("help")) {
-        std::cerr << "Usage: " << argv[0] << " [options]" << std::endl;
-        std::cerr << opt_desc << std::endl;
-        std::exit(-1);
-    }
-    opts::notify(vm);
-#endif
-#ifdef GRAPH_RUN
-    // for +args
-    Verilated::commandArgs(argc, argv);
-#endif
-    return cfg;
 }
 
 int main(int argc, char* argv[]) {

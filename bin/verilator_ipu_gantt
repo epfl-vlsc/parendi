@@ -34,6 +34,8 @@ if __name__ == "__main__":
     preExchangePath = objDir / "preExchange.txt"
     preWorkloadPath = objDir / "preWorkload.txt"
     estimatedPath = objDir / "estimatedCost.txt"
+    initTsPath  = objDir / "initTs.txt"
+
     assertFileExists(postWorkloadPath)
     assertFileExists(preExchangePath)
     assertFileExists(preWorkloadPath)
@@ -43,32 +45,25 @@ if __name__ == "__main__":
     # read the estimates
     estimatedCost = {}
     numTiles = 0
-    with open(estimatedPath, 'r') as fp:
-        pattern = r'__V.*__(?P<VERTEX>\d+)\s*@\s*\[\s*(?P<TILE>\d+),\s*(?P<WORKER>\d+)\s*\]\s*(?P<COST>\d+)'
-        for line in fp.readlines():
-            m = re.match(pattern, line)
-            if m:
-                t = int(m.group("TILE"))
-                if t not in estimatedCost:
-                    estimatedCost[t] = {
-                        "vertex": [],
-                        "worker": [],
-                        "cost" : []
-                    }
-                v = int(m.group("VERTEX"))
-                w = int(m.group("WORKER"))
-                c = int(m.group("COST"))
-                estimatedCost[t]['worker'].append(w)
-                estimatedCost[t]['vertex'].append(v)
-                estimatedCost[t]['cost'].append(c)
-
-                numTiles = max(numTiles, t + 1)
+    estimatedCost = pd.read_table(estimatedPath, delim_whitespace=True)
 
 
 
+    def tileCost(t: int):
+        return np.max(estimatedCost.loc[estimatedCost['Tile'] == t]['Cycles'])
 
+    numTiles = np.max(estimatedCost['Tile'])
+    print(f"Tiles used: {numTiles}")
     exchange = [[] for _ in range(numTiles)]
     workload = [[] for _ in range(numTiles)]
+
+
+    # Read the synchronized timestamps, they will serve as an offset that is subtracted from the other time stamps
+    # We do this to essentially to counter the time shift across multiple IPUs
+    initTs = []
+    with open(initTsPath, 'r') as fp:
+        initTs = [int(x) for x in fp.readlines()[0].strip().split(' ')]
+
 
     with open(postWorkloadPath, 'r') as postfp, open(preExchangePath, 'r') as xfp, open(preWorkloadPath, 'r') as prefp:
         n = 0
@@ -80,17 +75,19 @@ if __name__ == "__main__":
             pret = pre.split()
 
             for tiles in range(numTiles):
-                e0 = int(et[tiles])
-                p0 = int(pret[tiles])
-                p1 = int(pot[tiles])
+                offset = initTs[tiles]
+                e0 = int(et[tiles]) - offset
+                p0 = int(pret[tiles]) - offset
+                p1 = int(pot[tiles]) - offset
 
-                ed = (n, int(et[tiles]), p0 - e0)
-                wd = (n, int(pret[tiles]), p1 - p0)
+                ed = (n, e0, p0 - e0)
+                wd = (n, p0, p1 - p0)
                 exchange[tiles].append(ed)
                 workload[tiles].append(wd)
 
             n += 1
-    minTs = np.min([ts[0][1] for ts in exchange])
+
+    minTs = np.min([e[0][1] for e in exchange])
 
     # zero out the offset
 
@@ -139,7 +136,7 @@ if __name__ == "__main__":
     workload_df = makeDf(workload, "Workload")
 
     workloadAvg_df = pd.DataFrame([dict(Tile = tile, Delta = np.mean(df["Duration"])) for tile, df in workload_df.groupby("Tile")])
-    workloadAvg_est = pd.DataFrame([dict(Tile = tile, Delta = np.max(estimatedCost[tile]['cost'])) for tile in range(numTiles)])
+    workloadAvg_est = pd.DataFrame([dict(Tile = tile, Delta = tileCost(tile)) for tile in range(numTiles)])
 
     plot("Exchange", "lightblue", exchange_df)
     plot("Workload", "tomato", workload_df)
@@ -186,7 +183,7 @@ if __name__ == "__main__":
     worstAvgs = sorted(zip(workloadAvg_df['Delta'], workloadAvg_df['Tile']), key = lambda d: -d[0])
     print("Top 10 cycles:")
     for ((d, t), i) in zip(worstAvgs, range(10)):
-        print(f"\tAt tile {t}: {d} ({np.max(estimatedCost[t]['cost'])})")
+        print(f"\tAt tile {t}: {d} ({tileCost(t)})")
     print(f"Exchnage cycles: {np.max(exchange_df['Duration'])}")
     traceEst = fig.add_bar(
         y = workloadAvg_est['Delta'],
