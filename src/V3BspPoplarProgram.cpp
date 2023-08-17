@@ -205,7 +205,8 @@ public:
                     if (vscp->varp()->user1()) {
                         // AstNode::dedotName()
                         // const std::string newName
-                        //     = vscp->scopep()->nameDotless() + "__ARROW__" + vscp->varp()->name();
+                        //     = vscp->scopep()->nameDotless() + "__ARROW__" +
+                        //     vscp->varp()->name();
                         if (vscp->varp()->origName().empty()) {
                             vscp->varp()->origName(vscp->varp()->name());
                         }
@@ -246,6 +247,9 @@ private:
 
     VNUser1InUse m_user1InUse;
     AstUser1Allocator<AstVar, TensorHandle> m_handles;
+
+    // dump this matrix for summarization
+    std::unique_ptr<std::ofstream> m_exchangeDump;
 
     void initBuiltinTypes() {
         auto newType = [this](VBasicDTypeKwd kwd) {
@@ -431,6 +435,18 @@ private:
                 V3Stats::addStatSum(
                     string{"Poplar, Total off-tile word copies "} + " (" + kind + ")", totalWords);
             }
+            if (m_exchangeDump && kind == "exchange") {
+                auto getClass = [](AstNode* nodep) {
+                    return VN_AS(VN_AS(nodep, MemberSel)->fromp()->dtypep(), ClassRefDType)
+                        ->classp();
+                };
+                AstClass* const sourceClassp = getClass(assignp->rhsp());
+                AstClass* const targetClassp = getClass(assignp->lhsp());
+
+                *m_exchangeDump << sourceClassp->name() << " " << tileIdFrom << " "
+                                << targetClassp->name() << " " << tileIdTo << " "
+                                << totalWords * VL_BYTES_I(VL_IDATASIZE) << std::endl;
+            }
 
             auto toHandle = m_handles(top).tensor;
             UASSERT(!toHandle.empty(), "handle not set!");
@@ -517,7 +533,6 @@ private:
         for (AstCFunc* nodep : reachablep) { patchHostFuncCall(nodep); }
     }
 
-
     void patchHostFuncCall(AstCFunc* cfuncp);
 
     // create a vertex that ORs all the needInteraction signals. Ideally this
@@ -528,6 +543,14 @@ public:
     explicit PoplarComputeGraphBuilder(AstNetlist* nodep)
         : m_newNames{"__VPoplar"} {
         m_netlistp = nodep;
+
+        // open up a file to dump the exchange information
+        m_exchangeDump = std::unique_ptr<std::ofstream>(
+            V3File::new_ofstream(v3Global.opt.makeDir() + "/" + "exchangeDump.txt"));
+        if (m_exchangeDump) {
+            *m_exchangeDump << "SourceVertex SourceTile TargetVertex TargetTile Bytes"
+                            << std::endl;
+        }
         // AstClass*
         initBuiltinTypes();
 

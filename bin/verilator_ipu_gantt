@@ -14,6 +14,7 @@ if __name__ == "__main__":
 
     TRACE_BAR_WIDTH = 1
     DEFAULT_NUM_BINS = 10
+    IPU_TILES = 1472
     parser = argparse.ArgumentParser("plot IPU profile")
     parser.add_argument("obj_dir", metavar="OBJ_DIR", help="object directory (verilator output given by --Mdir)", default="obj_dir")
     parser.add_argument('-n', '--num', metavar="N", help="number of traces to show", default='5', type=int)
@@ -35,6 +36,7 @@ if __name__ == "__main__":
     preWorkloadPath = objDir / "preWorkload.txt"
     estimatedPath = objDir / "estimatedCost.txt"
     initTsPath  = objDir / "initTs.txt"
+    exchangeDumpPath = objDir / "exchangeDump.txt"
 
     assertFileExists(postWorkloadPath)
     assertFileExists(preExchangePath)
@@ -43,19 +45,31 @@ if __name__ == "__main__":
 
 
     # read the estimates
-    estimatedCost = {}
-    numTiles = 0
+
+
     estimatedCost = pd.read_table(estimatedPath, delim_whitespace=True)
 
-
+    exchangeTable = pd.read_table(exchangeDumpPath, delim_whitespace=True)
 
     def tileCost(t: int):
         return np.max(estimatedCost.loc[estimatedCost['Tile'] == t]['Cycles'])
 
-    numTiles = np.max(estimatedCost['Tile'])
-    print(f"Tiles used: {numTiles}")
+    numTiles = np.max(estimatedCost['Tile']) + 1
+    numIpus = int(numTiles / IPU_TILES) + 1
+
+    print(f"Tiles used: {numTiles} in {numIpus} IPUs")
+
     exchange = [[] for _ in range(numTiles)]
     workload = [[] for _ in range(numTiles)]
+    exchangeMapSend = np.zeros((numTiles, numTiles))
+
+    totalBytes = 0
+    for _,row in exchangeTable.iterrows():
+        stile = row['SourceTile']
+        ttile = row['TargetTile']
+        b = row['Bytes']
+        exchangeMapSend[ttile, stile] += b
+        totalBytes += b
 
 
     # Read the synchronized timestamps, they will serve as an offset that is subtracted from the other time stamps
@@ -181,10 +195,33 @@ if __name__ == "__main__":
 
     print(f"Error stats (%):\n\tmean {np.mean(error):0.1f} std {np.std(error):0.1f} median {np.median(error):0.1f}\n\tmax {np.max(error):0.1f} min {np.min(error):0.1f}")
     worstAvgs = sorted(zip(workloadAvg_df['Delta'], workloadAvg_df['Tile']), key = lambda d: -d[0])
-    print("Top 10 cycles:")
+    print("Top 10 stragglers:")
     for ((d, t), i) in zip(worstAvgs, range(10)):
         print(f"\tAt tile {t}: {d} ({tileCost(t)})")
-    print(f"Exchnage cycles: {np.max(exchange_df['Duration'])}")
+    def prettyBytes(b: int):
+        if (b < (1 << 10)):
+            return f"{b:.1f} B"
+        elif (b < (1 << 20)):
+            return f"{b / 1024: 0.1f} KiB"
+        elif (b < (1 << 30)):
+            return f"{b / 1024 / 1024: .1f} MiB"
+        else:
+            return f"{b / 1024 / 1024 / 1024: .1f} GiB"
+    totalExchangeCycle = np.max(exchange_df['Duration'])
+    bytesPerCycle = totalBytes / totalExchangeCycle
+    print(f"Exchange:\n\tcycles {totalExchangeCycle}\n\tbytes {prettyBytes(totalBytes)}\n\tbw {prettyBytes(bytesPerCycle)}/c {prettyBytes(bytesPerCycle * 1.35e9)}/s")
+
+    exchangeMapSendDevice = np.zeros((numIpus, numIpus))
+    for sid in range(numTiles):
+        for tid in range(numTiles):
+            sIpu = int(sid / IPU_TILES)
+            tIpu = int(tid / IPU_TILES)
+            exchangeMapSendDevice[tIpu, sIpu] += exchangeMapSend[tid, sid]
+    print("External exchnage:")
+    for sIpu in range(numIpus):
+        for tIpu in range(numIpus):
+            print(f"\tIPU{sIpu}->IPU{tIpu} {prettyBytes(exchangeMapSendDevice[tIpu, sIpu])}")
+
     traceEst = fig.add_bar(
         y = workloadAvg_est['Delta'],
         x = workloadAvg_est['Tile'],
@@ -260,13 +297,46 @@ if __name__ == "__main__":
     plotECDF(True)
 
 
+    fig.add_heatmap(z = exchangeMapSend,
+                    visible = False, name = "exchange", autocolorscale = True,
+                    hovertemplate = "<br>".join(["txTile:%{x}", "rxTile:%{y}", "bytes:%{z}"]))
+
+    exchangeRx = [sum(exchangeMapSend[r, :]) for r in range(numTiles)]
+    exchangeTx = [sum(exchangeMapSend[:, t]) for t in range(numTiles)]
+
+    fig.add_bar(
+        y = exchangeRx,
+        x = np.arange(numTiles),
+        base = 0,
+        orientation= 'v',
+        name = 'RX',
+        hovertemplate="<br>".join(["RX:%{y}", "Tile:%{x}"]),
+        marker = dict(color =TOMATOR_COLOR_PALE, line=dict(color='tomato', width = 2)),
+        row = 1, col = 1,
+        visible=False,
+    )
+
+    FORESTGREEN_PALE = "rgba(34,139,34, 0.5)"
+    fig.add_bar(
+        y = exchangeTx,
+        x = np.arange(numTiles),
+        base = 0,
+        orientation= 'v',
+        name = 'TX',
+        hovertemplate="<br>".join(["TX:%{y}", "Tile:%{x}"]),
+        marker=dict(color=FORESTGREEN_PALE, line=dict(color='forestgreen', width=2)),
+        row = 1, col = 1,
+        visible=False,
+    )
+
+
     fig.update_layout(
         updatemenus=[
             {
                 "buttons": [
                     {
                         "args": [
-                            {"visible": [True, True, False, False, False, False, False]},
+                            {"visible": [True, True, False, False, False, False, False, False, False, False]},
                             {
                                 'xaxis' : {'title' : 'cycle'},
                                 'yaxis' : {'title' : 'tile'},
@@ -279,7 +349,7 @@ if __name__ == "__main__":
                     },
                     {
                         "args": [
-                            {"visible": [False, False, True, True, False, False, False]},
+                            {"visible": [False, False, True, True, False, False, False, False, False, False]},
                             {
                                 'xaxis' : {'title' : 'tile'},
                                 'yaxis' : {'title' : 'cycles'},
@@ -291,7 +361,7 @@ if __name__ == "__main__":
                     },
                     {
                         "args": [
-                            {"visible": [False, False, False, False, True, True, False]},
+                            {"visible": [False, False, False, False, True, True, False, False, False, False]},
                             {
                                 'xaxis' : {'title' : 'cycles'},
                                 'yaxis' : {'title' : 'count'},
@@ -313,7 +383,7 @@ if __name__ == "__main__":
                                         # 'y': 0,
                                         'steps': [{
                                             'args': [
-                                                        { 'nbinsx': int(i), "visible": [False, False, False, False, True, True, False]}
+                                                        { 'nbinsx': int(i), "visible": [False, False, False, False, True, True, False, False, False]}
                                                     ],
                                             'label': str(i),
                                             'value': i,
@@ -328,7 +398,7 @@ if __name__ == "__main__":
                     },
                     {
                         "args": [
-                            {"visible": [False, False, False, False, False, False, True]},
+                            {"visible": [False, False, False, False, False, False, True, False, False, False]},
                             {
                                 'xaxis' : {'title' : '$P$'},
                                 'yaxis' : {'title' : 'cycles'},
@@ -338,6 +408,30 @@ if __name__ == "__main__":
                         "label": "CDF",
                         "method": "update",
                     },
+                    {
+                        "args": [
+                            {"visible": [False, False, False, False, False, False, False, True, False, False]},
+                            {
+                                'xaxis' : {'title' : 'tx tile'},
+                                'yaxis' : {'title' : 'tx tile'},
+                                'sliders': []
+                            }
+                        ],
+                        "label": "Heat",
+                        "method": "update",
+                    },
+                    {
+                        "args": [
+                            {"visible": [False, False, False, False, False, False, False, False, True, True]},
+                            {
+                                'xaxis' : {'title' : 'tile'},
+                                'yaxis' : {'title' : 'bytes'},
+                                'sliders': []
+                            }
+                        ],
+                        "label": "Exchange",
+                        "method": "update",
+                    }
                 ],
                 "direction": "down",
                 "showactive": True,
