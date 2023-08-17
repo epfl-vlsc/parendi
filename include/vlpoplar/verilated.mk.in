@@ -11,10 +11,10 @@ HOST_DEFINES =  \
 	-DCODELET_LIST="\"$(VMAIN_ROOT).list\""\
 	-DOBJ_DIR="\"$(OBJ_DIR)\""
 
-TRACE_BUFFER_SIZE ?= 1024
+VL_IPU_TRACE_BUFFER_SIZE ?= 1024
 
 HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) \
-				-Wno-parentheses-equality -DVL_IPU_TRACE_BUFFER_SIZE=$(TRACE_BUFFER_SIZE)
+				-Wno-parentheses-equality -DVL_IPU_TRACE_BUFFER_SIZE=$(VL_IPU_TRACE_BUFFER_SIZE)
 
 HOST_FLAGS += -DVL_NUM_TILES_USED=$(TILES_USED)
 HOST_FLAGS += -DVL_NUM_WORKERS_USED=$(WORKERS_USED)
@@ -37,7 +37,7 @@ IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
 	-X-fno-builtin-memcpy \
 	-X-funroll-loops \
 	$(IPU_SCHED_FLAGS) \
-	-DVL_IPU_TRACE_BUFFER_SIZE=$(TRACE_BUFFER_SIZE)
+	-DVL_IPU_TRACE_BUFFER_SIZE=$(VL_IPU_TRACE_BUFFER_SIZE)
 
 
 
@@ -90,6 +90,6 @@ $(VMAIN): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_RUN_FLAGS) -o $@
 
 clean_main:
-	rm $(VMAIN) $(VMAIN_ROOT).graph.bin $(VMAIN)_graph_compiler
+	rm -f $(VMAIN) $(VMAIN_ROOT).graph.bin $(VMAIN)_graph_compiler VlTimeStamp.gp
 clean:
 	rm -rf *.o *.gp *.s report *.graph.bin VMain VMain_graph_compiler
