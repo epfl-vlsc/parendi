@@ -413,7 +413,7 @@ if __name__ == "__main__":
                             {"visible": [False, False, False, False, False, False, False, True, False, False]},
                             {
                                 'xaxis' : {'title' : 'tx tile'},
-                                'yaxis' : {'title' : 'tx tile'},
+                                'yaxis' : {'title' : 'rx tile'},
                                 'sliders': []
                             }
                         ],
