@@ -23,6 +23,7 @@
 #include "V3Branch.h"
 #include "V3Broken.h"
 #include "V3BspDifferential.h"
+#include "V3BspIpuTiles.h"
 #include "V3BspPoplarProgram.h"
 #include "V3BspSched.h"
 #include "V3BspStraggler.h"
@@ -87,8 +88,8 @@
 #include "V3Scoreboard.h"
 #include "V3Slice.h"
 #include "V3Split.h"
-#include "V3SplitComb.h"
 #include "V3SplitAs.h"
+#include "V3SplitComb.h"
 #include "V3SplitVar.h"
 #include "V3SplitVarExtra.h"
 #include "V3Stats.h"
@@ -318,7 +319,7 @@ static void process() {
     if (!(v3Global.opt.xmlOnly() && !v3Global.opt.flatten())) {
         // Inline all tasks
         V3Task::taskAll(v3Global.rootp());
-         // Push constants across variables and remove redundant assignments
+        // Push constants across variables and remove redundant assignments
         V3Const::constifyAll(v3Global.rootp());
     }
 
@@ -353,22 +354,20 @@ static void process() {
         // (May convert some ALWAYS to combo blocks, so should be before V3Gate step.)
         V3Active::activeAll(v3Global.rootp());
 
-
         // split variables to remove combinational loops
         V3SplitVarExtra::splitVariableExtra(v3Global.rootp());
 
         // Split single ALWAYS blocks into multiple blocks for better ordering chances
         V3Split::splitAlwaysAll(v3Global.rootp());
 
-        // Split always_comb blocks into as many as possible, could remove some "false" combinational loops
-        // and provides better reordering chances. The V3Split::splitAlwaysAll is slightly
-        // geared towards clocked blocks and NBA assignments and does not do so well with
-        // combinatioal logic.
+        // Split always_comb blocks into as many as possible, could remove some "false"
+        // combinational loops and provides better reordering chances. The V3Split::splitAlwaysAll
+        // is slightly geared towards clocked blocks and NBA assignments and does not do so well
+        // with combinatioal logic.
         V3SplitComb::splitAlwaysComb(v3Global.rootp());
         // V3SplitComb potentially creates a lot of dead code. We should remove them
         // as early as possible.
         V3Dead::deadifyAll(v3Global.rootp());
-
 
         V3SplitAs::splitAsAll(v3Global.rootp());
 
@@ -471,6 +470,9 @@ static void process() {
             // use --diff-exchange-threshold to tune
             V3BspDifferential::differentialUnpack(v3Global.rootp());
         }
+
+        // set the tile ids
+        V3BspIpuTiles::tileAll(v3Global.rootp());
         // create a poplar program
         V3BspPoplarProgram::createProgram(v3Global.rootp());
     }

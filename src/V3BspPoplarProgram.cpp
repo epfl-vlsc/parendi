@@ -33,84 +33,6 @@
 
 VL_DEFINE_DEBUG_FUNCTIONS;
 
-class PoplarSetTileAndWorkerVisitor final {
-private:
-    uint32_t m_numAvailTiles;
-    uint32_t m_numAvailWorkers;
-    AstNetlist* m_netlistp;
-    void doLocate(const std::vector<AstClass*> unlocated) {
-        if (unlocated.size() > m_numAvailTiles * m_numAvailWorkers) {
-            m_netlistp->v3warn(UNOPT, "Not enough tiles, exceeding worker limit: There are  "
-                                          << unlocated.size() << " parallel process but have only "
-                                          << m_numAvailTiles << "*" << m_numAvailWorkers
-                                          << " tiles*workers" << endl);
-        }
-        // simple tile assignment
-        uint32_t maxTileId = 0;
-        uint32_t tid = 0;
-        uint32_t wid = 0;
-        for (AstClass* classp : unlocated) {
-            maxTileId = std::max(maxTileId, tid);
-            auto newFlag = classp->flag().withTileId(tid++).withWorkerId(wid);
-            classp->flag(newFlag);
-            if (tid == m_numAvailTiles) {
-                tid = 0;
-                wid++;
-            }
-        }
-    }
-
-    void forEachBspClass(std::function<void(AstClass*)>&& fn) {
-        for (AstVarScope* vscp = m_netlistp->topScopep()->scopep()->varsp(); vscp;
-             vscp = VN_CAST(vscp->nextp(), VarScope)) {
-            AstClassRefDType* const clsRefDTypep = VN_CAST(vscp->dtypep(), ClassRefDType);
-            if (!clsRefDTypep || !clsRefDTypep->classp()->flag().isBsp()) { continue; }
-            AstClass* const classp = clsRefDTypep->classp();
-            fn(classp);
-        }
-    }
-    void fixTileCountAndPromoteToSupervisor() {
-        uint32_t maxTileId = 0;
-        uint32_t maxWorkerId = 0;
-        forEachBspClass([&](AstClass* classp) {
-            maxTileId = std::max(classp->flag().tileId(), maxTileId);
-            maxWorkerId = std::max(classp->flag().workerId(), maxWorkerId);
-        });
-        // set the tile count, potentially lower than the requested tile count
-        // by the user (i.e, --tiles)
-        v3Global.opt.tiles(maxTileId + 1);  // this is needed later to pass to the runtime
-        v3Global.opt.workers(maxWorkerId + 1);
-        if (maxWorkerId == 0 && v3Global.opt.fIpuSupervisor()) {
-            // optionally promote every class to a supervisor, it's good for performance
-            UINFO(3, "Promoting all vertices to supervisors" << endl);
-            forEachBspClass([](AstClass* classp) {
-                classp->flag(classp->flag().append(VClassFlag::BSP_SUPERVISOR));
-            });
-        }
-    }
-
-public:
-    explicit PoplarSetTileAndWorkerVisitor(AstNetlist* netlistp) {
-        // collect all the bsp classes that do not have tile or worker id
-        // const auto numAvailTiles = V3Global.opt
-        m_netlistp = netlistp;
-        m_numAvailTiles = static_cast<uint32_t>(v3Global.opt.tiles());
-        m_numAvailWorkers = static_cast<uint32_t>(v3Global.opt.workers());
-        std::vector<AstClass*> unlocatedCompute;
-        std::vector<AstClass*> unlocatedInit;
-        forEachBspClass([&](AstClass* classp) {
-            if (classp->flag().isBspInit())
-                unlocatedInit.push_back(classp);
-            else
-                unlocatedCompute.push_back(classp);
-        });
-
-        doLocate(unlocatedCompute);
-        doLocate(unlocatedInit);
-        fixTileCountAndPromoteToSupervisor();
-    }
-};
-
 /// @brief  replaces AstVarRefs of members of the classes derived from the base
 /// V3BspSched::V3BspModules::builtinBaseClass with AstVarRefView so that the code generation
 /// can simply emit either a reinterpret_cast or a placement new. We do this because the poplar
@@ -720,7 +642,6 @@ void PoplarComputeGraphBuilder::patchHostFuncCall(AstCFunc* cfuncp) {
 void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     // reoder passes only if you know what you are doing
     UINFO(3, "Creating poplar program" << endl);
-    { PoplarSetTileAndWorkerVisitor{nodep}; }
 
     V3BspPlusArgs::makeCache(nodep);
 

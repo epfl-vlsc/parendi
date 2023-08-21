@@ -55,7 +55,7 @@ if __name__ == "__main__":
         return np.max(estimatedCost.loc[estimatedCost['Tile'] == t]['Cycles'])
 
     numTiles = np.max(estimatedCost['Tile']) + 1
-    numIpus = int(numTiles / IPU_TILES) + 1
+    numIpus = int((numTiles - 1) / IPU_TILES) + 1
 
     print(f"Tiles used: {numTiles} in {numIpus} IPUs")
 

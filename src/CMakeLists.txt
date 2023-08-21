@@ -48,6 +48,7 @@ set(HEADERS
     V3BspDifferential.h
     V3BspDpi.h
     V3BspGraph.h
+    V3BspIpuTiles.h
     V3BspMerger.h
     V3BspModules.h
     V3BspNetlistGraph.h
@@ -205,6 +206,7 @@ set(COMMON_SOURCES
     V3BspDifferential.cpp
     V3BspDpi.cpp
     V3BspGraph.cpp
+    V3BspIpuTiles.cpp
     V3BspMerger.cpp
     V3BspModules.cpp
     V3BspPliCheck.cpp
@@ -543,7 +545,8 @@ if (WIN32)
     target_include_directories(${verilator} PRIVATE ../platform/win32)
     target_link_libraries(${verilator} PRIVATE bcrypt psapi Threads::Threads)
 else()
-target_link_libraries(${verilator} PRIVATE Threads::Threads)
+# Hacky way of linking KaHyPar, fix later. Add it as a submodule... find it systematically
+target_link_libraries(${verilator} PRIVATE Threads::Threads /usr/local/lib/libkahypar.so)
 endif()
 
 

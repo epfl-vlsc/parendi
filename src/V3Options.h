@@ -312,6 +312,8 @@ private:
     int         m_maxUnpackCopies = 4096;   // main poplar switch: --max-unpack-copies
     int         m_diffExchangeThreshold = 16; // main poplar switch: --diff-exchange-threshold
     double      m_resyncThreshold = 0.8; // main poplar switch: --resync-threshold
+    double      m_kahyparImbalance = 0.03; // main poplar switch: --kahypar-imbalance
+    int         m_tilesPerIpu       = 1472; // main poplar switch: --tiles-per-ipu
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
     VTimescale  m_timeDefaultUnit;  // main switch: --timescale
@@ -384,6 +386,7 @@ private:
     bool m_fIpuDiffExchange = true; // main switch: -fno-ipu-diff-exchange: disable differential exchange
     bool m_fSplitExtraWide = false; // main switch: -fsplit-extra-wide: split extra wide variables
     bool m_fIpuResync = false;      // main switch: -fipu-resync: resynchronize bsp partitions
+    bool m_fInterIpuComm = true; // main switch: -fno-inter-ipu-comm: do not optimize inter-ipu communcation
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -547,6 +550,8 @@ public:
     int maxUnpackCopies() const VL_MT_SAFE { return m_maxUnpackCopies; }
     int diffExchangeThreshold() const VL_MT_SAFE { return m_diffExchangeThreshold; }
     double resyncThreshold() const VL_MT_SAFE { return m_resyncThreshold; }
+    double kahyparImbalance() const VL_MT_SAFE { return m_kahyparImbalance; }
+    int tilesPerIpu() const VL_MT_SAFE { return m_tilesPerIpu; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }
     VTimescale timeOverridePrec() const { return m_timeOverridePrec; }
@@ -656,6 +661,7 @@ public:
     bool fIpuDiffExchnage() const { return m_fIpuDiffExchange; }
     bool fSplitExtraWide() const { return m_fSplitExtraWide; }
     bool fIpuResync() const { return m_fIpuResync; }
+    bool fInterIpuComm() const { return m_fInterIpuComm; }
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
     string traceSourceBase() const { return m_traceFormat.sourceName(); }

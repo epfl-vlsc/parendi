@@ -59,6 +59,7 @@ find_package(BISON)
 find_package(FLEX)
 find_package(Threads REQUIRED)
 
+
 # Build
 #set_property(GLOBAL PROPERTY JOB_POOLS one_job=1)
 
@@ -103,6 +104,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/verilator-config-version.cmake DESTINA
 
 foreach (program
     verilator_gantt
+    verilator_ipu_gantt
     verilator_ccache_report
     verilator_difftree
     verilator_profcfunc

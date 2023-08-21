@@ -1228,7 +1228,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-fipu-diff-exchange", FOnOff, &m_fIpuDiffExchange);
     DECL_OPTION("-fsplit-extra-wide", FOnOff, &m_fSplitExtraWide);
     DECL_OPTION("-fipu-resync", FOnOff, &m_fIpuResync);
-
+    DECL_OPTION("-finter-ipu-comm", FOnOff, &m_fInterIpuComm);
     DECL_OPTION("-G", CbPartialMatch, [this](const char* optp) { addParameter(optp, false); });
     DECL_OPTION("-gate-stmts", Set, &m_gateStmts);
     DECL_OPTION("-gdb", CbCall, []() {});  // Processed only in bin/verilator shell
@@ -1615,6 +1615,18 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
         m_resyncThreshold = std::atof(valp);
         if (m_resyncThreshold > 1.0 || m_resyncThreshold < 0.0) {
             fl->v3fatal("--resync-threshold should be >= 0.0 and =< 1.0 but was given " << valp << endl);
+        }
+    });
+    DECL_OPTION("-kahypar-imbalance", CbVal, [this, fl](const char* valp) {
+        m_kahyparImbalance = std::atof(valp);
+        if (m_kahyparImbalance > 1.0 || m_kahyparImbalance < 0.0) {
+            fl->v3fatal("--kahypar-imbalance should be >= 0.0 and <= 1.0 but was given " << valp << endl);
+        }
+    });
+    DECL_OPTION("-tiles-per-ipu", CbVal, [this, fl](const char* valp) {
+        m_tilesPerIpu = std::atoi(valp);
+        if (m_tilesPerIpu < 1) {
+            fl->v3fatal("--tiles-per-ipu should be at least 1 but was given " << valp << endl);
         }
     });
     DECL_OPTION("-Wwarn-", CbPartialMatch, [this, fl, &parser](const char* optp) {
