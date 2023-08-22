@@ -163,7 +163,6 @@ private:
         bool tryIncr(NetId id, int v) {
             auto it = m_index.find(id);
             if (it != m_index.end()) {
-                m_weights[it->second] += v;
                 m_edgeNodes[it->second].insert(id.sourcep->user1());
                 m_edgeNodes[it->second].insert(id.targetp->user1());
                 return true;
@@ -180,11 +179,27 @@ private:
                 // add the two end nodes to the hyperedge
                 m_edgeNodes.back().insert(id.sourcep->user1());
                 m_edgeNodes.back().insert(id.targetp->user1());
-                // keep the weight
+                // keep the weight, i.e., total number of words on the net
                 m_weights.push_back(v);
             }
         }
 
+        inline int baseCost(int fanout) {
+            if (fanout == 1) {
+                return 1194;
+            } else if (fanout <= 8) {
+                return 1254;
+            } else if (fanout <= 16) {
+                return 1264;
+            } else if (fanout <= 32) {
+                return 1289;
+            } else if (fanout <= 64) {
+                return 1322;
+            } else {
+                return 1325;
+            }
+        }
+        inline int fanoutCost(int words, int fanout) { return baseCost(fanout) + words * 2; }
         void build() {
             // In a hypergraph with N edges, we have and edgeIndex array of size N + 1
             // that is used to index into a second array that contains the list of
@@ -198,6 +213,11 @@ private:
                 std::copy(nodeSet.cbegin(), nodeSet.cend(), std::back_inserter(m_hyperedges));
             }
             m_edgeIndex.push_back(m_hyperedges.size());
+            for (int ix = 0; ix < m_weights.size(); ix++) {
+                int words = m_weights[ix];
+                const int fanout = m_edgeNodes[ix].size() - 1;
+                m_weights[ix] = fanoutCost(words, fanout);
+            }
         }
 
         NetBuilder() = default;
@@ -345,12 +365,34 @@ private:
             UASSERT(assigned, "could not assign to any IPU");
         }
         int ipuId = 0;
-        for (auto& ipu : ipuNodes) {
+
+        for (int ipuId = 0; ipuId < ipuNodes.size(); ipuId++) {
             int tileId = 0;
             int workerId = 0;
-            for (AstClass* const classp : ipu) {}
-            ipuId++;
+            const int tileIdBase = ipuId * v3Global.opt.tilesPerIpu();
+            const int tilesInLastIpu = (v3Global.opt.tiles() % v3Global.opt.tilesPerIpu())
+                                           ? (v3Global.opt.tiles() % v3Global.opt.tilesPerIpu())
+                                           : v3Global.opt.tilesPerIpu();
+            const int tileIdLen
+                = (ipuId == ipuNodes.size() - 1) ? tilesInLastIpu : v3Global.opt.tilesPerIpu();
+            for (AstClass* const classp : ipuNodes[ipuId]) {
+                int newTileId = tileId + tileIdBase;
+                UASSERT(newTileId < v3Global.opt.tiles(), "overflow in tileid");
+                UASSERT(workerId < v3Global.opt.workers(), "overflow in workerid");
+                VClassFlag flag = classp->flag();
+                UINFO(10, "reassign (" << flag.tileId() << ", " << flag.workerId() << ") to ("
+                                       << newTileId << "," << workerId << ")" << endl);
+                classp->flag(flag.withTileId(newTileId).withWorkerId(workerId));
+                if (tileId == tileIdLen - 1) {
+                    workerId += 1;
+                    tileId = 0;
+                } else {
+                    tileId++;
+                }
+            }
+            UINFO(5, "Reassignment finished for IPU" << ipuId << endl);
         }
+
     }
 
     explicit PartitionAndAssignTileNumbers(AstNetlist* netlistp,
