@@ -79,7 +79,11 @@ else()
     add_subdirectory(src)
 endif()
 
+# KaHyPar partitioning library
+add_subdirectory(external)
+
 add_subdirectory(include)
+
 
 # Configuration and Installation
 

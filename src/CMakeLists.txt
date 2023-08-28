@@ -546,7 +546,7 @@ if (WIN32)
     target_link_libraries(${verilator} PRIVATE bcrypt psapi Threads::Threads)
 else()
 # Hacky way of linking KaHyPar, fix later. Add it as a submodule... find it systematically
-target_link_libraries(${verilator} PRIVATE Threads::Threads /usr/local/lib/libkahypar.so)
+target_link_libraries(${verilator} PRIVATE Threads::Threads vltKahypar)
 endif()
 
 

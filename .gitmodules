@@ -1,0 +1,4 @@
+[submodule "external/kahypar"]
+	path = external/kahypar
+	url = https://github.com/kahypar/kahypar.git
+	branch = 02f50d2ced65b408ca56820bf6d18a7c47a8518c
