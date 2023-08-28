@@ -15,6 +15,8 @@ set_target_properties(vltKahypar PROPERTIES
     PUBLIC_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/kahypar/include/libkahypar.h
     CXX_STANDARD 17)
 
+target_include_directories(vltKahypar PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/kahypar/include)
+
 target_include_directories(vltKahypar PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/kahypar/)
 
 target_include_directories(vltKahypar PRIVATE
