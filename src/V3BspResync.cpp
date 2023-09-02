@@ -111,7 +111,14 @@ public:
             SeqVertex* const seqp
                 = new SeqVertex{graphp.get(), seqCost, senp, std::move(logicsp), lvsp};
             seqp->unopt(unopt);
-            for (AstVarScope* vscp : lvsp) { writersp.emplace(vscp, seqp); }
+            for (AstVarScope* vscp : lvsp) {
+                if (vscp->dtypep()->arrayUnpackedElements() * vscp->dtypep()->widthWords()
+                    >= v3Global.opt.maxUnpackCopies()) {
+                    // if an lv array is too large, do not even try to retime.
+                    seqp->unopt(true);
+                }
+                writersp.emplace(vscp, seqp);
+            }
             graphsp.emplace_back(std::move(graphp));
             sinksp.push_back(seqp);
         }
@@ -675,7 +682,6 @@ private:
                 AstAssign* const newp = new AstAssign{nodep->fileline(), mkSel(nodep->lhsp(), ix),
                                                       mkSel(nodep->rhsp(), ix)};
                 unrolledp = AstNode::addNext(unrolledp, newp);
-
             }
             nodep->replaceWith(unrolledp);
             VL_DO_DANGLING(nodep->deleteTree(), nodep);
