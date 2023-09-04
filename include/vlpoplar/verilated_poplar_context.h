@@ -133,6 +133,9 @@ private:
     std::unordered_map<std::string, poplar::Tensor> tensors;
     std::unordered_map<std::string, std::unique_ptr<HostBuffer>> hbuffers;
     std::unordered_map<std::string, poplar::VertexRef> vertices;
+    std::unordered_map<std::string, std::string> nextToCurrent;
+    // std::unordered_map<std::string, std::string> currentToNext;
+
     std::vector<poplar::Tensor> hostRequest;
     poplar::Tensor interruptCond;
     poplar::program::Sequence initCopies;
@@ -152,6 +155,7 @@ private:
         }
         return it->second;
     }
+    poplar::Tensor addTensor(uint32_t size, const std::string& name);
     void dumpCycleTrace(std::ostream& os);
 public:
     void init(int argc, char* argv[]);
@@ -160,6 +164,7 @@ public:
     void run();
     void runReEntrant();
     void addCopy(const std::string& from, const std::string& to, uint32_t size, const std::string& kind);
+    void addNextCurrentPair(const std::string& next, const std::string& current, uint32_t size);
     template <std::size_t T_Words>
     void addInitConstCopy(const VlWide<T_Words>& value, const std::string& to) {
 #ifdef GRAPH_COMPILE
@@ -185,7 +190,7 @@ public:
     void setPerfEstimate(poplar::VertexRef&, int) {}
     poplar::VertexRef getOrAddVertex(const std::string& name, const std::string& where);
 
-    poplar::Tensor addTensor(uint32_t size, const std::string& name);
+    poplar::Tensor getOrAddTensor(uint32_t size, const std::string& name);
 
     template <typename T>
     inline T getHostData(const std::string& handle) {

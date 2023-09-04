@@ -33,7 +33,10 @@
 
 // extra types
 #include "vlpoplar/verilated_ipu_types.h"
+#include <poplar/Vertex.hpp>
 
+using Vec   = poplar::InOut<poplar::Vector<IData, poplar::VectorLayout::COMPACT_PTR, alignof(QData)>>;
+using VecIn = poplar::Input<poplar::Vector<IData, poplar::VectorLayout::COMPACT_PTR, alignof(QData)>>;
 
 //===================================================================
 /// Verilog wide packed bit container.

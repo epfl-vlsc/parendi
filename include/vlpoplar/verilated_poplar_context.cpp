@@ -79,6 +79,7 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     }
 #endif
     // std::cout << "initializing simulation context " << std::endl;
+    vprog->constructStatePairs();
     vprog->constructAll();
     vprog->initialize();
     vprog->exchange();
@@ -289,15 +290,12 @@ void VlPoplarContext::buildReEntrant() {
         std::cout << flags << std::endl;
     }
 #endif
-    float lastProg = 0.0;
+
     exec = std::make_unique<Executable>(
-        compileGraph(*graph, programs, flags, [&lastProg](int step, int total) {
+        compileGraph(*graph, programs, flags, [](int step, int total) {
             float newProg = static_cast<float>(step) / static_cast<float>(total) * 100.0;
-            if (newProg - lastProg >= 10.0f) {
-                std::cout << "Graph compilation: " << static_cast<int>(newProg) << "%"
-                          << std::endl;
-                lastProg = newProg;
-            }
+            std::cout << "Graph compilation: " << static_cast<int>(newProg) << "% (step " << step
+                      << " of " << total << ")" << std::endl;
         }));
 
 #ifndef GRAPH_RUN
@@ -442,16 +440,31 @@ void VlPoplarContext::runReEntrant() {
 #endif
 }
 
+void VlPoplarContext::addNextCurrentPair(const std::string& next, const std::string& current,
+                                         uint32_t size) {
+    if (tensors.count(next) == 0) {
+
+        poplar::Tensor tNext = addTensor(size, next);
+        poplar::Tensor tCurrent = addTensor(size, current);
+        nextToCurrent.emplace(next, current);
+        exchangeCopies.add(poplar::program::Copy{tNext, tCurrent, true, "apply " + next});
+    }
+    if (tensors.count(current) == 0) {
+        // currentToNext.emplace(current, next);
+        poplar::Tensor currentTensor = getTensor(nextToCurrent[next]);
+        tensors.emplace(current, currentTensor);
+    }
+}
+
 void VlPoplarContext::addCopy(const std::string& from, const std::string& to, uint32_t size,
                               const std::string& kind) {
 #ifdef GRAPH_COMPILE
+    if (kind == "exchange") { return; }
     poplar::Tensor fromTensor = getTensor(from);
     poplar::Tensor toTensor = getTensor(to);
     poplar::program::Copy cp{fromTensor, toTensor, true, from + " ==> " + to};
     if (kind == "initialize") {
         initCopies.add(cp);
-    } else if (kind == "exchange") {
-        exchangeCopies.add(cp);
     } else if (kind == "dpiExchange") {
         dpiCopies.add(cp);
     } else if (kind == "dpiBroadcast") {
@@ -462,8 +475,8 @@ void VlPoplarContext::addCopy(const std::string& from, const std::string& to, ui
     }
 #endif
 }
+
 poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name) {
-#ifdef GRAPH_COMPILE
     poplar::Tensor t = graph->addVariable(
         poplar::UNSIGNED_INT,
         {std::max(size, 2u) /*pad single-word tensors to 8 bytes to optimize on-tile copies*/},
@@ -476,6 +489,14 @@ poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name
     }
     tensors.emplace(name, t);
     return t;
+}
+poplar::Tensor VlPoplarContext::getOrAddTensor(uint32_t size, const std::string& name) {
+#ifdef GRAPH_COMPILE
+    if (tensors.count(name) == 0) {
+        return addTensor(size, name);
+    } else {
+        return getTensor(name);
+    }
 #else
     return poplar::Tensor{};
 #endif

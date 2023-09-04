@@ -361,7 +361,13 @@ private:
             = new AstVar{oldVscp->varp()->fileline(), VVarType::MEMBER,
                          freshName(oldVscp->varp()->name()), oldVscp->varp()->dtypep()};
         newVarp->lifetime(VLifetime::AUTOMATIC);
-        newVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
+
+        if (m_vscpRefs(oldVscp).isClocked() && consumer) {
+            newVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
+        } else {
+            newVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
+        }
+
         classp->addStmtsp(newVarp);
 
         AstVarScope* const newVscp = new AstVarScope{oldVscp->fileline(), scopep, newVarp};
@@ -370,7 +376,7 @@ private:
         oldVscp->user2(true);
 
         if (consumer) {
-            UASSERT(instVscp, "expected none-null");
+            UASSERT(instVscp, "expected non-null");
             m_vscpRefs(oldVscp).consumer(consumer);
             m_vscpRefs(oldVscp).addTargetp({instVscp, newVarp});
         }
@@ -397,6 +403,7 @@ private:
         AstVar* prevVarp = new AstVar{itemp->fileline(), VVarType::MEMBER, freshName(itemp),
                                       m_netlistp->findBitDType(1, 1, VSigning::UNSIGNED)};
         prevVarp->lifetime(VLifetime::AUTOMATIC);
+        prevVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
         classp->addStmtsp(prevVarp);
         AstVarScope* prevVscp = new AstVarScope{prevVarp->fileline(), scopep, prevVarp};
         scopep->addVarsp(prevVscp);
@@ -567,7 +574,7 @@ private:
                     auto& refInfo = m_vscpRefs(vscp);
                     vscp->user2(true);  // visited
                     AstVar* const varp = new AstVar{vscp->varp()->fileline(), VVarType::MEMBER,
-                                                    freshName(vscp), vscp->varp()->dtypep()};
+                                                    "active___" + freshName(vscp), vscp->varp()->dtypep()};
                     varp->origName(vscp->name());
                     varp->lifetime(VLifetime::AUTOMATIC);
                     classp->addStmtsp(varp);
@@ -577,16 +584,20 @@ private:
                     vscp->user3p(newVscp);
                     // the variable could be produced by another partition, the init
                     // class or the current active. In the latter case, we can keep
-                    // it on the stack as an optimizatin, but we don't do it yet.
+                    // it on the stack as an optimization, but we don't do it yet.
                     if (supportedDType(vscp->dtypep())) {
                         UASSERT_OBJ(!refInfo.isOwned(graphp), vscp,
                                     "Expected to be produced by another");
                         if (refInfo.isClocked() || refInfo.initp().first) {
-                            // not produced here but consumed
-                            varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
-                            // need to recieve it
+                            if (refInfo.isOwned(graphp)) {
+                                varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
+                                V3Stats::addStatSum("BspModules, local variable", 1);
+                            } else {
+                                // not produced here but consumed, so need to recieve it
+                                varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
+                                V3Stats::addStatSum("BspModules, input variable", 1);
+                            }
                             refInfo.addTargetp(std::make_pair(instVscp, varp));
-                            V3Stats::addStatSum("BspModules, input variable", 1);
                         }
                     } else {
                         vscp->v3error("Unknown data type " << vscp->dtypep()->skipRefp() << endl);

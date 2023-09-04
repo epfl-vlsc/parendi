@@ -272,6 +272,9 @@ private:
             // receives the diffs
             // create the condition bitvector for the update
             auto& scratchpad = getScratchpad(sourcep);
+            // no longer just input, mark as local and clear input
+            varp->bspFlag(
+                varp->bspFlag().clear(VBspFlag::MEMBER_INPUT).append(VBspFlag::MEMBER_LOCAL));
             AstVar* const condClonep = scratchpad.subst.condp->varp()->cloneTree(false);
             condClonep->bspFlag({VBspFlag::MEMBER_INPUT});
             condClonep->lifetime(VLifetime::STATIC);

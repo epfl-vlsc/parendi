@@ -1296,7 +1296,11 @@ public:
         // UASSERT(valid(), "invalid flag combination" << ascii() << endl);
         return *this;
     }
-
+    VBspFlag& clear(EFlags v) {
+        m_flag &= (~v);
+        return *this;
+    }
+    bool isInputOnly() const { return m_flag == MEMBER_INPUT; }
     bool hasLocal() const { return (m_flag & MEMBER_LOCAL); }
     bool hasInput() const { return (m_flag & MEMBER_INPUT); }
     bool hasOutput() const { return (m_flag & MEMBER_OUTPUT); }

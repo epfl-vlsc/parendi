@@ -228,6 +228,7 @@ private:
             return dtypep->widthWords() * dtypep->arrayUnpackedElements();
         }
     }
+
     AstCFunc* createVertexCons(AstClass* classp, uint32_t tileId) {
         FileLine* fl = classp->fileline();
         AstCFunc* ctorp = new AstCFunc{classp->fileline(), "ctor_" + classp->name(),
@@ -280,7 +281,7 @@ private:
 
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
-                mkCall(fl, "addTensor",
+                mkCall(fl, "getOrAddTensor",
                        {new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize},
                         new AstConst{fl, AstConst::String{}, tensorDeviceHandle}})};
             ctorp->addStmtsp(mkTensorp);
@@ -327,6 +328,63 @@ private:
         return ctorp;
     }
 
+    void addNextCurrentPairs(AstCFunc* exchangep) {
+
+        std::vector<AstNode*> stmtsp;
+        for (AstNode* nodep = exchangep->stmtsp(); nodep;) {
+            UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
+            AstAssign* const assignp = VN_AS(nodep, Assign);
+            AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
+            AstVar* const fromp = VN_AS(assignp->rhsp(), MemberSel)->varp();
+            const string nextHandle = m_handles(fromp).tensor;
+            UASSERT(!nextHandle.empty(), "handle not set!");
+            const string currentHandle = m_handles(top).tensor;
+            UASSERT(!currentHandle.empty(), "handle not set!");
+            const auto totalWords
+                = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
+
+            AstNode* newp = new AstStmtExpr{
+                nodep->fileline(),
+                mkCall(
+                    assignp->fileline(), "addNextCurrentPair",
+                    {new AstConst{nodep->fileline(), AstConst::String{}, nextHandle} /*source*/,
+                     new AstConst{nodep->fileline(), AstConst::String{}, currentHandle} /*target*/,
+                     new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
+                                  static_cast<uint32_t>(totalWords)} /*number of words*/})};
+            AstNode* const nextp = nodep->nextp();
+            stmtsp.push_back(newp);
+            // newp->addHereThisAsNext(newCommentp);
+            nodep = nextp;
+        }
+        AstCFunc* splitFuncp = nullptr;
+        const uint32_t maxFuncStmts = static_cast<uint32_t>(v3Global.opt.outputSplit());
+        uint32_t funcSize = 0;
+        AstCFunc* const cfuncp = new AstCFunc{exchangep->fileline(), "constructStatePairs",
+                                              exchangep->scopep(), "void"};
+        exchangep->scopep()->addBlocksp(cfuncp);
+        cfuncp->isInline(false);
+        cfuncp->isMethod(true);
+        cfuncp->dontCombine(true);
+        for (AstNode* const nodep : stmtsp) {
+            if (!splitFuncp || (funcSize >= maxFuncStmts)) {
+                funcSize = 0;
+                splitFuncp = new AstCFunc{cfuncp->fileline(), m_newNames.get("statepairsplit"),
+                                          cfuncp->scopep(), "void"};
+                splitFuncp->isInline(false);
+                splitFuncp->isMethod(true);
+                splitFuncp->dontCombine(true);
+                cfuncp->scopep()->addBlocksp(splitFuncp);
+                AstCCall* const callp = new AstCCall{cfuncp->fileline(), splitFuncp};
+                callp->dtypeSetVoid();
+                cfuncp->addStmtsp(callp->makeStmt());
+            }
+            funcSize++;
+            splitFuncp->addStmtsp(nodep);
+        }
+    }
+    AstClass* getClass(AstNode* nodep) {
+        return VN_AS(VN_AS(nodep, MemberSel)->fromp()->dtypep(), ClassRefDType)->classp();
+    }
     void addCopies(AstCFunc* cfuncp, const string& kind) {
 
         std::vector<AstNode*> nodesp;
@@ -358,10 +416,7 @@ private:
                     string{"Poplar, Total off-tile word copies "} + " (" + kind + ")", totalWords);
             }
             if (m_exchangeDump && kind == "exchange") {
-                auto getClass = [](AstNode* nodep) {
-                    return VN_AS(VN_AS(nodep, MemberSel)->fromp()->dtypep(), ClassRefDType)
-                        ->classp();
-                };
+
                 AstClass* const sourceClassp = getClass(assignp->rhsp());
                 AstClass* const targetClassp = getClass(assignp->lhsp());
 
@@ -522,6 +577,9 @@ public:
         // create a poplar program with the following structure:
         // Add the copy operations
         m_netlistp->foreach([this](AstCFunc* cfuncp) {
+            if (cfuncp->name() == "exchange") {
+                addNextCurrentPairs(cfuncp);
+            }
             if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize"
                 || cfuncp->name() == "dpiExchange" || cfuncp->name() == "dpiBroadcast") {
                 // create copy operations
