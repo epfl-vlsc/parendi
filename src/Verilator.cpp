@@ -716,7 +716,7 @@ static void verilate(const string& argString) {
             V3EmitCMake::emit();
         }
     }
-    if (v3Global.opt.makeDepend().isTrue()) {
+    if (v3Global.opt.makeDepend().isTrue() && !v3Global.opt.poplar()) {
         string filename = v3Global.opt.makeDir() + "/" + v3Global.opt.prefix();
         filename += v3Global.opt.hierTop() ? "__hierVer.d" : "__ver.d";
         V3File::writeDepend(filename);
