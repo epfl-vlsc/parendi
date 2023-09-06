@@ -156,7 +156,7 @@ private:
     // std::chrono::time_point<std::chrono::high_resolution_clock> m_startTime;
     // double m_simRateLast;
     poplar::Tensor getTensor(const TensorId tid) {
-        if (tensors.count(tid) == tid) {
+        if (tensors.count(tid) == 0) {
             std::cerr << "Can not find tensor " << tid << std::endl;
             std::exit(EXIT_FAILURE);
         }
