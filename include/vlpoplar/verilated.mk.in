@@ -2,7 +2,7 @@
 CXX ?= g++
 POPC ?= popc
 INCLUDES := -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/include/vltstd -I.
-LIBS := -lpoplar -lpopops -lpoputil -lpthread -lboost_program_options
+LIBS := -lpoplar -lpopops -lpoputil -lpthread
 
 HOST_DEFINES =  \
 	-DVPROGRAM="$(VMAIN_ROOT)" \
@@ -39,6 +39,11 @@ IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
 	$(IPU_SCHED_FLAGS) \
 	-DVL_IPU_TRACE_BUFFER_SIZE=$(VL_IPU_TRACE_BUFFER_SIZE)
 
+
+VERILATOR_CPP =  \
+	$(VERIPOPLAR_ROOT)/include/verilated.cpp \
+	$(VERIPOPLAR_ROOT)/include/verilated_threads.cpp \
+	$(VERIPOPLAR_ROOT)/include/vlpoplar/verilated_poplar_context.cpp
 
 
 HOST_SOURCES += $(USER_CPP)

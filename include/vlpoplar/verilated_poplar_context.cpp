@@ -9,8 +9,6 @@
 #include <fstream>
 #include <iomanip>
 
-#include <boost/filesystem.hpp>
-#include <boost/program_options.hpp>
 #include <poplar/CycleCount.hpp>
 #ifndef VL_NUM_TILES_USED
 #error "VL_NUM_TILES_USED is no defined!"
@@ -440,14 +438,14 @@ void VlPoplarContext::runReEntrant() {
 #endif
 }
 
-void VlPoplarContext::addNextCurrentPair(const std::string& next, const std::string& current,
+void VlPoplarContext::addNextCurrentPair(const TensorId& next, const TensorId& current,
                                          uint32_t size) {
     if (tensors.count(next) == 0) {
 
         poplar::Tensor tNext = addTensor(size, next);
         poplar::Tensor tCurrent = addTensor(size, current);
         nextToCurrent.emplace(next, current);
-        exchangeCopies.add(poplar::program::Copy{tNext, tCurrent, true, "apply " + next});
+        exchangeCopies.add(poplar::program::Copy{tNext, tCurrent, true});
     }
     if (tensors.count(current) == 0) {
         // currentToNext.emplace(current, next);
@@ -456,13 +454,13 @@ void VlPoplarContext::addNextCurrentPair(const std::string& next, const std::str
     }
 }
 
-void VlPoplarContext::addCopy(const std::string& from, const std::string& to, uint32_t size,
+void VlPoplarContext::addCopy(const TensorId& from, const TensorId& to, uint32_t size,
                               const std::string& kind) {
 #ifdef GRAPH_COMPILE
     if (kind == "exchange") { return; }
     poplar::Tensor fromTensor = getTensor(from);
     poplar::Tensor toTensor = getTensor(to);
-    poplar::program::Copy cp{fromTensor, toTensor, true, from + " ==> " + to};
+    poplar::program::Copy cp{fromTensor, toTensor, true};
     if (kind == "initialize") {
         initCopies.add(cp);
     } else if (kind == "dpiExchange") {
@@ -476,11 +474,11 @@ void VlPoplarContext::addCopy(const std::string& from, const std::string& to, ui
 #endif
 }
 
-poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name) {
+poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const TensorId& name) {
     poplar::Tensor t = graph->addVariable(
         poplar::UNSIGNED_INT,
         {std::max(size, 2u) /*pad single-word tensors to 8 bytes to optimize on-tile copies*/},
-        name);
+        "Tensor_" + std::to_string(name));
     if (size > 1) {
         std::vector<uint32_t> zeros(size);
         graph->setInitialValue(t, poplar::ArrayRef(zeros));
@@ -490,7 +488,7 @@ poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const std::string& name
     tensors.emplace(name, t);
     return t;
 }
-poplar::Tensor VlPoplarContext::getOrAddTensor(uint32_t size, const std::string& name) {
+poplar::Tensor VlPoplarContext::getOrAddTensor(uint32_t size, const TensorId& name) {
 #ifdef GRAPH_COMPILE
     if (tensors.count(name) == 0) {
         return addTensor(size, name);

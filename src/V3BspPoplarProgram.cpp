@@ -146,8 +146,10 @@ struct TensorHandle {
     std::string tensor;
     std::string hostRead;
     std::string hostWrite;
+    int id;
     bool isReq;
-    TensorHandle() {
+    TensorHandle()
+        : id(std::numeric_limits<int>::max()) {
         tensor.erase();
         hostRead.erase();
         hostWrite.erase();
@@ -166,7 +168,7 @@ private:
     AstBasicDType* m_vtxRefTypep = nullptr;
     AstVar* m_ctxVarp = nullptr;
     AstVarScope* m_ctxVscp = nullptr;
-
+    int m_nextTensorId = 0;
     VNUser1InUse m_user1InUse;
     AstUser1Allocator<AstVar, TensorHandle> m_handles;
 
@@ -276,14 +278,14 @@ private:
             std::string tensorDeviceHandle = className + "." + varp->nameProtect();
             m_handles(varp).tensor
                 = tensorDeviceHandle;  // need this to be able to later look up the tensor
-
+            m_handles(varp).id = m_nextTensorId++;
             const uint32_t vectorSize = getVectorSize(varp->dtypep());
 
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
                 mkCall(fl, "getOrAddTensor",
                        {new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize},
-                        new AstConst{fl, AstConst::String{}, tensorDeviceHandle}})};
+                        new AstConst{fl, AstConst::Signed32{}, m_handles(varp).id}})};
             ctorp->addStmtsp(mkTensorp);
             setTileMapping(tensorVscp, tileId);
             // connect the tensor to the vertex
@@ -343,14 +345,17 @@ private:
             const auto totalWords
                 = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
 
+            stmtsp.push_back(new AstComment{nodep->fileline(),
+                                            "next: " + nextHandle + " current: " + currentHandle});
             AstNode* newp = new AstStmtExpr{
                 nodep->fileline(),
-                mkCall(
-                    assignp->fileline(), "addNextCurrentPair",
-                    {new AstConst{nodep->fileline(), AstConst::String{}, nextHandle} /*source*/,
-                     new AstConst{nodep->fileline(), AstConst::String{}, currentHandle} /*target*/,
-                     new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
-                                  static_cast<uint32_t>(totalWords)} /*number of words*/})};
+                mkCall(assignp->fileline(), "addNextCurrentPair",
+                       {new AstConst{nodep->fileline(), AstConst::Signed32{},
+                                     m_handles(fromp).id} /*source*/,
+                        new AstConst{nodep->fileline(), AstConst::Signed32{},
+                                     m_handles(top).id} /*target*/,
+                        new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
+                                     static_cast<uint32_t>(totalWords)} /*number of words*/})};
             AstNode* const nextp = nodep->nextp();
             stmtsp.push_back(newp);
             // newp->addHereThisAsNext(newCommentp);
@@ -431,11 +436,16 @@ private:
             UASSERT(!fromHandle.empty(), "handle not set!");
             // AstComment* newCommentp
             //     = new AstComment{assignp->fileline(), cvtToStr(totalWords) + " words"};
+
+            nodesp.push_back(
+                new AstComment{nodep->fileline(), "Copy " + fromHandle + " -> " + toHandle});
             AstNode* newp = new AstStmtExpr{
                 nodep->fileline(),
                 mkCall(assignp->fileline(), "addCopy",
-                       {new AstConst{nodep->fileline(), AstConst::String{}, fromHandle} /*source*/,
-                        new AstConst{nodep->fileline(), AstConst::String{}, toHandle} /*target*/,
+                       {new AstConst{nodep->fileline(), AstConst::Signed32{},
+                                     m_handles(fromp).id} /*source*/,
+                        new AstConst{nodep->fileline(), AstConst::Signed32{},
+                                     m_handles(top).id} /*target*/,
                         new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
                                      static_cast<uint32_t>(totalWords)} /*number of words*/,
                         new AstConst{nodep->fileline(), AstConst::String{},
@@ -448,7 +458,7 @@ private:
         }
 
         AstCFunc* splitFuncp = nullptr;
-        const uint32_t maxFuncStmts = 2000;
+        const uint32_t maxFuncStmts = 4000;
         uint32_t funcSize = 0;
         for (AstNode* const nodep : nodesp) {
             if (!splitFuncp || (funcSize >= maxFuncStmts)) {
@@ -493,7 +503,6 @@ private:
         std::set<AstCFunc*> reachablep;
         std::queue<AstCFunc*> toVisitp;
         toVisitp.push(getFunc(m_netlistp->topModulep(), "hostHandle"));
-
         int depth = 0;
         while (!toVisitp.empty()) {
             UASSERT(depth++ < 100000, "something is up");
@@ -566,9 +575,6 @@ public:
         // copy the cache values of args to the tensors on startup
         AstCFunc* plusArgsCopyp = getFunc(m_netlistp->topModulep(), "plusArgsCopy");
         addInitConstCopies(plusArgsCopyp);
-        // same goes for readmem
-        AstCFunc* readMemCopyp = getFunc(m_netlistp->topModulep(), "readMemCopy");
-        addInitConstCopies(readMemCopyp);
         // AstCCall* plusArgsCopyCallp = new AstCCall{plusArgsCopyp->fileline(), plusArgsCopyp};
         // plusArgsCopyCallp->dtypeSetVoid();
         // constructAllp->addStmtsp(
@@ -577,9 +583,7 @@ public:
         // create a poplar program with the following structure:
         // Add the copy operations
         m_netlistp->foreach([this](AstCFunc* cfuncp) {
-            if (cfuncp->name() == "exchange") {
-                addNextCurrentPairs(cfuncp);
-            }
+            if (cfuncp->name() == "exchange") { addNextCurrentPairs(cfuncp); }
             if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize"
                 || cfuncp->name() == "dpiExchange" || cfuncp->name() == "dpiBroadcast") {
                 // create copy operations

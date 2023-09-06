@@ -66,11 +66,7 @@ public:
                       });
         ofp->puts("\n");
         ofp->puts("\n");
-        ofp->puts("VERILATOR_CPP =  \\\n");
-        ofp->puts("\t$(VERIPOPLAR_ROOT)/include/verilated.cpp \\\n");
-        ofp->puts("\t$(VERIPOPLAR_ROOT)/include/verilated_threads.cpp \\\n");
-        ofp->puts("\t$(VERIPOPLAR_ROOT)/include/vlpoplar/verilated_poplar_context.cpp\n");
-        ofp->puts("\n");
+       
         ofp->puts("USER_CPP = \\\n");
         for (const auto& cpp : v3Global.opt.cppFiles()) { ofp->puts("\t" + cpp + "\\\n"); }
         string graphFile

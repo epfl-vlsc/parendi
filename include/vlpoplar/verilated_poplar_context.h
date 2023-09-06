@@ -110,7 +110,12 @@ class VPROGRAM;
 ///             IPU|        simLoop
 ///             hostHandle();
 
+
 class VlPoplarContext final {
+public:
+    using TensorId = int;
+    template<typename Value>
+    using TensorIdMap = std::vector<Value>;
 private:
     struct HostBuffer {
         std::vector<uint32_t> buff;
@@ -130,10 +135,13 @@ private:
     std::unique_ptr<poplar::ComputeSet> workload;
     std::unique_ptr<poplar::ComputeSet> condeval;
     std::unique_ptr<poplar::ComputeSet> initializer;
-    std::unordered_map<std::string, poplar::Tensor> tensors;
+
+    std::unordered_map<TensorId, poplar::Tensor> tensors;
     std::unordered_map<std::string, std::unique_ptr<HostBuffer>> hbuffers;
+    std::unordered_map<TensorId, TensorId> nextToCurrent;
+
     std::unordered_map<std::string, poplar::VertexRef> vertices;
-    std::unordered_map<std::string, std::string> nextToCurrent;
+
     // std::unordered_map<std::string, std::string> currentToNext;
 
     std::vector<poplar::Tensor> hostRequest;
@@ -147,15 +155,14 @@ private:
 
     // std::chrono::time_point<std::chrono::high_resolution_clock> m_startTime;
     // double m_simRateLast;
-    poplar::Tensor getTensor(const std::string& name) {
-        auto it = tensors.find(name);
-        if (it == tensors.end()) {
-            std::cerr << "Can not find tensor " << name << std::endl;
+    poplar::Tensor getTensor(const TensorId tid) {
+        if (tensors.count(tid) == tid) {
+            std::cerr << "Can not find tensor " << tid << std::endl;
             std::exit(EXIT_FAILURE);
         }
-        return it->second;
+        return tensors[tid];
     }
-    poplar::Tensor addTensor(uint32_t size, const std::string& name);
+    poplar::Tensor addTensor(uint32_t size, const TensorId& name);
     void dumpCycleTrace(std::ostream& os);
 public:
     void init(int argc, char* argv[]);
@@ -163,23 +170,9 @@ public:
     void buildReEntrant();
     void run();
     void runReEntrant();
-    void addCopy(const std::string& from, const std::string& to, uint32_t size, const std::string& kind);
-    void addNextCurrentPair(const std::string& next, const std::string& current, uint32_t size);
-    template <std::size_t T_Words>
-    void addInitConstCopy(const VlWide<T_Words>& value, const std::string& to) {
-#ifdef GRAPH_COMPILE
-        auto constTensor = graph->addConstant(poplar::UNSIGNED_INT, {T_Words}, value.m_storage);
-        graph->setTileMapping(constTensor, 0);
-        constInitCopies.add(poplar::program::Copy(constTensor, getTensor(to)));
-#endif
-    }
-    void addInitConstCopy(const IData value, const std::string& to) {
-#ifdef GRAPH_COMPILE
-        VlWide<1> valuew;
-        valuew[0] = value;
-        addInitConstCopy(valuew, to);
-#endif
-    }
+    void addCopy(const TensorId& from, const TensorId& to, uint32_t size, const std::string& kind);
+    void addNextCurrentPair(const TensorId& next, const TensorId& current, uint32_t size);
+
 
     void setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId);
     void setTileMapping(poplar::Tensor& tensor, uint32_t tileId);
@@ -190,7 +183,7 @@ public:
     void setPerfEstimate(poplar::VertexRef&, int) {}
     poplar::VertexRef getOrAddVertex(const std::string& name, const std::string& where);
 
-    poplar::Tensor getOrAddTensor(uint32_t size, const std::string& name);
+    poplar::Tensor getOrAddTensor(uint32_t size, const TensorId& name);
 
     template <typename T>
     inline T getHostData(const std::string& handle) {
