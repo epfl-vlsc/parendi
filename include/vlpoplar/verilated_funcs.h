@@ -2248,13 +2248,13 @@ void VL_READMEM_PROXY(uint32_t numWords, const T& fileproxy, T& dest) {
 // VL_VIEW
 
 template <typename T>
-VL_INLINE_OPT T& VL_VIEW(Vec& vec) {
-    T& r = (*reinterpret_cast<T*>(vec.data()));
+VL_INLINE_OPT T& VL_VIEW(Vec& vec, int offset = 0) {
+    T& r = (*reinterpret_cast<T*>(vec.data() + offset));
     return r;
 }
 template <typename T>
-VL_INLINE_OPT const T& VL_VIEW(const VecIn& vec) {
-    const T& r = (*reinterpret_cast<const T*>(vec.data()));
+VL_INLINE_OPT const T& VL_VIEW(const VecIn& vec, int offset = 0) {
+    const T& r = (*reinterpret_cast<const T*>(vec.data() + offset));
     return r;
 }
 

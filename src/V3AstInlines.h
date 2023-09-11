@@ -152,9 +152,10 @@ AstCExpr::AstCExpr(FileLine* fl, const string& textStmt, int setwidth, bool clea
     addExprsp(new AstText{fl, textStmt, true});
     if (setwidth) dtypeSetLogicSized(setwidth, VSigning::UNSIGNED);
 }
-AstVarRefView::AstVarRefView(FileLine* fl, AstVarRef* vrefp)
+AstVarRefView::AstVarRefView(FileLine* fl, AstVarRef* vrefp, AstConst* offsetp)
     : ASTGEN_SUPER_VarRefView(fl) {
         this->vrefp(vrefp);
+        this->offsetp(offsetp);
         UASSERT(vrefp->dtypep(), "Expected dtype!");
         this->dtypep(vrefp->dtypep());
 }

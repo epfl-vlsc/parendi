@@ -110,12 +110,18 @@ class VPROGRAM;
 ///             IPU|        simLoop
 ///             hostHandle();
 
-
 class VlPoplarContext final {
 public:
     using TensorId = int;
-    template<typename Value>
+    struct TensorHandle {
+        TensorId id;
+        int begin;
+        int end;
+        int totalSize;
+    };
+    template <typename Value>
     using TensorIdMap = std::vector<Value>;
+
 private:
     struct HostBuffer {
         std::vector<uint32_t> buff;
@@ -137,8 +143,10 @@ private:
     std::unique_ptr<poplar::ComputeSet> initializer;
 
     std::unordered_map<TensorId, poplar::Tensor> tensors;
+    std::unordered_set<TensorId> alreadyMapped;
     std::unordered_map<std::string, std::unique_ptr<HostBuffer>> hbuffers;
-    std::unordered_map<TensorId, TensorId> nextToCurrent;
+    std::unordered_map<TensorId, std::vector<std::pair<int, poplar::Tensor>>> tensorChunks;
+    std::unordered_map<TensorId, poplar::Tensor> nextToCurrent;
 
     std::unordered_map<std::string, poplar::VertexRef> vertices;
 
@@ -163,19 +171,23 @@ private:
         return tensors[tid];
     }
     poplar::Tensor addTensor(uint32_t size, const TensorId& name);
+    poplar::Tensor mkTensor(uint32_t size, const std::string& name);
     void dumpCycleTrace(std::ostream& os);
+
 public:
     void init(int argc, char* argv[]);
     void build();
     void buildReEntrant();
     void run();
     void runReEntrant();
-    void addCopy(const TensorId& from, const TensorId& to, uint32_t size, const std::string& kind);
-    void addNextCurrentPair(const TensorId& next, const TensorId& current, uint32_t size);
-
+    void addCopy(const TensorId& from, const TensorId& to, const int offsetTo, uint32_t size,
+                 const std::string& kind);
+    void addNextCurrentPair(const TensorId& next, const int nextSize, const TensorId& current,
+                            const int currentBegin, const int currentEnd, const int currentSize,
+                            const int currentTile);
 
     void setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId);
-    void setTileMapping(poplar::Tensor& tensor, uint32_t tileId);
+    void setTileMapping(poplar::Tensor& tensor, const TensorId& tid, uint32_t tileId);
     void connect(poplar::VertexRef& vtxRef, const std::string& vtxField, poplar::Tensor& tensor);
     void isHostRequest(poplar::Tensor& tensor, bool isInterruptCond);
     void createHostRead(const std::string& handleName, poplar::Tensor& tensor, uint32_t numElems);
@@ -183,7 +195,7 @@ public:
     void setPerfEstimate(poplar::VertexRef&, int) {}
     poplar::VertexRef getOrAddVertex(const std::string& name, const std::string& where);
 
-    poplar::Tensor getOrAddTensor(uint32_t size, const TensorId& name);
+    poplar::Tensor getOrAddTensor(uint32_t size, const TensorId& name, const int tileId);
 
     template <typename T>
     inline T getHostData(const std::string& handle) {

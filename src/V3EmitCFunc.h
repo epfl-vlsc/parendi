@@ -1232,12 +1232,16 @@ public:
         if (nodep->vrefp()->access().isReadOnly()) {
             puts("const ");
         }
-        puts(nodep->vrefp()->dtypep()->cType("", false, false));
+        puts(nodep->dtypep()->cType("", false, false));
         puts(">(");
-        iterateChildren(nodep);
+        iterate(nodep->vrefp());
         puts("/*");
         puts(AstNode::dedotName(nodep->vrefp()->varp()->origName()));
         puts("*/");
+        if (nodep->offsetp()) {
+            puts(", ");
+            iterate(nodep->offsetp());
+        }
         puts(")");
     }
     void visit(AstAddrOfCFunc* nodep) override {

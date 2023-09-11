@@ -470,7 +470,7 @@ private:
 
         AstVar* const thisTrigp = new AstVar{classp->fileline(), VVarType::MEMBER,
                                              freshName("actTrig"), m_triggering.trigDTypep};
-        trigEvalFuncp->rtnType(thisTrigp->dtypep()->cType("", false, false));
+        trigEvalFuncp->rtnType(thisTrigp->dtypep()->cType("", true, false));
         thisTrigp->funcLocal(true);
         thisTrigp->funcReturn(true);
         thisTrigp->lifetime(VLifetime::AUTOMATIC);

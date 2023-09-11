@@ -24,6 +24,7 @@
 #include "V3BspDpi.h"
 #include "V3BspModules.h"
 #include "V3BspPlusArgs.h"
+#include "V3BspPoplarIOMerge.h"
 #include "V3EmitCBase.h"
 #include "V3Global.h"
 #include "V3Stats.h"
@@ -45,7 +46,7 @@ private:
 
     // STATE
     //     AstVar::user1() -> true if top level class member
-    //     AstVarRef::user1() -> true if processes
+    //     AstVarRef::user1() -> true if processed
     VNUser1InUse m_user1Inuse;  // clear on AstClass
     uint32_t calcSize(AstNodeDType* dtp) {
         if (VN_IS(dtp, RefDType)) {
@@ -284,10 +285,15 @@ private:
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
                 mkCall(fl, "getOrAddTensor",
-                       {new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize},
-                        new AstConst{fl, AstConst::Signed32{}, m_handles(varp).id}})};
+                       {mkConst32(vectorSize), mkConst32(m_handles(varp).id), mkConst32(tileId)})};
             ctorp->addStmtsp(mkTensorp);
-            setTileMapping(tensorVscp, tileId);
+            ctorp->addStmtsp(
+                mkCall(fl, "setTileMapping",
+                       {new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
+                        new AstConst{fl, AstConst::Signed32{}, m_handles(varp).id},
+                        new AstConst{fl, AstConst::Signed32{}, static_cast<int>(tileId)}})
+                    ->makeStmt());
+            // setTileMapping(tensorVscp, tileId);
             // connect the tensor to the vertex
             ctorp->addStmtsp(new AstStmtExpr{
                 fl, mkCall(fl, "connect",
@@ -330,32 +336,44 @@ private:
         return ctorp;
     }
 
+    AstConst* mkConst32(int n) const {
+        return new AstConst{m_netlistp->fileline(), AstConst::Signed32{}, n};
+    }
+
+    AstConst* mkConst32(uint32_t n) const {
+        UASSERT(static_cast<int>(n) <= std::numeric_limits<int>::max(), "underflow in int");
+        return new AstConst{m_netlistp->fileline(), AstConst::Signed32{}, static_cast<int>(n)};
+    }
+
     void addNextCurrentPairs(AstCFunc* exchangep) {
 
         std::vector<AstNode*> stmtsp;
         for (AstNode* nodep = exchangep->stmtsp(); nodep;) {
             UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
             AstAssign* const assignp = VN_AS(nodep, Assign);
-            AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
-            AstVar* const fromp = VN_AS(assignp->rhsp(), MemberSel)->varp();
+            AstVar* const top = getCopyMemSel(assignp->lhsp())->varp();
+            AstVar* const fromp = getCopyMemSel(assignp->rhsp())->varp();
             const string nextHandle = m_handles(fromp).tensor;
             UASSERT(!nextHandle.empty(), "handle not set!");
             const string currentHandle = m_handles(top).tensor;
             UASSERT(!currentHandle.empty(), "handle not set!");
-            const auto totalWords
-                = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
+            const auto sliceWords = getNumWords(assignp->lhsp());
+            const auto totalWordsFrom = static_cast<int>(fromp->dtypep()->arrayUnpackedElements())
+                                        * fromp->dtypep()->widthWords();
+            const auto totalWordsTo = static_cast<int>(top->dtypep()->arrayUnpackedElements())
+                                      * top->dtypep()->widthWords();
 
             stmtsp.push_back(new AstComment{nodep->fileline(),
                                             "next: " + nextHandle + " current: " + currentHandle});
-            AstNode* newp = new AstStmtExpr{
-                nodep->fileline(),
-                mkCall(assignp->fileline(), "addNextCurrentPair",
-                       {new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(fromp).id} /*source*/,
-                        new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(top).id} /*target*/,
-                        new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
-                                     static_cast<uint32_t>(totalWords)} /*number of words*/})};
+            int fromOffset = getSliceOffset(assignp->rhsp());
+            int toOffset = getSliceOffset(assignp->lhsp());
+
+            AstNode* newp = mkCall(assignp->fileline(), "addNextCurrentPair",
+                                   {mkConst32(m_handles(fromp).id), mkConst32(totalWordsFrom),
+                                    mkConst32(m_handles(top).id), mkConst32(toOffset),
+                                    mkConst32(toOffset + sliceWords), mkConst32(totalWordsTo),
+                                    mkConst32(getClass(assignp->lhsp())->flag().tileId())})
+                                ->makeStmt();
             AstNode* const nextp = nodep->nextp();
             stmtsp.push_back(newp);
             // newp->addHereThisAsNext(newCommentp);
@@ -370,6 +388,7 @@ private:
         cfuncp->isInline(false);
         cfuncp->isMethod(true);
         cfuncp->dontCombine(true);
+        cfuncp->slow(true);
         for (AstNode* const nodep : stmtsp) {
             if (!splitFuncp || (funcSize >= maxFuncStmts)) {
                 funcSize = 0;
@@ -378,6 +397,7 @@ private:
                 splitFuncp->isInline(false);
                 splitFuncp->isMethod(true);
                 splitFuncp->dontCombine(true);
+                splitFuncp->slow(true);
                 cfuncp->scopep()->addBlocksp(splitFuncp);
                 AstCCall* const callp = new AstCCall{cfuncp->fileline(), splitFuncp};
                 callp->dtypeSetVoid();
@@ -387,9 +407,40 @@ private:
             splitFuncp->addStmtsp(nodep);
         }
     }
-    AstClass* getClass(AstNode* nodep) {
-        return VN_AS(VN_AS(nodep, MemberSel)->fromp()->dtypep(), ClassRefDType)->classp();
+    inline AstClass* getClass(AstNodeExpr* nodep) const {
+        return VN_AS(getCopyMemSel(nodep)->fromp()->dtypep(), ClassRefDType)->classp();
     }
+
+    inline AstMemberSel* getCopyMemSel(AstNodeExpr* exprp) const {
+
+        AstMemberSel* memselp = nullptr;
+        if (AstSliceSel* const selp = VN_CAST(exprp, SliceSel)) {
+            memselp = VN_AS(selp->fromp(), MemberSel);
+        } else {
+            memselp = VN_AS(exprp, MemberSel);
+        }
+        return memselp;
+    }
+
+    inline int getSliceOffset(AstNodeExpr* exprp) const {
+        if (AstSliceSel* const selp = VN_CAST(exprp, SliceSel)) {
+            return selp->declRange().lo();
+        } else {
+            return 0;
+        }
+    }
+
+    inline int getTileId(AstNodeExpr* exprp) const { return getClass(exprp)->flag().tileId(); }
+
+    inline int getNumWords(AstNodeExpr* exprp) const {
+        if (AstSliceSel* const selp = VN_CAST(exprp, SliceSel)) {
+            return selp->declRange().elements();
+        } else {
+            AstVar* const varp = VN_AS(exprp, MemberSel)->varp();
+            return varp->dtypep()->arrayUnpackedElements() * varp->dtypep()->widthWords();
+        }
+    }
+
     void addCopies(AstCFunc* cfuncp, const string& kind) {
 
         std::vector<AstNode*> nodesp;
@@ -397,20 +448,15 @@ private:
             UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
             AstAssign* const assignp = VN_AS(nodep, Assign);
 
-            AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
-            AstVar* const fromp = VN_AS(assignp->rhsp(), MemberSel)->varp();
-            // get the handles from the user1
+            AstVar* const top = getCopyMemSel(assignp->lhsp())->varp();
+            AstVar* const fromp = getCopyMemSel(assignp->rhsp())->varp();
 
-            auto getTileId = [](AstNodeExpr* np) {
-                return VN_AS(VN_AS(np, MemberSel)->fromp()->dtypep(), ClassRefDType)
-                    ->classp()
-                    ->flag()
-                    .tileId();
-            };
+            // get the handles from the user1
             auto tileIdFrom = getTileId(assignp->rhsp());
             auto tileIdTo = getTileId(assignp->lhsp());
-            const auto totalWords
-                = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
+            //
+            const auto totalWords = getNumWords(assignp->rhsp());
+
             // auto totalWords = VN_AS(top->dtypep(), VectorDType)->size();
 
             if (tileIdFrom == tileIdTo) {
@@ -446,6 +492,8 @@ private:
                                      m_handles(fromp).id} /*source*/,
                         new AstConst{nodep->fileline(), AstConst::Signed32{},
                                      m_handles(top).id} /*target*/,
+                        new AstConst{nodep->fileline(), AstConst::Signed32{},
+                                     getSliceOffset(assignp->lhsp())},
                         new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
                                      static_cast<uint32_t>(totalWords)} /*number of words*/,
                         new AstConst{nodep->fileline(), AstConst::String{},
@@ -460,12 +508,14 @@ private:
         AstCFunc* splitFuncp = nullptr;
         const uint32_t maxFuncStmts = 4000;
         uint32_t funcSize = 0;
+        cfuncp->slow(true);
         for (AstNode* const nodep : nodesp) {
             if (!splitFuncp || (funcSize >= maxFuncStmts)) {
                 funcSize = 0;
                 splitFuncp = new AstCFunc{cfuncp->fileline(), m_newNames.get("cpsplit"),
                                           cfuncp->scopep(), "void"};
                 splitFuncp->isInline(false);
+                splitFuncp->slow(true);
                 splitFuncp->isMethod(true);
                 splitFuncp->dontCombine(true);
                 cfuncp->scopep()->addBlocksp(splitFuncp);
@@ -710,10 +760,13 @@ void V3BspPoplarProgram::createProgram(AstNetlist* nodep) {
     // delegate all dpi calls to the host
     V3BspDpi::delegateAll(nodep);
 
+    // { PoplarViewsVisitor{nodep}; }  // destroy before checking
+    // V3Global::dumpCheckGlobalTree("bspPoplarView", 0, dumpTree() >= 1);
+    { V3BspPoplarIOMerge::mergeIO(nodep); }
+
     { PoplarLegalizeFieldNamesVisitor{nodep}; }
     V3Global::dumpCheckGlobalTree("bspLegal", 0, dumpTree() >= 1);
-    { PoplarViewsVisitor{nodep}; }  // destroy before checking
-    V3Global::dumpCheckGlobalTree("bspPoplarView", 0, dumpTree() >= 1);
+
     { PoplarComputeGraphBuilder{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspPoplarProgram", 0, dumpTree() >= 1);
 }
