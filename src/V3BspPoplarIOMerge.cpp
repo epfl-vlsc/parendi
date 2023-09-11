@@ -71,7 +71,6 @@ private:
             , m_funcp(funcp)
             , m_dtp(dtp)
             , m_inputVscp(inputVscp) {}
-        ~InputVarReplacement() { UINFO(3, "Deleted" << endl); }
     };
     AstUser2Allocator<AstVar, std::unique_ptr<InputVarReplacement>> m_varReplacement;
 
@@ -114,7 +113,6 @@ private:
             } else {
                 // probably something from the initialization code
             }
-
         }
     }
     void visit(AstVarRef* vrefp) override {
@@ -170,9 +168,10 @@ private:
 
             AstVarRef* const inputRef = new AstVarRef{vscp->fileline(), inputVscp, VAccess::READ};
             inputRef->user1(true);  // mark processed
-            AstVarRefView* const viewp = new AstVarRefView{
-                vscp->fileline(), inputRef,
-                new AstConst{vscp->fileline(), AstConst::Signed32{}, m_nextOffset}};
+            AstVarRefView* const viewp
+                = new AstVarRefView{vscp->fileline(), inputRef,
+                                    new AstConst{vscp->fileline(), AstConst::WidthedValue{}, 32,
+                                                 static_cast<uint32_t>(m_nextOffset)}};
             viewp->dtypep(vscp->varp()->dtypep());
 
             AstCReturn* const returnp = new AstCReturn{vscp->fileline(), viewp};
@@ -180,7 +179,8 @@ private:
             scopep->addBlocksp(getterp);
 
             UINFO(3, "In class " << m_classp->name() << " var " << vscp->varp()->prettyNameQ()
-                                 << " has offset " << m_nextOffset << "  " << vscp->varp() << endl);
+                                 << " has offset " << m_nextOffset << "  " << vscp->varp()
+                                 << endl);
             m_varReplacement(vscp->varp()) = std::make_unique<InputVarReplacement>(
                 m_nextOffset, getterp, vscp->varp()->dtypep(), inputVscp);
             m_nextOffset += vscp->dtypep()->arrayUnpackedElements() * vscp->dtypep()->widthWords();
@@ -214,9 +214,9 @@ public:
             if (AstClass* classp = VN_CAST(modp, Class)) {
                 if (classp->flag().isBsp()) {
                     UINFO(3, "Visiting class " << classp->name() << endl);
-                    for (AstNode* nodep =  classp->stmtsp(); nodep; nodep = nodep->nextp()) {
+                    for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
                         if (AstVar* const varp = VN_CAST(nodep, Var)) {
-                            varp->user1(true); // mark as member
+                            varp->user1(true);  // mark as member
                         }
                     }
                     m_classp = classp;

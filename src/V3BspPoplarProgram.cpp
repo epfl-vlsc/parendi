@@ -287,12 +287,10 @@ private:
                 mkCall(fl, "getOrAddTensor",
                        {mkConst32(vectorSize), mkConst32(m_handles(varp).id), mkConst32(tileId)})};
             ctorp->addStmtsp(mkTensorp);
-            ctorp->addStmtsp(
-                mkCall(fl, "setTileMapping",
-                       {new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                        new AstConst{fl, AstConst::Signed32{}, m_handles(varp).id},
-                        new AstConst{fl, AstConst::Signed32{}, static_cast<int>(tileId)}})
-                    ->makeStmt());
+            ctorp->addStmtsp(mkCall(fl, "setTileMapping",
+                                    {new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
+                                     mkConst32(m_handles(varp).id), mkConst32(tileId)})
+                                 ->makeStmt());
             // setTileMapping(tensorVscp, tileId);
             // connect the tensor to the vertex
             ctorp->addStmtsp(new AstStmtExpr{
@@ -337,12 +335,14 @@ private:
     }
 
     AstConst* mkConst32(int n) const {
-        return new AstConst{m_netlistp->fileline(), AstConst::Signed32{}, n};
+        UASSERT(n >= 0, "undeflow");
+        return new AstConst{m_netlistp->fileline(), AstConst::WidthedValue{}, 32,
+                            static_cast<uint32_t>(n)};
     }
 
     AstConst* mkConst32(uint32_t n) const {
-        UASSERT(static_cast<int>(n) <= std::numeric_limits<int>::max(), "underflow in int");
-        return new AstConst{m_netlistp->fileline(), AstConst::Signed32{}, static_cast<int>(n)};
+
+        return new AstConst{m_netlistp->fileline(), AstConst::WidthedValue{}, 32, n};
     }
 
     void addNextCurrentPairs(AstCFunc* exchangep) {
@@ -486,18 +486,13 @@ private:
             nodesp.push_back(
                 new AstComment{nodep->fileline(), "Copy " + fromHandle + " -> " + toHandle});
             AstNode* newp = new AstStmtExpr{
-                nodep->fileline(),
-                mkCall(assignp->fileline(), "addCopy",
-                       {new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(fromp).id} /*source*/,
-                        new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(top).id} /*target*/,
-                        new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     getSliceOffset(assignp->lhsp())},
-                        new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
-                                     static_cast<uint32_t>(totalWords)} /*number of words*/,
-                        new AstConst{nodep->fileline(), AstConst::String{},
-                                     kind} /*is it part of init*/})};
+                nodep->fileline(), mkCall(assignp->fileline(), "addCopy",
+                                          {mkConst32(m_handles(fromp).id) /*source*/,
+                                           mkConst32(m_handles(top).id) /*target*/,
+                                           mkConst32(getSliceOffset(assignp->lhsp())),
+                                           mkConst32(totalWords) /*number of words*/,
+                                           new AstConst{nodep->fileline(), AstConst::String{},
+                                                        kind} /*is it part of init*/})};
             AstNode* const nextp = nodep->nextp();
             nodesp.push_back(newp);
             // newp->addHereThisAsNext(newCommentp);
