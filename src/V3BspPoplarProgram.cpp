@@ -251,17 +251,15 @@ private:
         auto setTileMapping = [this, &fl, &ctorp](AstVarScope* vscp, uint32_t tid) {
             AstStmtExpr* tileMapp = new AstStmtExpr{
                 fl, mkCall(fl, "setTileMapping",
-                           {new AstVarRef{fl, vscp, VAccess::READWRITE},
-                            new AstConst{fl, AstConst::WidthedValue{}, 32, tid}})};
+                           {new AstVarRef{fl, vscp, VAccess::READWRITE}, mkConst(tid)})};
             ctorp->addStmtsp(tileMapp);
         };
 
         setTileMapping(vtxVscp, tileId);
 
-        AstStmtExpr* perfEstp
-            = new AstStmtExpr{fl, mkCall(fl, "setPerfEstimate",
-                                         {new AstVarRef{fl, vtxVscp, VAccess::READWRITE},
-                                          new AstConst{fl, AstConst::WidthedValue{}, 32, 0}})};
+        AstStmtExpr* perfEstp = new AstStmtExpr{
+            fl, mkCall(fl, "setPerfEstimate",
+                       {new AstVarRef{fl, vtxVscp, VAccess::READWRITE}, mkConst(0)})};
         ctorp->addStmtsp(perfEstp);
         // iterate through the class members and create tensors
         for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
@@ -283,9 +281,7 @@ private:
 
             AstAssign* mkTensorp = new AstAssign{
                 fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
-                mkCall(fl, "getOrAddTensor",
-                       {new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize},
-                        new AstConst{fl, AstConst::Signed32{}, m_handles(varp).id}})};
+                mkCall(fl, "getOrAddTensor", {mkConst(vectorSize), mkConst(m_handles(varp).id)})};
             ctorp->addStmtsp(mkTensorp);
             setTileMapping(tensorVscp, tileId);
             // connect the tensor to the vertex
@@ -299,12 +295,12 @@ private:
                 const std::string hrHandle
                     = varp->bspFlag().hasAnyHostReq() ? "interrupt" : ("hr." + tensorDeviceHandle);
                 m_handles(varp).hostRead = hrHandle;
-                ctorp->addStmtsp(new AstStmtExpr{
-                    fl, mkCall(fl, "createHostRead",
-                               {new AstConst{fl, AstConst::String{}, hrHandle},
-                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize}},
-                               nullptr)});
+                ctorp->addStmtsp(
+                    new AstStmtExpr{fl, mkCall(fl, "createHostRead",
+                                               {new AstConst{fl, AstConst::String{}, hrHandle},
+                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
+                                                mkConst(vectorSize)},
+                                               nullptr)});
 
                 if (varp->bspFlag().hasAnyHostReq()) {
                     ctorp->addStmtsp(
@@ -318,18 +314,26 @@ private:
             if (varp->bspFlag().hasHostWrite()) {
                 const std::string hwHandle = "hw." + tensorDeviceHandle;
                 m_handles(varp).hostWrite = hwHandle;
-                ctorp->addStmtsp(new AstStmtExpr{
-                    fl, mkCall(fl, "createHostWrite",
-                               {new AstConst{fl, AstConst::String{}, hwHandle},
-                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                new AstConst{fl, AstConst::WidthedValue{}, 32, vectorSize}},
-                               nullptr)});
+                ctorp->addStmtsp(
+                    new AstStmtExpr{fl, mkCall(fl, "createHostWrite",
+                                               {new AstConst{fl, AstConst::String{}, hwHandle},
+                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
+                                                mkConst(vectorSize)},
+                                               nullptr)});
             }
         }
 
         return ctorp;
     }
 
+    AstConst* mkConst(int n) const {
+        UASSERT(n >= 0, "underflow");
+        return new AstConst{m_netlistp->fileline(), AstConst::WidthedValue{}, 32,
+                            static_cast<uint32_t>(n)};
+    }
+    AstConst* mkConst(uint32_t n) const {
+        return new AstConst{m_netlistp->fileline(), AstConst::WidthedValue{}, 32, n};
+    }
     void addNextCurrentPairs(AstCFunc* exchangep) {
 
         std::vector<AstNode*> stmtsp;
@@ -347,15 +351,11 @@ private:
 
             stmtsp.push_back(new AstComment{nodep->fileline(),
                                             "next: " + nextHandle + " current: " + currentHandle});
-            AstNode* newp = new AstStmtExpr{
-                nodep->fileline(),
-                mkCall(assignp->fileline(), "addNextCurrentPair",
-                       {new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(fromp).id} /*source*/,
-                        new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(top).id} /*target*/,
-                        new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
-                                     static_cast<uint32_t>(totalWords)} /*number of words*/})};
+            AstNode* newp = new AstStmtExpr{nodep->fileline(),
+                                            mkCall(assignp->fileline(), "addNextCurrentPair",
+                                                   {mkConst(m_handles(fromp).id) /*source*/,
+                                                    mkConst(m_handles(top).id) /*target*/,
+                                                    mkConst(totalWords) /*number of words*/})};
             AstNode* const nextp = nodep->nextp();
             stmtsp.push_back(newp);
             // newp->addHereThisAsNext(newCommentp);
@@ -440,16 +440,12 @@ private:
             nodesp.push_back(
                 new AstComment{nodep->fileline(), "Copy " + fromHandle + " -> " + toHandle});
             AstNode* newp = new AstStmtExpr{
-                nodep->fileline(),
-                mkCall(assignp->fileline(), "addCopy",
-                       {new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(fromp).id} /*source*/,
-                        new AstConst{nodep->fileline(), AstConst::Signed32{},
-                                     m_handles(top).id} /*target*/,
-                        new AstConst{nodep->fileline(), AstConst::WidthedValue{}, 32,
-                                     static_cast<uint32_t>(totalWords)} /*number of words*/,
-                        new AstConst{nodep->fileline(), AstConst::String{},
-                                     kind} /*is it part of init*/})};
+                nodep->fileline(), mkCall(assignp->fileline(), "addCopy",
+                                          {mkConst(m_handles(fromp).id) /*source*/,
+                                           mkConst(m_handles(top).id) /*target*/,
+                                           mkConst(totalWords) /*number of words*/,
+                                           new AstConst{nodep->fileline(), AstConst::String{},
+                                                        kind} /*is it part of init*/})};
             AstNode* const nextp = nodep->nextp();
             nodesp.push_back(newp);
             // newp->addHereThisAsNext(newCommentp);
