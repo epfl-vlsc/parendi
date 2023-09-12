@@ -5,7 +5,6 @@
 
 #include "verilated.h"
 
-#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
@@ -78,14 +77,12 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     }
 #endif
     // std::cout << "initializing simulation context " << std::endl;
-
     vprog->constructStatePairs();
     vprog->constructAll();
     vprog->initialize();
     vprog->exchange();
     vprog->dpiExchange();
     vprog->dpiBroadcast();
-
 }
 
 void VlPoplarContext::buildReEntrant() {
@@ -291,15 +288,7 @@ void VlPoplarContext::buildReEntrant() {
         std::cout << flags << std::endl;
     }
 #endif
-    // for (const auto& pair : tensors) {
-    //     std::cout << pair.second.getDebugStr() << ": " << std::endl;
-    //     const auto mappings = graph->getTileMapping(pair.second, true);
-    //     for (int i = 0; i < mappings.size(); i++) {
-    //         for (int j = 0; j < mappings[i].size(); j++) {
-    //             std::cout << "\t" << mappings[i][j] << " -> " << i << std::endl;
-    //         }
-    //     }
-    // }
+
     exec = std::make_unique<Executable>(
         compileGraph(*graph, programs, flags, [](int step, int total) {
             float newProg = static_cast<float>(step) / static_cast<float>(total) * 100.0;
@@ -449,33 +438,29 @@ void VlPoplarContext::runReEntrant() {
 #endif
 }
 
-void VlPoplarContext::addNextCurrentPair(const TensorId& next, const int nextSize,
-                                         const TensorId& current, const int currentBegin,
-                                         const int currentEnd, const int currentSize,
-                                         const int currentTile) {
-#ifdef GRAPH_COMPILE
+void VlPoplarContext::addNextCurrentPair(const TensorId& next, const TensorId& current,
+                                         uint32_t size) {
     if (tensors.count(next) == 0) {
-        poplar::Tensor tNext = addTensor(nextSize, next);
-        poplar::Tensor tCurrent = addTensor(nextSize, -next);
-        graph->setTileMapping(tCurrent, currentTile);
-        nextToCurrent.emplace(next, tCurrent);
+
+        poplar::Tensor tNext = addTensor(size, next);
+        poplar::Tensor tCurrent = addTensor(size, current);
+        nextToCurrent.emplace(next, current);
         exchangeCopies.add(poplar::program::Copy{tNext, tCurrent, true});
     }
-
-    tensorChunks[current].emplace_back(currentBegin, nextToCurrent[next]);
-    alreadyMapped.emplace(current);
-#endif
+    if (tensors.count(current) == 0) {
+        // currentToNext.emplace(current, next);
+        poplar::Tensor currentTensor = getTensor(nextToCurrent[next]);
+        tensors.emplace(current, currentTensor);
+    }
 }
 
-void VlPoplarContext::addCopy(const TensorId& from, const TensorId& to, const int offsetTo,
-                              uint32_t size, const std::string& kind) {
+void VlPoplarContext::addCopy(const TensorId& from, const TensorId& to, uint32_t size,
+                              const std::string& kind) {
 #ifdef GRAPH_COMPILE
-    // std::cout << "Adding copy from " << from << " to " << to << " (" << offsetTo << ", " << size
-    //           << ")" << kind << std::endl;
     if (kind == "exchange") { return; }
     poplar::Tensor fromTensor = getTensor(from);
     poplar::Tensor toTensor = getTensor(to);
-    poplar::program::Copy cp{fromTensor, toTensor.slice(offsetTo, offsetTo + size), true};
+    poplar::program::Copy cp{fromTensor, toTensor, true};
     if (kind == "initialize") {
         initCopies.add(cp);
     } else if (kind == "dpiExchange") {
@@ -490,64 +475,21 @@ void VlPoplarContext::addCopy(const TensorId& from, const TensorId& to, const in
 }
 
 poplar::Tensor VlPoplarContext::addTensor(uint32_t size, const TensorId& name) {
-#ifdef GRAPH_COMPILE
-    // std::cout << "AddinTensor_" << name << " with size " << size << std::endl;
-    poplar::Tensor t = mkTensor(size, "Tensor_" + std::to_string(name));
-    tensors.emplace(name, t);
-    return t;
-#else
-    return poplar::Tensor{};
-#endif
-}
-poplar::Tensor VlPoplarContext::mkTensor(uint32_t size, const std::string& name) {
-    poplar::Tensor t
-        = graph->addVariable(poplar::UNSIGNED_INT, {size}, name);
+    poplar::Tensor t = graph->addVariable(
+        poplar::UNSIGNED_INT,
+        {std::max(size, 2u) /*pad single-word tensors to 8 bytes to optimize on-tile copies*/},
+        "Tensor_" + std::to_string(name));
     if (size > 1) {
         std::vector<uint32_t> zeros(size);
         graph->setInitialValue(t, poplar::ArrayRef(zeros));
     } else {
         graph->setInitialValue(t, 0u);
     }
+    tensors.emplace(name, t);
     return t;
 }
-poplar::Tensor VlPoplarContext::getOrAddTensor(uint32_t size, const TensorId& name, const int tileId) {
+poplar::Tensor VlPoplarContext::getOrAddTensor(uint32_t size, const TensorId& name) {
 #ifdef GRAPH_COMPILE
-    static int newTensorId;
-    if (tensorChunks.count(name)) {
-        // std::cout << "Concatenating Tensor " << name << " with size " << size << std::endl;
-        // chunks exits, concatenate them
-        std::vector<std::pair<int, poplar::Tensor>>& chunks = tensorChunks[name];
-        std::sort(chunks.begin(), chunks.end(),
-                  [](const auto& p1, const auto& p2) { return p1.first < p2.first; });
-        int offset = 0;
-        std::vector<poplar::Tensor> concatVec;
-        for (const auto& pair : chunks) {
-            if (pair.first != offset) {
-                // std::cerr << "missing chunks at offset " << offset << "in tensor " << name
-                //           << " where next offset is " << pair.first << std::endl;
-                poplar::Tensor filler = mkTensor(pair.first - offset, "anon_" + std::to_string(newTensorId++));
-                concatVec.push_back(filler);
-                graph->setTileMapping(filler, tileId);
-                offset += filler.numElements();
-
-            } else {
-                // std::cout << "\t offset " << pair.first << " size " << pair.second.numElements()
-                //         << std::endl;
-                concatVec.push_back(pair.second);
-                offset += pair.second.numElements();
-            }
-        }
-        if (offset != size) {
-            // std::cerr << "missing last chunk at offset " << offset << " in tensor " << name
-            //           << " where last offset was " << chunks.back().first << std::endl;
-            poplar::Tensor filler = mkTensor(size - offset, "annon_" + std::to_string(newTensorId++));
-            concatVec.push_back(filler);
-            graph->setTileMapping(filler, tileId);
-        }
-        tensors.emplace(name, poplar::concat(concatVec));
-        tensorChunks.erase(name);
-    }
-
     if (tensors.count(name) == 0) {
         return addTensor(size, name);
     } else {
@@ -587,10 +529,9 @@ void VlPoplarContext::setTileMapping(poplar::VertexRef& vtxRef, uint32_t tileId)
     graph->setTileMapping(vtxRef, tileId);
 #endif
 }
-void VlPoplarContext::setTileMapping(poplar::Tensor& tensor, const TensorId& tensorId,
-                                     uint32_t tileId) {
+void VlPoplarContext::setTileMapping(poplar::Tensor& tensor, uint32_t tileId) {
 #ifdef GRAPH_COMPILE
-    if (alreadyMapped.count(tensorId) == 0) { graph->setTileMapping(tensor, tileId); }
+    graph->setTileMapping(tensor, tileId);
 #endif
 }
 void VlPoplarContext::connect(poplar::VertexRef& vtx, const std::string& field,

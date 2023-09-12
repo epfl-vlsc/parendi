@@ -123,11 +123,6 @@ private:
                 puts(vrefp->nameProtect());
                 puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : " + vrefp->fileline()->ascii() + " */\n");
             }
-            // print layout of the vertex
-            if (AstComment* const commentp = VN_CAST(stmtp, Comment)) {
-                puts("// " + commentp->name());
-                puts("\n");
-            }
         }
 
         // emit method decls

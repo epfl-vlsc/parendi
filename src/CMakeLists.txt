@@ -54,7 +54,6 @@ set(HEADERS
     V3BspNetlistGraph.h
     V3BspPliCheck.h
     V3BspPlusArgs.h
-    V3BspPoplarIOMerge.h
     V3BspPoplarProgram.h
     V3BspResync.h
     V3BspResyncGraph.h
@@ -212,7 +211,6 @@ set(COMMON_SOURCES
     V3BspModules.cpp
     V3BspPliCheck.cpp
     V3BspPlusArgs.cpp
-    V3BspPoplarIOMerge.cpp
     V3BspPoplarProgram.cpp
     V3BspResync.cpp
     V3BspRetiming.cpp

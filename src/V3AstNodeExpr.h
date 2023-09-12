@@ -2063,9 +2063,8 @@ public:
 class AstVarRefView final : public AstNodeExpr {
     // view a variable references as another data type without runtime casting
     // @astgen op1 := vrefp  : AstVarRef
-    // @astgen op2 := offsetp : Optional[AstConst]
 public:
-    inline AstVarRefView(FileLine* fl, AstVarRef* vrefp, AstConst* offsetp = nullptr);
+    inline AstVarRefView(FileLine* fl, AstVarRef* vrefp);
     ASTGEN_MEMBERS_AstVarRefView;
 
     string emitVerilog() override { V3ERROR_NA_RETURN(""); }
