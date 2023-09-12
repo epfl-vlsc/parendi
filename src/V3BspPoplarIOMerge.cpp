@@ -38,7 +38,6 @@ private:
     VNUser2InUse m_user2InUse;
     struct InputVarReplacement {
         const int m_offset;
-        AstCFunc* const m_funcp;
         AstNodeDType* const m_dtp;
         AstVarScope* const m_inputVscp;  // the new aggregated input variable
         inline AstSliceSel* mkSlice(FileLine* flp, AstNodeExpr* fromp) {
@@ -62,13 +61,19 @@ private:
                                            - 1};
         }
         inline AstNodeExpr* mkConstRef() const {
-            AstCCall* const callp = new AstCCall{m_funcp->fileline(), m_funcp, nullptr};
-            callp->dtypeFrom(m_dtp);
-            return callp;
+            AstVarRefView* const viewp = new AstVarRefView{
+                m_inputVscp->fileline(),
+                new AstVarRef{m_inputVscp->fileline(), m_inputVscp, VAccess::READ},
+                new AstConst{m_inputVscp->fileline(), AstConst::WidthedValue{}, 32,
+                             static_cast<uint32_t>(m_offset)}};
+            viewp->dtypep(m_dtp);
+            return viewp;
+            // AstCCall* const callp = new AstCCall{m_funcp->fileline(), m_funcp, nullptr};
+            // callp->dtypep(m_dtp);
+            // return callp;
         };
-        InputVarReplacement(int offset, AstCFunc* funcp, AstNodeDType* dtp, AstVarScope* inputVscp)
+        InputVarReplacement(int offset, AstNodeDType* dtp, AstVarScope* inputVscp)
             : m_offset(offset)
-            , m_funcp(funcp)
             , m_dtp(dtp)
             , m_inputVscp(inputVscp) {}
     };
@@ -160,30 +165,21 @@ private:
         AstVarScope* const inputVscp = new AstVarScope{m_classp->fileline(), scopep, inputVarp};
         scopep->addVarsp(inputVscp);
 
+        m_classp->addStmtsp(new AstComment{m_classp->fileline(), "Input layout:"});
         for (AstVarScope* vscp : inputMembersp) {
             // create a getter method for the const data
-            string funcReturnTypeStr = "const " + vscp->varp()->dtypep()->cType("", true, true);
-            AstCFunc* const getterp = new AstCFunc{vscp->varp()->fileline(), vscp->varp()->name(),
-                                                   scopep, funcReturnTypeStr};
-
-            AstVarRef* const inputRef = new AstVarRef{vscp->fileline(), inputVscp, VAccess::READ};
-            inputRef->user1(true);  // mark processed
-            AstVarRefView* const viewp
-                = new AstVarRefView{vscp->fileline(), inputRef,
-                                    new AstConst{vscp->fileline(), AstConst::WidthedValue{}, 32,
-                                                 static_cast<uint32_t>(m_nextOffset)}};
-            viewp->dtypep(vscp->varp()->dtypep());
-
-            AstCReturn* const returnp = new AstCReturn{vscp->fileline(), viewp};
-            getterp->addStmtsp(returnp);
-            scopep->addBlocksp(getterp);
 
             UINFO(3, "In class " << m_classp->name() << " var " << vscp->varp()->prettyNameQ()
                                  << " has offset " << m_nextOffset << "  " << vscp->varp()
                                  << endl);
             m_varReplacement(vscp->varp()) = std::make_unique<InputVarReplacement>(
-                m_nextOffset, getterp, vscp->varp()->dtypep(), inputVscp);
-            m_nextOffset += vscp->dtypep()->arrayUnpackedElements() * vscp->dtypep()->widthWords();
+                m_nextOffset, vscp->varp()->dtypep(), inputVscp);
+            int numWords = vscp->dtypep()->arrayUnpackedElements() * vscp->dtypep()->widthWords();
+
+            m_classp->addStmtsp(new AstComment{
+                vscp->fileline(), "[0x" + cvtToHex(m_nextOffset) + "+:0x" + cvtToHex(numWords)
+                                      + "] -> " + vscp->varp()->name()});
+            m_nextOffset += numWords;
             // unlink and push delete (do not delete here since still referenced)
             vscp->unlinkFrBack();
             pushDeletep(vscp);
