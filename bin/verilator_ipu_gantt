@@ -117,6 +117,7 @@ if __name__ == "__main__":
     fig.update_layout(
         barmode='stack',
         template = args.theme,
+        title = str(objDir),
         xaxis ={'automargin': True},
         yaxis = {'automargin': True} #, 'categoryorder': 'category ascending'}}
     )
@@ -297,8 +298,8 @@ if __name__ == "__main__":
     plotECDF(True)
 
 
-    fig.add_heatmap(z = exchangeMapSend,
-                    visible = False, name = "exchange", autocolorscale = True,
+    fig.add_heatmap(z = exchangeMapSend, colorscale="blues",
+                    visible = False, name = "exchange",
                     hovertemplate = "<br>".join(["txTile:%{x}", "rxTile:%{y}", "bytes:%{z}"]))
 
     exchangeRx = [sum(exchangeMapSend[r, :]) for r in range(numTiles)]
