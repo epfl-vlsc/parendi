@@ -38,11 +38,18 @@ class ChannelEdge;
 struct CostType {
     uint32_t instrCount;
     uint32_t recvCount;
-    explicit CostType(uint32_t f, uint32_t s)
+    uint32_t memWords;
+
+    explicit CostType(uint32_t f, uint32_t s, uint32_t memWords)
         : instrCount{f}
-        , recvCount{s} {}
+        , recvCount{s}
+        , memWords{memWords} {}
     CostType() = default;
-    inline uint32_t sum() const { return instrCount; }
+    inline uint32_t sum() const {
+        // what actually constitutes as the cost is the instruction count
+        return instrCount;
+    }
+
     friend inline bool operator<(const CostType& c1, const CostType& c2) {
         return c1.sum() < c2.sum();
     }
@@ -59,17 +66,19 @@ struct CostType {
         return c1.sum() >= c2.sum();
     }
     friend inline std::ostream& operator<<(std::ostream& os, const CostType& c) {
-        os << "Cost(" << c.sum() << ":" << c.instrCount << ", " << c.recvCount << ")";
+        os << "Cost(" << c.sum() << ":" << c.instrCount << ", " << c.recvCount << ", "
+           << c.memWords << ")";
         return os;
     }
-    CostType percential(double p) {
+    CostType percentile(double p) {
         return CostType{static_cast<uint32_t>(instrCount * p),
-                        static_cast<uint32_t>(recvCount * p)};
+                        static_cast<uint32_t>(recvCount * p), memWords};
     }
     static CostType max() {
-        return CostType{std::numeric_limits<uint32_t>::max(),
-                        std::numeric_limits<uint32_t>::max()};
+        return CostType{std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint32_t>::max(),
+                        0};
     }
+    static CostType zero() { return CostType{0, 0, 0}; }
 };
 struct HeapKey {
     CoreVertex* corep;
@@ -89,15 +98,18 @@ class CoreVertex : public V3GraphVertex {
 private:
     uint32_t m_instrCount = 0;
     uint32_t m_recvWords = 0;
+    uint32_t m_memWords = 0;
     VlBitSet m_dupSet;
+    VlBitSet m_dupVarSet;
     std::vector<int> m_partIndex;
     std::unique_ptr<HeapNode> m_heapNode;
     bool m_hasPli;
 
 public:
-    CoreVertex(MultiCoreGraph* graphp, size_t numDups, std::vector<int>&& parts)
+    CoreVertex(MultiCoreGraph* graphp, size_t numDups, size_t numVarDups, std::vector<int>&& parts)
         : V3GraphVertex{graphp}
         , m_dupSet{numDups}
+        , m_dupVarSet{numVarDups}
         , m_partIndex{parts}
         , m_heapNode(std::make_unique<HeapNode>()) {
         m_heapNode->m_key = HeapKey{.corep = this};
@@ -107,9 +119,12 @@ public:
     inline uint32_t recvWords() const { return m_recvWords; }
     inline void instrCount(uint32_t v) { m_instrCount = v; }
     inline void recvWords(uint32_t v) { m_recvWords = v; }
+    inline void memoryWords(uint32_t v) { m_memWords = v; }
+    uint32_t memoryWords() const { return m_memWords; }
     inline std::vector<int>& partp() { return m_partIndex; }
     inline VlBitSet& dupSet() { return m_dupSet; }
-    inline CostType cost() const { return CostType{instrCount(), recvWords()}; }
+    inline VlBitSet& dupVarSet() { return m_dupVarSet; }
+    inline CostType cost() const { return CostType{instrCount(), recvWords(), memoryWords()}; }
     inline void heapNode(std::unique_ptr<HeapNode>&& n) { m_heapNode = std::move(n); }
     inline std::unique_ptr<HeapNode>& heapNode() { return m_heapNode; }
     inline bool hasPli() const { return m_hasPli; }
@@ -181,6 +196,7 @@ private:
     // AstNode::user2u()      -> node information
 
     std::vector<uint32_t> m_dupInstrCount;
+    std::vector<uint32_t> m_dupVarSize;
     std::vector<uint32_t> m_instrCount;
     std::unique_ptr<MultiCoreGraph> m_coreGraphp;
     MinHeap m_heap;
@@ -196,6 +212,7 @@ private:
             if (Arg const vp = dynamic_cast<Arg>(vtxp)) { fn(vp); }
         }
     }
+
     template <typename Fn>
     void iterEdges(CoreVertex* corep, GraphWay way, Fn&& fn) {
         using Traits = FunctionTraits<Fn>;
@@ -205,6 +222,7 @@ private:
             if (Arg const ep = dynamic_cast<Arg>(edgep)) { fn(ep); }
         }
     }
+
     uint32_t cachedInstrCount(AstNode* nodep) const {
         size_t index = m_nodeInfo(nodep).nodeIndex;
         UASSERT_OBJ(index < m_instrCount.size(), nodep, "instrCount not set");
@@ -217,9 +235,14 @@ private:
         AstNode::user2ClearTree();
         size_t dupIndex = 0;
         size_t nodeIndex = 0;
+        size_t varIndex = 0;
+        size_t varDupIndex = 0;
+        size_t numDupVars = 0;
         std::vector<uint32_t> totalCost;
+        std::vector<uint32_t> totalMem;
         std::vector<bool> hasPli;
         totalCost.resize(partitionsp.size());
+        totalMem.resize(partitionsp.size());
         hasPli.resize(partitionsp.size());
         std::fill_n(hasPli.begin(), hasPli.size(), false);
         for (int pix = 0; pix < partitionsp.size(); pix++) {
@@ -232,6 +255,8 @@ private:
 
             const auto& graphp = partitionsp[pix];
             uint32_t costAccum = 0;
+            uint32_t memAccum = 0;
+
             iterVertex(graphp.get(), [&](AnyVertex* const vtxp) {
                 if (ConstrCommitVertex* const commitp = dynamic_cast<ConstrCommitVertex*>(vtxp)) {
                     UASSERT(commitp->vscp(), "ConstrCommitVertex of nullptr");
@@ -241,10 +266,32 @@ private:
                     // mark AstVarScope with the partition that produces it
                     commitp->vscp()->user1(pix + 1);
                 }
+                if (ConstrVertex* const constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
+                    UASSERT(constrp->vscp(), "Expected VarScope");
+                    auto& infoRef = m_nodeInfo(constrp->vscp());
+                    const uint32_t bytes
+                        = constrp->vscp()->varp()->dtypep()->arrayUnpackedElements()
+                          * constrp->vscp()->varp()->widthWords();
+                    memAccum += bytes;
+                    if (!infoRef.visited) {
+                        // first visit to this variable that may have duplicates across the graphs
+                        infoRef.nodeIndex = varIndex;
+                        infoRef.visited = true;
+                        varIndex++;
+                    } else if (infoRef.visited && !infoRef.hasDuplicates) {
+                        infoRef.hasDuplicates = true;
+                        infoRef.nodeDupIndex = varDupIndex;
+                        m_dupVarSize.push_back(bytes);
+                        varDupIndex++;
+                    } else {
+                        // do not care, third or later visits
+                    }
+                }
                 // compute and cache the cost of each node
                 if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
                     auto& infoRef = m_nodeInfo(compp->nodep());
-                    const uint32_t numInstr = V3InstrCount::count(compp->nodep(), ofsp.get());
+                    const uint32_t numInstr
+                        = V3InstrCount::count(compp->nodep(), false, ofsp.get());
                     if (PliCheck::check(compp->nodep())) { hasPli[pix] = true; }
                     costAccum += numInstr;
                     if (!infoRef.visited) {
@@ -264,6 +311,7 @@ private:
                 }
             });
             totalCost[pix] = costAccum;
+            totalMem[pix] = memAccum;
             // iterVertex<DepGraph, AnyVertex>(graphp.get(), )
         }
         m_coreGraphp = std::make_unique<MultiCoreGraph>();
@@ -271,21 +319,32 @@ private:
 
         // number of nodes that have duplicates
         const size_t numDups = m_dupInstrCount.size();
+        const size_t numVarDups = m_dupVarSize.size();
         UINFO(3, "There are " << numDups << " nodes that have duplicates" << endl);
         V3Stats::addStat("BspMerger, nodes with duplicates ", numDups);
         for (int pix = 0; pix < partitionsp.size(); pix++) {
             // now create a CoreVertex for each partition
             const auto& depGraphp = partitionsp[pix];
-            CoreVertex* corep = new CoreVertex{m_coreGraphp.get(), numDups, {pix}};
+            CoreVertex* corep = new CoreVertex{m_coreGraphp.get(), numDups, numVarDups, {pix}};
             coresp.push_back(corep);
             corep->instrCount(totalCost[pix]);
+            corep->memoryWords(totalMem[pix]);
             corep->hasPli(hasPli[pix]);
             // Fill-in the duplicate set within the core
-            iterVertex(depGraphp.get(), [&](CompVertex* const compp) {
-                AstNode* const nodep = compp->nodep();
-                auto& info = m_nodeInfo(nodep);
-                auto& dups = corep->dupSet();
-                if (info.hasDuplicates) { dups.insert(info.nodeDupIndex); }
+            iterVertex(depGraphp.get(), [&](AnyVertex* const vtxp) {
+                if (ConstrVertex* constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
+                    // set the variables that are duplicated
+                    AstVarScope* const vscp = constrp->vscp();
+                    auto& info = m_nodeInfo(vscp);
+                    auto& varDups = corep->dupVarSet();
+                    if (info.hasDuplicates) { varDups.insert(info.nodeDupIndex); }
+                } else if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
+                    // set the compute nodes that are duplicated
+                    AstNode* const nodep = compp->nodep();
+                    auto& info = m_nodeInfo(nodep);
+                    auto& dups = corep->dupSet();
+                    if (info.hasDuplicates) { dups.insert(info.nodeDupIndex); }
+                }
             });
         }
 
@@ -331,6 +390,7 @@ private:
 
         const uint32_t rawInstrCost = core1p->instrCount() + core2p->instrCount();
         const uint32_t rawRecvCost = core1p->recvWords() + core2p->recvWords();
+        const uint32_t rawMemWords = core1p->memoryWords() + core2p->memoryWords();
 
         auto sumRecvFrom = [](CoreVertex* recvp, CoreVertex* sendp) {
             uint32_t sum = 0;
@@ -341,19 +401,29 @@ private:
         };
         const uint32_t recvReduction = sumRecvFrom(core1p, core2p) + sumRecvFrom(core2p, core1p);
 
+        // compute the duplicatation instruction count between the two core
         VlBitSet dupInCommon = VlBitSet::doIntersect(core1p->dupSet(), core2p->dupSet());
         uint32_t dupCostCommon = 0;
         dupInCommon.foreach([&](size_t dupIx) { dupCostCommon += m_dupInstrCount[dupIx]; });
+
+        // compute the variable duplication count between the two cores
+        VlBitSet varDupInCommon = VlBitSet::doIntersect(core1p->dupVarSet(), core2p->dupVarSet());
+        uint32_t dupVarCostCommon = 0;
+        varDupInCommon.foreach([&](size_t dupIx) { dupVarCostCommon += m_dupVarSize[dupIx]; });
+
         UASSERT(rawInstrCost >= dupCostCommon, "invalid instr cost computation");
         UASSERT(rawRecvCost >= recvReduction, "invalid recv cost computation");
         const uint32_t mergedCost = rawInstrCost - dupCostCommon;
         const uint32_t mergedRecvCost = rawRecvCost - recvReduction;
-        return CostType{mergedCost, mergedRecvCost};
+        UASSERT(rawMemWords >= dupVarCostCommon, "invalid mem byte computation");
+        const uint32_t mergedMemWords = rawMemWords - dupVarCostCommon;
+
+        return CostType{mergedCost, mergedRecvCost, mergedMemWords};
     }
     // merger core1p and core2p
     // complexity should be amortized O(max(log V, E))
-    void doMerge(CoreVertex* core1p, CoreVertex* core2p, CostType newCost = CostType{0, 0}) {
-        if (newCost == CostType{0, 0}) { newCost = costAfterMerge(core1p, core2p); }
+    void doMerge(CoreVertex* core1p, CoreVertex* core2p, CostType newCost = CostType{0, 0, 0}) {
+        if (newCost == CostType{0, 0, 0}) { newCost = costAfterMerge(core1p, core2p); }
 
         UINFO(10, "merging " << core1p->partsString() << " and " << core2p->partsString() << endl);
 
@@ -368,6 +438,8 @@ private:
         for (const auto p : core2p->partp()) { core1p->partp().push_back(p); }
 
         core1p->dupSet().unionInPlace(core2p->dupSet());
+        core1p->dupVarSet().unionInPlace(core2p->dupVarSet());
+        core1p->memoryWords(newCost.memWords);
         core1p->instrCount(newCost.instrCount);
         core1p->recvWords(newCost.recvCount);
         // connect every in/out edge core2p to core1p (careful not to make redundant
@@ -428,6 +500,14 @@ private:
                    [&coreCost](CoreVertex* const corep) { coreCost.push_back(corep->cost()); });
         return coreCost;
     }
+
+    uint32_t maxMemoryWords() const {
+        return static_cast<uint32_t>(v3Global.opt.ipuMemoryPerTile() / 8);
+    }
+
+    bool isFeasible(CostType& cost) const { return cost.memWords <= maxMemoryWords(); }
+    bool isInHeap(CoreVertex* corep) const { return corep->heapNode()->m_ownerpp; }
+
     uint32_t mergeConservatively() {
         UASSERT(m_heap.empty(), "heap should be empty");
         uint32_t numMerges = 0;
@@ -436,19 +516,25 @@ private:
         if (numCores <= targetCoreCount()) { return 0; }
 
         iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
-            if (!corep->hasPli()) { m_heap.insert(corep->heapNode().get()); }
+            if (!corep->hasPli()) {
+                UINFO(10, "Adding core " << corep->name() << " to the heap " << endl);
+                m_heap.insert(corep->heapNode().get());
+                UASSERT(corep->heapNode()->m_ownerpp, "no ownerpp");
+            } else {
+                UINFO(10, "Will not merge " << corep->name() << " for now" << endl);
+            }
         });
         std::stable_sort(coreCost.begin(), coreCost.end());
-        // do not exceed the 95th percentile worst-case cost
+        // do not exceed the 85th percentile worst-case cost
         CostType worstCost = coreCost.back();
-        for (const double p : {0.95, 0.96, 0.97, 0.98, 0.99}) {
-            if (worstCost.percential(p) > CostType{0, 0}) {
-                worstCost = worstCost.percential(p);
+        for (const double p : {0.85, 0.90, 0.95, 0.98, 0.99}) {
+            if (worstCost.percentile(p) > CostType::zero()) {
+                worstCost = worstCost.percentile(p);
                 break;
             }
         }
 
-        if (worstCost == CostType{0, 0}) { worstCost = coreCost.back(); }
+        if (worstCost == CostType::zero()) { worstCost = coreCost.back(); }
         // worstCost.instrCount += 200;
         // worstCost.recvCount += 200;
         UINFO(8, "Max permissible cost is " << worstCost << " and the max absolute cost is "
@@ -470,7 +556,8 @@ private:
                     CostType newCost = costAfterMerge(corep, neighbor);
                     // update cost if neighbor does not have pli has offers a better cost that
                     // already found
-                    if (!neighbor->hasPli() && newCost <= worstCost && newCost <= bestCost) {
+                    if (isInHeap(neighbor) && isFeasible(newCost) && newCost < worstCost
+                        && newCost < bestCost) {
                         bestNeighbor = neighbor;
                         bestCost = newCost;
                     }
@@ -487,14 +574,15 @@ private:
             if (secondMinNodep) {
                 costWithNext = costAfterMerge(corep, secondMinNodep->key().corep);
             }
-            if (bestNeighbor && bestCost <= costWithNext) {
+            if (bestNeighbor && isFeasible(bestCost)
+                && (bestCost < costWithNext || !secondMinNodep || !isFeasible(costWithNext))) {
                 // found a neighbor, merge it
-                UINFO(8, "Merging with neighbors: " << bestCost << endl);
+                UINFO(8, "Merging with neighbor: " << bestCost << endl);
                 doMerge(corep, bestNeighbor, bestCost);
                 UASSERT(numCores > 1, "numCores underflowed");
                 numCores--;
                 numMerges++;
-            } else if (secondMinNodep && costWithNext <= worstCost) {
+            } else if (secondMinNodep && isFeasible(costWithNext) && costWithNext < worstCost) {
                 // did not find the neighbor, try the next min key
                 CoreVertex* otherCorep = secondMinNodep->key().corep;
                 UINFO(8, "Merging with next the smallest core: " << costWithNext << endl);
@@ -561,7 +649,7 @@ private:
                 iterEdges(corep, way, [&](V3GraphEdge* edgep) {
                     CoreVertex* const neighborp = dynamic_cast<CoreVertex*>(edgep->furtherp(way));
                     CostType newCost = costAfterMerge(corep, neighborp);
-                    if (newCost < bestCost) {
+                    if (isInHeap(neighborp) && isFeasible(newCost) && newCost < bestCost) {
                         bestNeighborp = neighborp;
                         bestCost = newCost;
                     }
@@ -584,11 +672,12 @@ private:
                 UASSERT(numCores > 1, "underflow");
                 numCores--;
             };
-            if (bestNeighborp && bestCost <= costWithNext) {
+            if (bestNeighborp && isFeasible(bestCost)
+                && (bestCost < costWithNext || !secondMinNodep || !isFeasible(costWithNext))) {
                 UINFO(8, "Merging with neighbor core givs "
                              << bestCost << " current = " << currentWorst << endl);
                 applyMerge(bestNeighborp, bestCost);
-            } else if (secondMinNodep) {
+            } else if (secondMinNodep && isFeasible(costWithNext)) {
                 // there were no neighbors, merge with the next in the heap
                 CoreVertex* otherCorep = secondMinNodep->key().corep;
                 UINFO(8, "Merging with next in line " << costWithNext
@@ -596,13 +685,22 @@ private:
                 applyMerge(otherCorep, costWithNext);
             } else {
                 // something is up
-                UASSERT(false, "Nothing left to merge!");
+                // could not merge this node, remove it and continue.
+                m_heap.remove(minNodep);
+                UINFO(4, "Could not merge node with neither neighbors nor the next inline, "
+                         "perhaps low on memory? next = "
+                             << costWithNext << " neighbor = " << bestCost << endl);
             }
         }
 
-        UASSERT(numCores <= targetCoreCount(), "Could not reach desired count "
-                                                   << targetCoreCount() << " > " << numCores
-                                                   << endl);
+        if (numCores > targetCoreCount()) {
+            v3Global.rootp()->v3fatal("Could not reach the desired core count! "
+                                      << numCores << " > " << targetCoreCount() << endl
+                                      << "Probably ran out of IPU memory...");
+        }
+        // UASSERT(numCores <= targetCoreCount(), "Could not reach desired count "
+        //                                            << targetCoreCount() << " > " << numCores
+        //                                            << endl);
         // clean up
         while (!m_heap.empty()) { m_heap.remove(m_heap.max()); }
 
@@ -712,6 +810,7 @@ private:
 public:
     explicit PartitionMerger(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
 
+        UINFO(10, "merging " << partitionsp.size() << " to " << targetCoreCount() << endl);
         if (partitionsp.empty() || partitionsp.size() <= targetCoreCount()) { return; }
 
         buildMultiCoreGraph(partitionsp);

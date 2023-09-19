@@ -314,6 +314,7 @@ private:
     double      m_resyncThreshold = 0.8; // main poplar switch: --resync-threshold
     double      m_kahyparImbalance = 0.03; // main poplar switch: --kahypar-imbalance
     int         m_tilesPerIpu       = 1472; // main poplar switch: --tiles-per-ipu
+    int         m_ipuMemoryPerTile  = (256 * 1024); // main poplar switch: --ipu-memory-per-tile in bytes
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
     VTimescale  m_timeDefaultUnit;  // main switch: --timescale
@@ -552,6 +553,7 @@ public:
     double resyncThreshold() const VL_MT_SAFE { return m_resyncThreshold; }
     double kahyparImbalance() const VL_MT_SAFE { return m_kahyparImbalance; }
     int tilesPerIpu() const VL_MT_SAFE { return m_tilesPerIpu; }
+    int ipuMemoryPerTile() const VL_MT_SAFE { return m_ipuMemoryPerTile; }
     VTimescale timeDefaultPrec() const { return m_timeDefaultPrec; }
     VTimescale timeDefaultUnit() const { return m_timeDefaultUnit; }
     VTimescale timeOverridePrec() const { return m_timeOverridePrec; }

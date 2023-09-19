@@ -1629,6 +1629,12 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
             fl->v3fatal("--tiles-per-ipu should be at least 1 but was given " << valp << endl);
         }
     });
+    DECL_OPTION("-ipu-memory-per-tile", CbVal, [this, fl](const char* valp) {
+        m_ipuMemoryPerTile = std::atoi(valp);
+        if (m_ipuMemoryPerTile < 0) {
+            fl->v3fatal("--ipu-memory-per-tile should be positive but was given " << valp << endl);
+        }
+    });
     DECL_OPTION("-Wwarn-", CbPartialMatch, [this, fl, &parser](const char* optp) {
         const V3ErrorCode code{optp};
         if (code == V3ErrorCode::EC_ERROR) {
