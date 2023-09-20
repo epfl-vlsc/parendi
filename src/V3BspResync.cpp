@@ -728,7 +728,40 @@ private:
     const VNUser2InUse m_user2InUse;
     const VNUser3InUse m_user3InUse;
 
-    using VarScopeByDomain = std::unordered_map<AstSenTree*, AstVarScope*>;
+    class VarScopeByDomain {
+    private:
+        std::unordered_map<AstSenTree*, AstVarScope*> m_seqSubst;
+        std::unordered_map<AstSenTree*, std::unordered_map<int, AstVarScope*>> m_combSubst;
+
+    public:
+        void emplaceSampler(AstSenTree* sentreep, AstVarScope* vscp) {
+            m_seqSubst.emplace(sentreep, vscp);
+        }
+        void emplaceComb(AstSenTree* sentreep, int rank, AstVarScope* vscp) {
+            m_combSubst[sentreep].emplace(rank, vscp);
+        }
+        AstVarScope* getSampler(AstSenTree* sentreep) const {
+            auto it = m_seqSubst.find(sentreep);
+            UASSERT(it != m_seqSubst.end(), "key not found: " << sentreep << endl);
+            return it->second;
+        }
+
+        AstVarScope* getComb(AstSenTree* sentreep, int rank) const {
+            auto it = m_combSubst.find(sentreep);
+            UASSERT(it != m_combSubst.end(), "key not found: " << sentreep << endl);
+            auto it2 = it->second.find(rank);
+            UASSERT(it2 != it->second.end(), "key not found: " << rank << endl);
+            return it2->second;
+        }
+        bool containsSampler(AstSenTree* sentreep) const {
+            return m_seqSubst.find(sentreep) != m_seqSubst.end();
+        }
+        bool containsComb(AstSenTree* sentreep, int rank) const {
+            auto it = m_combSubst.find(sentreep);
+            return (it != m_combSubst.end()) && (it->second.find(rank) != it->second.end());
+        }
+    };
+    // using VarScopeByDomain = std::unordered_map<AstSenTree*, AstVarScope*>;
     using LogicCloneByDomain = std::unordered_map<AstSenTree*, AstNode*>;
     AstUser2Allocator<AstVarScope, VarScopeByDomain> m_newVscpByDomain;
     AstUser3Allocator<AstNode, LogicCloneByDomain> m_newLogicByDomain;
@@ -736,7 +769,8 @@ private:
     // STATE:
     // AstVarScope::user1p()        -> pointer to new AstVarScope, clear on each graph
     // AstVarScope::user2u()        -> pointer to new AstVarScope per domain, clear on
-    // construction AstNode::user2u()            -> clone of the logic by domain, clear on
+    // construction
+    // AstNode::user2u()            -> clone of the logic by domain, clear on
     // construction
 
     AstVarScope* makeVscp(AstVarScope* const oldp) {
@@ -797,10 +831,10 @@ private:
     // Create copies for variables created by CombSeqVertex, these are now "sequential"
     void markSubstOrCreateNewVscp(AstVarScope* const oldVscp, AstSenTree* const sentreep) {
         // Create a "sequential" version of this variable
-        if (!m_newVscpByDomain(oldVscp).count(sentreep)) {
+        if (!m_newVscpByDomain(oldVscp).containsSampler(sentreep)) {
             AstVarScope* const newVscp = makeVscp(oldVscp);
             LocalSubst::set(oldVscp, newVscp);
-            m_newVscpByDomain(oldVscp).emplace(sentreep, newVscp);
+            m_newVscpByDomain(oldVscp).emplaceSampler(sentreep, newVscp);
             FileLine* flp = oldVscp->fileline();
             UINFO(8, "creating sampler " << newVscp->prettyNameQ() << " for "
                                          << oldVscp->prettyNameQ() << endl);
@@ -815,7 +849,7 @@ private:
 
         } else {
             // sequential version exists
-            AstVarScope* const newVscp = m_newVscpByDomain(oldVscp)[sentreep];
+            AstVarScope* const newVscp = m_newVscpByDomain(oldVscp).getSampler(sentreep);
             UINFO(12, "Using cached sampler " << newVscp->prettyNameQ() << endl);
             LocalSubst::set(oldVscp, newVscp);
         }
@@ -833,15 +867,16 @@ private:
     void markSubstCombComb(CombCombVertex* vtxp) {
         vtxp->foreachOutEdge([&](ResyncEdge* edgep) {
             AstVarScope* const oldVscp = edgep->vscp();
-            if (!m_newVscpByDomain(oldVscp).count(vtxp->sentreep())) {
+            if (!m_newVscpByDomain(oldVscp).containsComb(vtxp->sentreep(), vtxp->rank())) {
 
                 AstVarScope* const newVscp = makeVscp(oldVscp);
                 LocalSubst::set(oldVscp, newVscp);
-                m_newVscpByDomain(oldVscp).emplace(vtxp->sentreep(), newVscp);
+                m_newVscpByDomain(oldVscp).emplaceComb(vtxp->sentreep(), vtxp->rank(), newVscp);
                 UINFO(8, "Creating new comb signal " << newVscp->prettyNameQ() << " for "
-                                                     << oldVscp->prettyNameQ() << endl);
+                                                     << oldVscp->prettyNameQ() << " at rank " << vtxp->rank() << endl);
             } else {
-                AstVarScope* const newVscp = m_newVscpByDomain(oldVscp)[vtxp->sentreep()];
+                AstVarScope* const newVscp
+                    = m_newVscpByDomain(oldVscp).getComb(vtxp->sentreep(), vtxp->rank());
                 UINFO(12, "Using cached comb lv " << newVscp->prettyNameQ() << endl);
                 LocalSubst::set(oldVscp, newVscp);
             }
@@ -931,15 +966,26 @@ private:
         LocalSubst::clearAll();
 
         vtxp->foreachInEdge([&](ResyncEdge* edgep) {
-            UASSERT(dynamic_cast<CombCombVertex*>(edgep->fromp())
-                        || dynamic_cast<CombSeqReadVertex*>(edgep->fromp()),
-                    "unexpected fromp type");
+            const bool fromCombComb = (dynamic_cast<CombCombVertex*>(edgep->fromp()) != nullptr);
+            const bool fromCombSeq = (dynamic_cast<CombSeqReadVertex*>(edgep->fromp()) != nullptr);
+
+            UASSERT(fromCombComb || fromCombSeq, "unexpected fromp type");
             UASSERT(vtxp->sentreep(), "something is up, resync logic with multiple domains?");
-            auto it = m_newVscpByDomain(edgep->vscp()).find(vtxp->sentreep());
-            if (it != m_newVscpByDomain(edgep->vscp()).end()) {
-                UINFO(10, "    RV subst " << edgep->vscp()->prettyNameQ() << " -> "
-                                          << it->second->prettyNameQ() << endl);
-                LocalSubst::set(edgep->vscp(), it->second);
+            if (fromCombSeq
+                && m_newVscpByDomain(edgep->vscp()).containsSampler(vtxp->sentreep())) {
+                AstVarScope* const substp
+                    = m_newVscpByDomain(edgep->vscp()).getSampler(vtxp->sentreep());
+                UINFO(10, "    RV subst from sampler " << edgep->vscp()->prettyNameQ() << " -> "
+                                                       << substp->prettyNameQ() << endl);
+                LocalSubst::set(edgep->vscp(), substp);
+            } else if (fromCombComb
+                       && m_newVscpByDomain(edgep->vscp())
+                              .containsComb(vtxp->sentreep(), edgep->fromp()->rank())) {
+                AstVarScope* const substp = m_newVscpByDomain(edgep->vscp())
+                                                .getComb(vtxp->sentreep(), edgep->fromp()->rank());
+                UINFO(10, "    RV subst from comb " << edgep->vscp()->prettyNameQ() << " -> "
+                                                    << substp->prettyNameQ() << endl);
+                LocalSubst::set(edgep->vscp(), substp);
             }
         });
         // for (AstVarScope* const lvp : vtxp->lvsp()) {
@@ -1121,7 +1167,7 @@ public:
         }
         graphsp.clear();
 
-        if (dump() >= 20) {
+        if (dump() >= 100) {
             std::unique_ptr<std::ofstream> ofsp{
                 V3File::new_ofstream(v3Global.debugFilename("newNodes.v"))};
             std::unique_ptr<std::ofstream> ofsp2{
@@ -1171,7 +1217,7 @@ void resyncAll(AstNetlist* netlistp) {
 
     if (ResyncLegalVisitor::allowed(netlistp)) {
         bool changed = false;
-
+        v3Global.dumpCheckGlobalTree("resync-pre", 0, dumpTree() >= 5);
         // v3Global.dumpCheckGlobalTree("preresync", 0, dumpTree() >= 3);
         auto deps = V3BspSched::buildDepGraphs(netlistp);
         auto& depGraphsp = std::get<2>(deps);
