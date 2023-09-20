@@ -31,7 +31,7 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     } else if (VL_NUM_TILES_USED <= MAX_TILES_PER_IPU * 2) {
         requiredNumIpus = 2;
     } else if (VL_NUM_TILES_USED <= MAX_TILES_PER_IPU * 3) {
-        requiredNumIpus = 3;
+        requiredNumIpus = 4; // use 4, API does not allow locking 3
     } else if (VL_NUM_TILES_USED <= MAX_TILES_PER_IPU * 4) {
         requiredNumIpus = 4;
     } else {
@@ -51,7 +51,7 @@ void VlPoplarContext::init(int argc, char* argv[]) {
     auto devIt = std::find_if(devices.begin(), devices.end(),
                               [](poplar::Device& dev) { return dev.attach(); });
     if (devIt == devices.end()) {
-        std::cerr << "Failed to attache to an IPU" << std::endl;
+        std::cerr << "Failed to attach to an IPU" << std::endl;
         std::exit(EXIT_FAILURE);
     }
 
