@@ -22,6 +22,7 @@
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3BspGraph.h"
+#include "V3InstrCount.h"
 #include "V3Stats.h"
 #include "V3UniqueNames.h"
 
@@ -30,6 +31,197 @@ VL_DEFINE_DEBUG_FUNCTIONS;
 
 namespace V3BspSched {
 namespace {
+class SchedVertex final : public V3GraphVertex {
+private:
+    CompVertex* m_compp;
+    int m_inDegree = 0;
+    bool m_schedDone = false;
+
+public:
+    SchedVertex(V3Graph* graphp)
+        : V3GraphVertex{graphp}
+        , m_compp{nullptr}
+        , m_inDegree{0}
+        , m_schedDone{false} {}
+    ~SchedVertex() override {}
+    void compp(CompVertex* ptr) { m_compp = ptr; }
+    CompVertex* compp() const { return m_compp; }
+    inline int inDegree() const { return m_inDegree; }
+    inline void inDegree(int n) { m_inDegree = n; }
+    inline void inDegreeInc() { m_inDegree++; }
+    inline void inDegreeDec() { m_inDegree--; }
+    inline void notifySchedComplete() { m_schedDone = true; }
+    inline bool schedDone() const { return m_schedDone; }
+    string name() const override {
+        if (m_compp)
+            return m_compp->name();
+        else
+            return V3GraphVertex::name();
+    }
+    string dotShape() const override {
+        if (m_compp)
+            return m_compp->dotShape();
+        else
+            return V3GraphVertex::dotShape();
+    }
+};
+class HybridDfsBfsScheduler final {
+public:
+    static int numWays() {
+        return 4;
+    }
+    static bool splitFibers() {
+        return true;
+    }
+
+    static std::unique_ptr<V3Graph> makeSchedGraphColored(DepGraph* const graphp, uint32_t color) {
+        std::unique_ptr<V3Graph> schedGraphp{new V3Graph};
+        std::unordered_map<CompVertex*, SchedVertex*> newVtxMapp;
+        std::vector<SchedVertex*> newVtxsp;
+        for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp; vtxp = vtxp->verticesNextp()) {
+            if (color && vtxp->color() != color) continue;
+            if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
+                SchedVertex* const newp = new SchedVertex{schedGraphp.get()};
+                newp->compp(compp);
+                auto nodep = newp->compp()->nodep();
+                UASSERT(nodep, "nullptr vertex");
+                UASSERT_OBJ(VN_IS(nodep, Always) || VN_IS(nodep, AlwaysPost)
+                                || VN_IS(nodep, AssignPost) || VN_IS(nodep, AssignPre)
+                                || VN_IS(nodep, AssignW) || VN_IS(nodep, AssignAlias),
+                            nodep, "unexpected node type " << nodep->prettyTypeName() << endl);
+                newVtxMapp.emplace(compp, newp);
+                newVtxsp.push_back(newp);
+            }
+        }
+        for (SchedVertex* schedp : newVtxsp) {
+            for (V3GraphEdge* edgep = schedp->compp()->outBeginp(); edgep;
+                 edgep = edgep->outNextp()) {
+                UASSERT(dynamic_cast<ConstrVertex*>(edgep->top()), "invalid vertex type!");
+                for (V3GraphEdge* edge2p = edgep->top()->outBeginp(); edge2p;
+                     edge2p = edge2p->outNextp()) {
+                    CompVertex* succCompp = dynamic_cast<CompVertex*>(edge2p->top());
+                    UASSERT(succCompp, "invalid vertex type");
+                    UASSERT(newVtxMapp.count(succCompp), "not found");
+                    SchedVertex* succp = newVtxMapp.find(succCompp)->second;
+                    UASSERT(succp, "expected non-null");
+                    new V3GraphEdge{schedGraphp.get(), schedp, succp, 1, false};
+                }
+            }
+        }
+        return schedGraphp;
+    }
+    static std::vector<std::unique_ptr<V3Graph>> makeSchedGraph(DepGraph* const graphp) {
+        graphp->order();  // topologically order the original graph
+        std::vector<std::unique_ptr<V3Graph>> schedGraphsp;
+        if (splitFibers()) {
+            uint32_t numColors = 0;
+            graphp->weaklyConnected(V3GraphEdge::followAlwaysTrue);
+            for (V3GraphVertex* vtxp = graphp->verticesBeginp(); vtxp;
+                 vtxp = vtxp->verticesNextp()) {
+                UASSERT(vtxp->color(), "graph not colored");
+                numColors = std::max(numColors, vtxp->color());
+            }
+            for (int c = 1; c <= numColors; c++) {
+                schedGraphsp.emplace_back(makeSchedGraphColored(graphp, c));
+            }
+        } else {
+            schedGraphsp.emplace_back(makeSchedGraphColored(graphp, 0 /*no color*/));
+        }
+        return schedGraphsp;
+    }
+    static std::vector<CompVertex*> scheduleOne(const std::unique_ptr<V3Graph>& schedGraphp) {
+        std::vector<SchedVertex*> scheduled;
+        std::vector<SchedVertex*> readyListp;
+        readyListp.clear();
+        // fill the readyList with vertices that have no predecessors.
+        int leftToSchedule = 0;
+
+        for (V3GraphVertex* itp = schedGraphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
+            auto vtxp = dynamic_cast<SchedVertex*>(itp);
+            UASSERT(vtxp, "bad type!");
+            vtxp->inDegree(0);
+
+            for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
+                vtxp->inDegreeInc();
+            }
+            if (vtxp->inDegree() == 0) { readyListp.push_back(vtxp); }
+            leftToSchedule++;
+        }
+
+        const int vtxCount = leftToSchedule;
+        // while there exists unscheduled instructions, schedule a few vertices from the readylist
+        // in parallel
+        std::vector<SchedVertex*> toCommitp;
+        while (leftToSchedule) {
+            toCommitp.clear();
+            int computeToCommit = std::min(numWays(), static_cast<int>(readyListp.size()));
+            for (int i = 0; i < computeToCommit; i++) {
+                toCommitp.push_back(readyListp.back());
+                readyListp.pop_back();
+                UASSERT(leftToSchedule, "undeflow in vertices left to schedule");
+                leftToSchedule--;
+            }
+            UASSERT(toCommitp.size(), "nothing to schedule!");
+            for (SchedVertex* const vtxp : vlstd::reverse_view(toCommitp)) {
+                scheduled.push_back(vtxp);
+
+                UASSERT(vtxp->compp() && dynamic_cast<CompVertex*>(vtxp->compp()),
+                        "invalid pointer");
+                UASSERT(!vtxp->schedDone(), "already scheduled?");
+                vtxp->notifySchedComplete();
+                vtxp->rank(scheduled.size());
+
+                // UINFO(10, "Scheduled " << vtxp << " at rank " << vtxp->rank() << endl);
+                UASSERT(vtxp->inDegree() == 0, "predecessor not scheduled?" << vtxp << endl);
+
+                for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+                    SchedVertex* const succp = dynamic_cast<SchedVertex*>(edgep->top());
+                    UASSERT(succp, "unexpected vertex type!");
+                    UASSERT(succp->inDegree(), "expected non-zero count " << succp << endl);
+                    succp->inDegreeDec();
+                    if (succp->inDegree() == 0) {
+                        // add to readyList
+                        readyListp.push_back(succp);
+                    }
+                }
+            }
+        }
+        UASSERT(scheduled.size() == vtxCount, "some vertex is not scheduled");
+        // verify that toplogical order is preserved
+        if (debug() >= 3) {
+
+            bool failed = false;
+            for (SchedVertex* vtxp : scheduled) {
+                for (V3GraphEdge* edgep = vtxp->inBeginp(); edgep; edgep = edgep->inNextp()) {
+                    V3GraphVertex* const fromp = edgep->fromp();
+                    if (fromp->rank() > vtxp->rank()) {
+                        failed = true;
+                        UINFO(3, "Invalid ordering: Vertex "
+                                     << vtxp << " is ordered as " << vtxp->rank()
+                                     << " but has a predecessor " << fromp
+                                     << " that is ordered as " << fromp->rank() << endl);
+                    }
+                }
+            }
+
+            if (failed || dump() >= 10) { schedGraphp->dumpDotFilePrefixedAlways("schedule"); }
+            UASSERT(!failed, "Invalid schedule");
+        }
+        std::vector<CompVertex*> result;
+        for (SchedVertex* vtxp : scheduled) { result.push_back(vtxp->compp()); }
+        return result;
+    }
+    static std::vector<CompVertex*> schedule(DepGraph* const graphp) {
+
+        std::vector<std::unique_ptr<V3Graph>> schedGraphp = makeSchedGraph(graphp);
+        std::vector<CompVertex*> result;
+        for (const auto& gp : schedGraphp) {
+            std::vector<CompVertex*> partialRes = scheduleOne(gp);
+            for (CompVertex* vtxp : partialRes) { result.push_back(vtxp); }
+        }
+        return result;
+    }
+};
 class ReplaceOldVarRefsVisitor final : public VNVisitor {
 private:
     void visit(AstVarRef* vrefp) override {
@@ -574,7 +766,7 @@ private:
                     auto& refInfo = m_vscpRefs(vscp);
                     vscp->user2(true);  // visited
                     AstVar* const varp = new AstVar{vscp->varp()->fileline(), VVarType::MEMBER,
-                                                    "active___" + freshName(vscp), vscp->varp()->dtypep()};
+                                                    freshName(vscp), vscp->varp()->dtypep()};
                     varp->origName(vscp->name());
                     varp->lifetime(VLifetime::AUTOMATIC);
                     classp->addStmtsp(varp);
@@ -794,8 +986,9 @@ private:
 
         // add the computation
         UINFO(5, "Ordering computation" << endl);
-        graphp->order();  // order the computation
+        // graphp->order();  // order the computation
 
+        std::vector<CompVertex*> orderedVtxps = HybridDfsBfsScheduler::schedule(graphp.get());
         // Go through the compute vertices in order and append them to nbaTopp.
         // Each compute vertex has a domainp (nullptr if combinatiol) that
         // determines whether the statement should fire or not. We keep track
@@ -810,9 +1003,8 @@ private:
         // just add a comment to as firstp to make sure its not null
         currentActive.firstp = new AstComment{fl, "begin nba computation"};
 
-        for (V3GraphVertex* itp = graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
-            auto vtxp = dynamic_cast<CompVertex* const>(itp);
-            if (!vtxp) continue;
+        for (CompVertex* vtxp : orderedVtxps) {
+
             auto vtxDomp = vtxp->domainp();
             auto nodep = vtxp->nodep();
             UASSERT(nodep, "nullptr vertex");
