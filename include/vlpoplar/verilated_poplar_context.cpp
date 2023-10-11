@@ -408,8 +408,10 @@ void VlPoplarContext::runReEntrant() {
 #endif
     do {
         profile << "init " << invIndex << std::endl;
-        engine->run(E_INIT);
-        vprog->hostHandle();
+        measure([this]() {
+            engine->run(E_INIT);
+            vprog->hostHandle();
+        }, "\twall");
         interrupt = getHostData<uint32_t>("interrupt");
     } while (interrupt && !Verilated::gotFinish());
     engine->run(E_INITCOPY);

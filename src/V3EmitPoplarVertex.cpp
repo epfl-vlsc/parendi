@@ -193,13 +193,14 @@ public:
                     toEmitp.back().push_back(classp);
                     nodeCount += classp->nodeCount();
 
-                    if (v3Global.opt.outputSplit() && nodeCount >= v3Global.opt.outputSplit()) {
+                    if (v3Global.opt.outputSplit() && nodeCount >= v3Global.opt.outputSplit() * 10) {
                         toEmitp.push_back({});
                         nodeCount = 0;
                     }
                 }
             }
         }
+        UINFO(3, "Emitting " << toEmitp.size() << " codelet files " << endl);
         using EmitResult = std::vector<AstCFile*>;
         std::vector<std::future<EmitResult>> results;
         for (int tid = 0; tid < toEmitp.size(); tid++) {
@@ -210,10 +211,13 @@ public:
             }});
             results.emplace_back(std::move(future));
         }
+        int filesEmitted = 0;
         for (auto& ft : results) {
             UASSERT(ft.valid(), "invalid future");
             ft.wait();
             EmitResult res = ft.get();
+            filesEmitted += res.size();
+            UINFO(3, "Emitted " << filesEmitted << " files " << endl);
             for (AstCFile* cfilep : res) { netlistp->addFilesp(cfilep); }
         }
     }

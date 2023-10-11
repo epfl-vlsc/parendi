@@ -167,7 +167,13 @@ inline bool HeapKey::operator<(const HeapKey& other) const {
     // user greater to turn the max-heap into a min-heap
     return (corep->cost() >= other.corep->cost());
 }
-inline uint32_t targetCoreCount() { return v3Global.opt.tiles() * v3Global.opt.workers(); }
+inline uint32_t targetCoreCount() {
+    uint32_t nTiles = v3Global.opt.tiles();
+    if (nTiles > v3Global.opt.tilesPerIpu()) {
+        nTiles--; // When multiple IPUs are used, keep the zeroth tile free
+    }
+    return nTiles * v3Global.opt.workers();
+}
 
 class PartitionMerger {
 private:

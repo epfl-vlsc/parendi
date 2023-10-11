@@ -18,6 +18,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("plot IPU profile")
     parser.add_argument("obj_dir", metavar="OBJ_DIR", help="object directory (verilator output given by --Mdir)", default="obj_dir")
     parser.add_argument('-n', '--num', metavar="N", help="number of traces to show", default='5', type=int)
+    parser.add_argument('-r', '--range', metavar="LB:UB", help="range of traces to consider", type=str)
     parser.add_argument('-t', '--theme', metavar="THEME", help="plotly theme", default="plotly_white", type=str)
     parser.add_argument('-o', '--output', metavar="FILES", help="output images", nargs="+", type=pathlib.Path, default=list())
     parser.add_argument('-b', '--nbins', default=DEFAULT_NUM_BINS, help="number of bins in the histogram", type=int)
@@ -57,7 +58,12 @@ if __name__ == "__main__":
     numTiles = np.max(estimatedCost['Tile']) + 1
     numIpus = int((numTiles - 1) / IPU_TILES) + 1
 
-    print(f"Tiles used: {numTiles} in {numIpus} IPUs")
+    reportFp = open(objDir / "profileSummary.txt", 'w')
+    def report(msg: str):
+        reportFp.write(msg + "\n")
+        print(msg)
+
+    report(f"Tiles used: {numTiles} in {numIpus} IPUs")
 
     exchange = [[] for _ in range(numTiles)]
     workload = [[] for _ in range(numTiles)]
@@ -78,11 +84,19 @@ if __name__ == "__main__":
     with open(initTsPath, 'r') as fp:
         initTs = [int(x) for x in fp.readlines()[0].strip().split(' ')]
 
-
+    traceRange = None
+    if args.range:
+        traceRange = [int(x) for x in args.range.strip().split(":")]
+        assert(len(traceRange) == 2)
     with open(postWorkloadPath, 'r') as postfp, open(preExchangePath, 'r') as xfp, open(preWorkloadPath, 'r') as prefp:
         n = 0
         for (ex, pre, post) in zip(xfp.readlines(), prefp.readlines(), postfp.readlines()):
-            if n >= args.num:
+            if traceRange and n < traceRange[0]:
+                n += 1
+                continue
+            elif traceRange and n >= traceRange[1]:
+                break
+            elif not traceRange and n >= args.num:
                 break
             et = ex.split()
             pot = post.split()
@@ -186,19 +200,24 @@ if __name__ == "__main__":
     # traceAvg.update_xaxes(title = 'tile')
     # traceAvg.update_yaxes(title = 'cycles')
     # print(workloadAvg_est)
-    with open(objDir / "workloadDf.txt", 'w') as fp:
-        fp.write(workload_df.to_string())
-    with open(objDir / "exchangeDf.txt", 'w') as fp:
-        fp.write(exchange_df.to_string())
+
+    workload_df.to_string(str(objDir / "workloadDf.txt"))
+    workloadAvg_df['Est'] = workloadAvg_est['Delta']
+    workloadAvg_df.to_string(str(objDir / "workloadAvgDf.txt"))
+    exchange_df.to_string(str(objDir / "exchangeDf.txt"))
+
 
     # plot estimated value
     error = [(real - est) / est * 100 for (est, real) in zip(workloadAvg_est['Delta'].tolist(), workloadAvg_df['Delta'].tolist())]
 
-    print(f"Error stats (%):\n\tmean {np.mean(error):0.1f} std {np.std(error):0.1f} median {np.median(error):0.1f}\n\tmax {np.max(error):0.1f} min {np.min(error):0.1f}")
+    report(f"Error stats (%):\n\tmean {np.mean(error):0.1f} std {np.std(error):0.1f} median {np.median(error):0.1f}\n\tmax {np.max(error):0.1f} min {np.min(error):0.1f}")
     worstAvgs = sorted(zip(workloadAvg_df['Delta'], workloadAvg_df['Tile']), key = lambda d: -d[0])
-    print("Top 10 stragglers:")
+
+
+
+    report("Top 10 stragglers:")
     for ((d, t), i) in zip(worstAvgs, range(10)):
-        print(f"\tAt tile {t}: {d} ({tileCost(t)})")
+        report(f"\tAt tile {t}: {d} ({tileCost(t)})")
     def prettyBytes(b: int):
         if (b < (1 << 10)):
             return f"{b:.1f} B"
@@ -210,7 +229,7 @@ if __name__ == "__main__":
             return f"{b / 1024 / 1024 / 1024: .1f} GiB"
     totalExchangeCycle = np.max(exchange_df['Duration'])
     bytesPerCycle = totalBytes / totalExchangeCycle
-    print(f"Exchange:\n\tcycles {totalExchangeCycle}\n\tbytes {prettyBytes(totalBytes)}\n\tbw {prettyBytes(bytesPerCycle)}/c {prettyBytes(bytesPerCycle * 1.35e9)}/s")
+    report(f"Exchange:\n\tcycles {totalExchangeCycle}\n\tbytes {prettyBytes(totalBytes)}\n\tbw {prettyBytes(bytesPerCycle)}/c {prettyBytes(bytesPerCycle * 1.35e9)}/s")
 
     exchangeMapSendDevice = np.zeros((numIpus, numIpus))
     for sid in range(numTiles):
@@ -218,10 +237,10 @@ if __name__ == "__main__":
             sIpu = int(sid / IPU_TILES)
             tIpu = int(tid / IPU_TILES)
             exchangeMapSendDevice[tIpu, sIpu] += exchangeMapSend[tid, sid]
-    print("External exchnage:")
+    report("External exchnage:")
     for sIpu in range(numIpus):
         for tIpu in range(numIpus):
-            print(f"\tIPU{sIpu}->IPU{tIpu} {prettyBytes(exchangeMapSendDevice[tIpu, sIpu])}")
+            report(f"\tIPU{sIpu}->IPU{tIpu} {prettyBytes(exchangeMapSendDevice[tIpu, sIpu])}")
 
     traceEst = fig.add_bar(
         y = workloadAvg_est['Delta'],
@@ -237,7 +256,7 @@ if __name__ == "__main__":
         row = 1, col = 1,
         visible=False,
     )
-
+    reportFp.close()
     saveImages("average")
     # traceEst.update_yaxes(
     #     title = 'cycles'

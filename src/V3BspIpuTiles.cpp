@@ -36,7 +36,7 @@ private:
     uint32_t m_numAvailTiles;
     uint32_t m_numAvailWorkers;
     AstNetlist* m_netlistp;
-    void doLocate(const std::vector<AstClass*> unlocated) {
+    void doLocate(const std::vector<AstClass*> unlocated, uint32_t startTid) {
         if (unlocated.size() > m_numAvailTiles * m_numAvailWorkers) {
             m_netlistp->v3warn(UNOPT, "Not enough tiles, exceeding worker limit: There are  "
                                           << unlocated.size() << " parallel process but have only "
@@ -45,7 +45,10 @@ private:
         }
         // simple tile assignment
         uint32_t maxTileId = 0;
-        uint32_t tid = 0;
+
+        // start with 1 if multiple IPUs are used to enable profiling and increase the likelyhood
+        // of fitting the exchange code.
+        uint32_t tid = startTid;
         uint32_t wid = 0;
         for (AstClass* classp : unlocated) {
             maxTileId = std::max(maxTileId, tid);
@@ -103,8 +106,14 @@ public:
                 unlocatedCompute.push_back(classp);
         });
 
-        doLocate(unlocatedCompute);
-        doLocate(unlocatedInit);
+        const bool multiIpu = (unlocatedCompute.size() > v3Global.opt.tilesPerIpu() * v3Global.opt.workers());
+        UASSERT(!multiIpu
+                    || unlocatedCompute.size()
+                           <= (v3Global.opt.tiles() - 1) * v3Global.opt.workers(),
+                "need tile 0 to be empty, Is V3BspMerge broken?");
+        const uint32_t startTileId = multiIpu ? 1 : 0;
+        doLocate(unlocatedCompute, startTileId);
+        doLocate(unlocatedInit, startTileId);
         fixTileCountAndPromoteToSupervisor();
     }
 };
@@ -355,9 +364,10 @@ private:
         }
         for (AstClass* classp : overload) {
             bool assigned = false;
-            for (auto& ipu : ipuNodes) {
-                if (ipu.size() < maxPartitionSize) {
-                    ipu.push_back(classp);
+            int ipuId = 0;
+            for (int ipuId = 0; ipuId < ipuNodes.size(); ipuId++) {
+                if (ipuNodes[ipuId].size() < blockWeight[ipuId]) {
+                    ipuNodes[ipuId].push_back(classp);
                     assigned = true;
                     break;
                 }
@@ -367,7 +377,7 @@ private:
         int ipuId = 0;
 
         for (int ipuId = 0; ipuId < ipuNodes.size(); ipuId++) {
-            int tileId = 0;
+            int tileId = ipuId == 0 ? 1 : 0;
             int workerId = 0;
             const int tileIdBase = ipuId * v3Global.opt.tilesPerIpu();
             const int tilesInLastIpu = (v3Global.opt.tiles() % v3Global.opt.tilesPerIpu())
@@ -392,7 +402,6 @@ private:
             }
             UINFO(5, "Reassignment finished for IPU" << ipuId << endl);
         }
-
     }
 
     explicit PartitionAndAssignTileNumbers(AstNetlist* netlistp,
@@ -435,12 +444,12 @@ public:
         }
     }
 };
-// we allow up to TILES_PER_IPU * numMaxWorker vertices per IPU
+
 
 }  // namespace
 
 void V3BspIpuTiles::tileAll(AstNetlist* netlistp) {
-    // first set the tile and worker ids, potentially also promote to supervisor context
+    // first set the tile and worker ids, potentially also promote to supervisor threads
     PoplarSetTileAndWorkerId{netlistp};
     // now if there are more than one IPUs, perform a k-way partition to minimize inter-IPU
     // communication
