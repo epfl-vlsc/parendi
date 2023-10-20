@@ -170,7 +170,7 @@ inline bool HeapKey::operator<(const HeapKey& other) const {
 inline uint32_t targetCoreCount() {
     uint32_t nTiles = v3Global.opt.tiles();
     if (nTiles > v3Global.opt.tilesPerIpu()) {
-        nTiles--; // When multiple IPUs are used, keep the zeroth tile free
+        nTiles--;  // When multiple IPUs are used, keep the zeroth tile free
     }
     return nTiles * v3Global.opt.workers();
 }
@@ -716,15 +716,43 @@ private:
 
     void buildMergedPartitions(std::vector<std::unique_ptr<DepGraph>>& oldPartitionsp) {
 
+        int pix = 0;
+        std::ofstream summary{v3Global.opt.makeDir() + "/" + "mergedCostEstimate.txt"};
+        // clang-format off
+        summary << "Vertex" << "            "
+                << "Cost  " << "            "
+                << "Memory" << "            "
+                << "Fibers" << std::endl;
+        // clang-format on
         iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
             // reconstruct the partitions
             // corep->partp()
+            std::unique_ptr<std::ofstream> ofsp;
+            uint32_t totalCost = 0;
+            if (dump() >= 10) {
+                ofsp = std::unique_ptr<std::ofstream>{V3File::new_ofstream(
+                    v3Global.debugFilename("cost_post_merge" + cvtToStr(pix) + ".txt"))};
+            }
+            summary << pix << "            " << corep->instrCount() << "            "
+                    << corep->memoryWords() * VL_EDATASIZE << "            "
+                    << corep->partp().size() << std::endl;
+
             UASSERT(corep->partp().size(), "invalid core partp size");
             if (corep->partp().size() == 1) {
                 // this core was not merged
                 m_partitionsp.emplace_back(std::move(oldPartitionsp[corep->partp().front()]));
+                if (ofsp) {
+                    for (V3GraphVertex* vtxp = m_partitionsp.back()->verticesBeginp(); vtxp;
+                        vtxp = vtxp->verticesNextp()) {
+                        if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
+                                totalCost += V3InstrCount::count(compp->nodep(), false, ofsp.get());
+                        }
+                    }
+                }
+                pix++;
                 return;
             }
+
             // a merged partition
             AstNode::user3ClearTree();
             // user3u has the new vertices
@@ -753,9 +781,17 @@ private:
                     } else {
                         CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp);
                         UASSERT(compp, "ill-constructed partitionp" << pix << endl);
+                        if (ofsp && !m_nodeVtx(compp->nodep()).compp) {
+                            totalCost += V3InstrCount::count(compp->nodep(), false, ofsp.get());
+                        }
                         cloneOnce(compp, &m_nodeVtx(compp->nodep()).compp);
                     }
                 });
+            }
+            if (ofsp) {
+                UASSERT(totalCost == corep->instrCount(),
+                        "Invalid instruction count!" << totalCost << " != " << corep->instrCount()
+                                                     << " in core " << pix << endl);
             }
             // now iterate old edges and clone them
             auto getNewVtxp = [this](AnyVertex* const oldp) -> AnyVertex* {
@@ -807,6 +843,7 @@ private:
                 });
             }
             newPartp->removeRedundantEdges(V3GraphEdge::followAlwaysTrue);
+            pix++;
         });
 
         oldPartitionsp.clear();
