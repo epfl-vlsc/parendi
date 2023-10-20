@@ -578,6 +578,9 @@ void GateVisitor::optimizeSignals(bool allowMultiIn) {
         // Consider "inlining" variables
         if (!vvertexp) continue;
 
+        // do not gate wide variables since they will ungated later (V3Expand)
+        if (vvertexp->varScp()->isWide()) continue;
+
         if (vvertexp->inEmpty()) {  // Can't deal with no sources
             vvertexp->clearReducibleAndDedupable("inEmpty");
         } else if (!vvertexp->inSize1()) {  // Can't deal with more than one src

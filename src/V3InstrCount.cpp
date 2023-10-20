@@ -80,7 +80,7 @@ private:
             if (nodep->isQuad()) {
                 return 6;
             } else if (nodep->isWide()) {
-                return nodep->widthWords() * 4 + 3;
+                return nodep->widthWords() * 16 + 3;
             } else {
                 return 1;
             }
@@ -89,7 +89,7 @@ private:
             if (nodep->isQuad()) {
                 return 12;
             } else if (nodep->isWide()) {
-                return nodep->widthWords() * 4 + 5;
+                return nodep->widthWords() * 16 + 5;
             } else {
                 return 10;
             }

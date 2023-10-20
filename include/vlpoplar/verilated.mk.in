@@ -19,16 +19,16 @@ HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) \
 HOST_FLAGS += -DVL_NUM_TILES_USED=$(TILES_USED)
 HOST_FLAGS += -DVL_NUM_WORKERS_USED=$(WORKERS_USED)
 
-# Schedule optimization flags, ensures minimum cycle count?
-IPU_SCHED_FLAGS:=  	\
-	-X-mmax-insn-nop-padding=6 	\
-	-X-mmax-nops-in-function=6000 \
-	-X-mllvm -X--enable-misched \
-	-X-mllvm -X--enable-post-misched \
+# Schedule optimization flags add --X-mllvm -X--Ot to ensure min cycle count, but may not out of instruction memory.
+
+IPU_SCHED_FLAGS :=                    \
+	-X-mllvm -X--Ot 			      \
+	-X-mllvm -X--enable-misched       \
+	-X-mllvm -X--enable-post-misched  \
 	-X-mllvm -X--pre-RA-sched=default \
-	-X-mllvm -X--post-RA-scheduler \
-	-X-mllvm -X--verify-misched \
-	-X-mllvm -X--Ot
+	-X-mllvm -X--post-RA-scheduler    \
+	-X-mllvm -X--verify-misched       \
+
 
 IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
 	-X-finline-functions \
