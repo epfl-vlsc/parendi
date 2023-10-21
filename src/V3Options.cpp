@@ -1697,6 +1697,18 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
         m_xmlOnly = true;
     });
 
+    DECL_OPTION("-ipu-merge-strategy", CbVal, [this, fl](const char* valp) {
+        m_ipuMergeStrategy.setFrom(valp);
+        if (!m_ipuMergeStrategy.valid()) {
+            fl->v3fatal("Invalid merge strategy \"" << valp
+                << "\"! Strategies can be " << V3IpuMergeStrategyOption::list() << endl);
+        }
+    });
+    DECL_OPTION("-ipu-merge-threshold", CbVal, [this, fl](const char* valp){
+        float th = std::atof(valp);
+        m_ipuMergeStrategy.threshold(th);
+    });
+    
     DECL_OPTION("-y", CbVal, [this, &optdir](const char* valp) {
         addIncDirUser(parseFileArg(optdir, string(valp)));
     });

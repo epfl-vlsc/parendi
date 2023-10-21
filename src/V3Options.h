@@ -185,6 +185,49 @@ public:
 
 using V3HierBlockOptSet = std::map<const std::string, V3HierarchicalBlockOption>;
 
+class V3IpuMergeStrategyOption final {
+public:
+    enum Strategy {
+        BottomUp = 0,
+        BottomUpTopDown = 1,
+        TopDown = 2,
+        Invalid = 3
+    };
+private:
+    Strategy m_strategy = Strategy::BottomUp;
+    float m_bottomUpThreshold = 0.5;
+
+public:
+    bool bottomUp() const { return m_strategy == Strategy::BottomUp; }
+    bool topDown() const { return m_strategy == Strategy::TopDown; }
+    bool bottomUpTopDown() const { return m_strategy == Strategy::BottomUpTopDown; }
+    bool valid() const { return m_strategy != Strategy::Invalid; }
+    float threshold() const { return m_bottomUpThreshold; }
+    void threshold(float v) { m_bottomUpThreshold = v; }
+    const char* ascii() const {
+        static const char* const m_names[] = {
+            "BottomUp", "BottomUpTopDown", "TopDown", "Invalid"
+        };
+        return m_names[m_strategy];
+    }
+
+    static std::string list() {
+        return "BottomUp, BottomUpTopDown, or TopDown";
+    }
+
+    void setFrom(const std::string& n) {
+        if (n == "BottomUp") {
+            m_strategy = Strategy::BottomUp;
+        } else if (n == "TopDown") {
+            m_strategy = Strategy::TopDown;
+        } else if (n == "BottomUpTopDown") {
+            m_strategy = Strategy::BottomUpTopDown;
+        } else {
+            m_strategy = Strategy::Invalid;
+        }
+    }
+
+};
 //######################################################################
 // V3Options - Command line options
 
@@ -314,7 +357,7 @@ private:
     double      m_resyncThreshold = 0.8; // main poplar switch: --resync-threshold
     double      m_kahyparImbalance = 0.03; // main poplar switch: --kahypar-imbalance
     int         m_tilesPerIpu       = 1472; // main poplar switch: --tiles-per-ipu
-    int         m_ipuMemoryPerTile  = (256 * 1024); // main poplar switch: --ipu-memory-per-tile in bytes
+    int         m_ipuMemoryPerTile  = (400 * 1024); // main poplar switch: --ipu-memory-per-tile in bytes
     int         m_threadsMaxMTasks = 0;  // main switch: --threads-max-mtasks
     VTimescale  m_timeDefaultPrec;  // main switch: --timescale
     VTimescale  m_timeDefaultUnit;  // main switch: --timescale
@@ -349,6 +392,8 @@ private:
     string      m_xAssign;      // main switch: --x-assign
     string      m_xInitial;     // main switch: --x-initial
     string      m_xmlOutput;    // main switch: --xml-output
+
+    V3IpuMergeStrategyOption m_ipuMergeStrategy; // main switch: --ipu-merge-strategy and --ipu-merge-threshold
 
     // Language is now held in FileLine, on a per-node basis. However we still
     // have a concept of the default language at a global level.
