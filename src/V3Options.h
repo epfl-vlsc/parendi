@@ -188,31 +188,35 @@ using V3HierBlockOptSet = std::map<const std::string, V3HierarchicalBlockOption>
 class V3IpuMergeStrategyOption final {
 public:
     enum Strategy {
-        BottomUp = 0,
-        BottomUpTopDown = 1,
+        BottomUpTopDown = 0,
+        BottomUp = 1,
         TopDown = 2,
-        Invalid = 3
+        Hypergraph = 3,
+        Invalid = 4
     };
 private:
-    Strategy m_strategy = Strategy::BottomUp;
-    float m_bottomUpThreshold = 0.5;
+    Strategy m_strategy = Strategy::BottomUpTopDown;
+    float m_bottomUpThreshold = 0.7;
+
 
 public:
     bool bottomUp() const { return m_strategy == Strategy::BottomUp; }
     bool topDown() const { return m_strategy == Strategy::TopDown; }
     bool bottomUpTopDown() const { return m_strategy == Strategy::BottomUpTopDown; }
+    bool hypergraph() const { return m_strategy == Strategy::Hypergraph; }
     bool valid() const { return m_strategy != Strategy::Invalid; }
     float threshold() const { return m_bottomUpThreshold; }
     void threshold(float v) { m_bottomUpThreshold = v; }
+
     const char* ascii() const {
         static const char* const m_names[] = {
-            "BottomUp", "BottomUpTopDown", "TopDown", "Invalid"
+            "BottomUp", "BottomUpTopDown", "TopDown", "Hypergraph", "Invalid"
         };
         return m_names[m_strategy];
     }
 
     static std::string list() {
-        return "BottomUp, BottomUpTopDown, or TopDown";
+        return "BottomUp, BottomUpTopDown, TopDown, or Hypergraph";
     }
 
     void setFrom(const std::string& n) {
@@ -351,7 +355,7 @@ private:
     VOptionBool m_skipIdentical;  // main switch: --skip-identical
     int         m_threads = 1;      // main switch: --threads
     int         m_tiles = 1472;     // main poplar switch: --tiles
-    int         m_workers = 6;      // main poplar switch: --workers
+    int         m_workers = 1;      // main poplar switch: --workers
     int         m_maxUnpackCopies = 4096;   // main poplar switch: --max-unpack-copies
     int         m_diffExchangeThreshold = 16; // main poplar switch: --diff-exchange-threshold
     double      m_resyncThreshold = 0.8; // main poplar switch: --resync-threshold
@@ -433,6 +437,7 @@ private:
     bool m_fSplitExtraWide = false; // main switch: -fsplit-extra-wide: split extra wide variables
     bool m_fIpuResync = false;      // main switch: -fipu-resync: resynchronize bsp partitions
     bool m_fInterIpuComm = true; // main switch: -fno-inter-ipu-comm: do not optimize inter-ipu communcation
+    bool m_fModelDupsInMerge = true; // main switch: -fno-model-dups-in-merge: do not model duplicates while mergin
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -715,6 +720,8 @@ public:
     string traceSourceLang() const VL_MT_SAFE {
         return m_traceFormat.sourceName() + (systemC() ? "_sc" : "_c");
     }
+
+    V3IpuMergeStrategyOption ipuMergeStrategy() const { return m_ipuMergeStrategy; }
 
     bool hierarchical() const { return m_hierarchical; }
     int hierChild() const { return m_hierChild; }

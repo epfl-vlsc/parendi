@@ -271,14 +271,23 @@ private:
                                     << commitp->vscp()->prettyNameQ() << endl);
                     // mark AstVarScope with the partition that produces it
                     commitp->vscp()->user1(pix + 1);
+                    const uint32_t bytes
+                        = commitp->vscp()->varp()->dtypep()->arrayUnpackedElements()
+                          * commitp->vscp()->varp()->widthWords();
+                    memAccum += bytes;
                 }
-                if (ConstrVertex* const constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
+                if (ConstrDefVertex* const constrp = dynamic_cast<ConstrDefVertex*>(vtxp)) {
                     UASSERT(constrp->vscp(), "Expected VarScope");
                     auto& infoRef = m_nodeInfo(constrp->vscp());
                     const uint32_t bytes
                         = constrp->vscp()->varp()->dtypep()->arrayUnpackedElements()
                           * constrp->vscp()->varp()->widthWords();
-                    memAccum += bytes;
+                    // calculating the real memory usage is difficult, since we need
+                    // to know
+                    if (constrp->inEmpty() /* only consider forever live variables*/
+                        && constrp->vscp()->user1() != pix + 1 /*do not double count*/) {
+                        memAccum += bytes;
+                    }
                     if (!infoRef.visited) {
                         // first visit to this variable that may have duplicates across the graphs
                         infoRef.nodeIndex = varIndex;
@@ -421,24 +430,22 @@ private:
         UASSERT(rawRecvCost >= recvReduction, "invalid recv cost computation");
         const uint32_t mergedCost = rawInstrCost - dupCostCommon;
         const uint32_t mergedRecvCost = rawRecvCost - recvReduction;
-        UASSERT(rawMemWords >= dupVarCostCommon, "invalid mem byte computation");
-        const uint32_t mergedMemWords = rawMemWords - dupVarCostCommon;
+        // the following assertion does not need to hold since we only model the
+        // cost of always-live variables and duplications occur in temporary variables
+        // UASSERT(rawMemWords >= dupVarCostCommon, "invalid mem byte computation");
 
-        return CostType{mergedCost, mergedRecvCost, mergedMemWords};
+        return CostType{mergedCost, mergedRecvCost, rawMemWords};
     }
     // merger core1p and core2p
     // complexity should be amortized O(max(log V, E))
-    void doMerge(CoreVertex* core1p, CoreVertex* core2p, CostType newCost = CostType{0, 0, 0}) {
+
+    void doMergeKeepHeap(CoreVertex* core1p, CoreVertex* core2p,
+                         CostType newCost = CostType{0, 0, 0}) {
         if (newCost == CostType{0, 0, 0}) { newCost = costAfterMerge(core1p, core2p); }
 
         UINFO(10, "merging " << core1p->partsString() << " and " << core2p->partsString() << endl);
 
-        // remove both cores from the min-heap
-        // O(log V) * 2
-        m_heap.remove(core1p->heapNode().get());
-        m_heap.remove(core2p->heapNode().get());
-
-        // create push core2p into core1p
+        // push core2p into core1p
         std::vector<int> parts{core1p->partp()};
 
         for (const auto p : core2p->partp()) { core1p->partp().push_back(p); }
@@ -495,6 +502,16 @@ private:
         };
         deleteReconnect(GraphWay::FORWARD);
         deleteReconnect(GraphWay::REVERSE);
+    }
+    void doMerge(CoreVertex* core1p, CoreVertex* core2p, CostType newCost = CostType{0, 0, 0}) {
+        if (newCost == CostType{0, 0, 0}) { newCost = costAfterMerge(core1p, core2p); }
+
+        UINFO(10, "merging " << core1p->partsString() << " and " << core2p->partsString() << endl);
+        // remove both cores from the min-heap
+        // O(log V) * 2
+        m_heap.remove(core1p->heapNode().get());
+        m_heap.remove(core2p->heapNode().get());
+        doMergeKeepHeap(core1p, core2p, newCost);
         // O(1)
         m_heap.insert(core1p->heapNode().get());
         VL_DO_DANGLING(core2p->unlinkDelete(m_coreGraphp.get()), core2p);
@@ -519,8 +536,25 @@ private:
         uint32_t numMerges = 0;
         std::vector<CostType> coreCost = gatherCost();
         uint32_t numCores = coreCost.size();
-        if (numCores <= targetCoreCount()) { return 0; }
+        if (numCores <= targetCoreCount()) {
+            // no need to merge
+            return 0;
+        }
 
+        std::stable_sort(coreCost.begin(), coreCost.end());
+
+        CostType worstCost = coreCost.back();
+
+        worstCost = worstCost.percentile(v3Global.opt.ipuMergeStrategy().threshold());
+        UINFO(3, "Max permissible cost is " << worstCost << " and the max absolute cost is "
+                                            << coreCost.back() << endl);
+        if (!(worstCost > CostType::zero())) {
+            UINFO(3, "Conservative merge is not possible" << endl);
+            // Do not attempt to merge since we may end up increasing the execution time.
+            // Let the next stage of merging take care of this.
+            // We do this to deal with the inaccuracy of the cost model.
+            return 0;
+        }
         iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
             if (!corep->hasPli()) {
                 UINFO(10, "Adding core " << corep->name() << " to the heap " << endl);
@@ -530,23 +564,7 @@ private:
                 UINFO(10, "Will not merge " << corep->name() << " for now" << endl);
             }
         });
-        std::stable_sort(coreCost.begin(), coreCost.end());
-        // do not exceed the 85th percentile worst-case cost
-        CostType worstCost = coreCost.back();
-        for (const double p : {0.85, 0.90, 0.95, 0.98, 0.99}) {
-            if (worstCost.percentile(p) > CostType::zero()) {
-                worstCost = worstCost.percentile(p);
-                break;
-            }
-        }
 
-        if (worstCost == CostType::zero()) { worstCost = coreCost.back(); }
-        // worstCost.instrCount += 200;
-        // worstCost.recvCount += 200;
-        UINFO(8, "Max permissible cost is " << worstCost << " and the max absolute cost is "
-                                            << coreCost.back() << endl);
-        // iteratively merge small cores up to the worstCost
-        // m_heap.max() is actually min
         HeapNode* minNodep = m_heap.max();
 
         // Conservatively merge: avoid an increase to the critical path
@@ -617,6 +635,7 @@ private:
         if (dumpGraph() >= 5) {
             m_coreGraphp->dumpDotFilePrefixed("multicore_conservative_final");
         }
+        UINFO(3, "Finished conservative merge" << endl);
         return numMerges;
     }
 
@@ -714,6 +733,109 @@ private:
         return numMerges;
     }
 
+    /// Longest-processing-time-first merge (scheduling) oblivious to communication
+
+    uint32_t mergeLongestProcessingTimeFirst() {
+
+        UASSERT(m_heap.empty(), "heap should be empty");
+        // get the current cost estimates
+        std::vector<CostType> coreCost = gatherCost();
+        uint32_t numCores = coreCost.size();
+
+        if (numCores <= targetCoreCount()) {
+            UINFO(3, "Nothing to merge LPTF!" << endl);
+            return 0;  // nothing to do
+        }
+
+        std::vector<CoreVertex*> coresLeftp;
+        iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
+            coresLeftp.push_back(corep);
+            auto deleteEdge = [corep](GraphWay way) {
+                for (V3GraphEdge* edgep = corep->beginp(way), *nextp; edgep; edgep = nextp) {
+                    nextp = edgep->nextp(way);
+                    VL_DO_DANGLING(edgep->unlinkDelete(), edgep);
+                }
+            };
+            // delete the edges since we are not using them anymore
+            deleteEdge(GraphWay::FORWARD);
+            deleteEdge(GraphWay::REVERSE);
+        });
+        // delete edges, not needed
+
+        uint32_t numMerges = 0;
+        // sort in increasing order of execution time
+        std::stable_sort(coresLeftp.begin(), coresLeftp.end(),
+                         [](CoreVertex* const c1p, CoreVertex* const c2p) {
+                             return c1p->cost() < c2p->cost();
+                         });
+
+        std::vector<CoreVertex*> placesp;
+        UASSERT(coresLeftp.size() > targetCoreCount(), "unexpected merge state");
+        // first popluate the places with the largest cores
+        for (int i = 0; i < targetCoreCount(); i++) {
+            m_heap.insert(coresLeftp.back()->heapNode().get());
+            coresLeftp.pop_back();
+        }
+        VDouble0 statsReinsertions;
+        std::vector<HeapNode*> reinsertionList;
+        float maxNumberOfSteps = static_cast<float>(coresLeftp.size());
+        float lastProgress = 0.0f;
+        while (coresLeftp.size() != 0) {
+            // nothing to merge
+            if (debug() >= 3) {
+                const float progress = 100.0
+                                       * (maxNumberOfSteps - static_cast<float>(coresLeftp.size()))
+                                       / maxNumberOfSteps;
+                if (progress - lastProgress >= 10.0f) {
+                    UINFO(3, "LPTF progress " << progress << "%" << endl);
+                }
+                lastProgress = progress;
+            }
+            bool merged = false;
+            reinsertionList.clear();
+            CoreVertex* const core1p = coresLeftp.back();
+            coresLeftp.pop_back();
+            UINFO(8, "inspecting  " << core1p->partsString() << " " << core1p->cost() << endl);
+            uint32_t minMemory = core1p->memoryWords();
+            do {
+                HeapNode* placep = m_heap.max();
+                CoreVertex* core2p = placep->key().corep;
+                CostType mergedCost = costAfterMerge(core1p, core2p);
+                if (isFeasible(mergedCost)) {
+                    m_heap.remove(placep);
+                    doMergeKeepHeap(core1p, core2p);
+                    VL_DO_DANGLING(core2p->unlinkDelete(m_coreGraphp.get()), core2p);
+                    m_heap.insert(core1p->heapNode().get());  // reinsert into the heap
+                    merged = true;
+                    numMerges++;
+                } else {
+                    // look deeper into the heap
+                    UINFO(3, "Could not merge with the smallest processor" << endl);
+                    reinsertionList.push_back(placep);
+                    m_heap.remove(placep);
+                    minMemory = std::max(minMemory, mergedCost.memWords);
+                }
+            } while (!merged && !m_heap.empty());
+
+            if (!merged) {
+                v3Global.rootp()->v3fatal("Could not reach the desired core count: ran out of "
+                                          "memory while trying to merge "
+                                          << core1p->partsString() << " which uses "
+                                          << (core1p->memoryWords() * VL_EDATASIZE / VL_BYTESIZE)
+                                          << " bytes and merge requires "
+                                          << (minMemory * VL_EDATASIZE / VL_BYTESIZE) << " bytes"
+                                          << endl);
+                return 0;
+            }
+            for (HeapNode* nodep : reinsertionList) {
+                m_heap.insert(nodep);
+                statsReinsertions++;
+            }
+        }
+        UINFO(3, "Finished LPTF merge" << endl);
+        V3Stats::addStat("BspMerger, reinsertions ", statsReinsertions);
+        return numMerges;
+    }
     void buildMergedPartitions(std::vector<std::unique_ptr<DepGraph>>& oldPartitionsp) {
 
         int pix = 0;
@@ -734,7 +856,7 @@ private:
                     v3Global.debugFilename("cost_post_merge" + cvtToStr(pix) + ".txt"))};
             }
             summary << pix << "            " << corep->instrCount() << "            "
-                    << corep->memoryWords() * VL_EDATASIZE << "            "
+                    << corep->memoryWords() * VL_EDATASIZE / VL_BYTESIZE << "            "
                     << corep->partp().size() << std::endl;
 
             UASSERT(corep->partp().size(), "invalid core partp size");
@@ -743,9 +865,9 @@ private:
                 m_partitionsp.emplace_back(std::move(oldPartitionsp[corep->partp().front()]));
                 if (ofsp) {
                     for (V3GraphVertex* vtxp = m_partitionsp.back()->verticesBeginp(); vtxp;
-                        vtxp = vtxp->verticesNextp()) {
+                         vtxp = vtxp->verticesNextp()) {
                         if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
-                                totalCost += V3InstrCount::count(compp->nodep(), false, ofsp.get());
+                            totalCost += V3InstrCount::count(compp->nodep(), false, ofsp.get());
                         }
                     }
                 }
@@ -857,15 +979,30 @@ public:
         if (partitionsp.empty() || partitionsp.size() <= targetCoreCount()) { return; }
 
         buildMultiCoreGraph(partitionsp);
-        uint32_t numMerges = mergeConservatively();
-        uint32_t numMergesForced = mergeForced();
-        if (numMerges) {
-            V3Stats::addStat("BspMerger, initial partitions", partitionsp.size());
-            buildMergedPartitions(partitionsp);  // modifies partitionsp
-            V3Stats::addStat("BspMerger, merged partitions - conservative", numMerges);
-            V3Stats::addStat("BspMerger, merged partitions - forced", numMergesForced);
-            V3Stats::addStat("BspMerger, final partitions", partitionsp.size());
+        uint32_t numMergesConservative = 0;
+        uint32_t numMergesForced = 0;
+        if (v3Global.opt.ipuMergeStrategy().topDown()) {
+            UINFO(3, "TopDown merge" << endl);
+            numMergesForced = mergeLongestProcessingTimeFirst();
+        } else if (v3Global.opt.ipuMergeStrategy().bottomUpTopDown()) {
+            UINFO(3, "BottomUpTopDown merge " << endl);
+            numMergesConservative = mergeConservatively();
+            numMergesForced = mergeLongestProcessingTimeFirst();
+        } else if (v3Global.opt.ipuMergeStrategy().bottomUp()) {
+            UINFO(3, "BottomUp merge " << endl);
+            numMergesConservative = mergeConservatively();
+            numMergesForced = mergeForced();
+        } else {
+            v3Global.rootp()->v3fatal("Unimplemented merge strategy!");
         }
+        V3Stats::addStat("BspMerger, initial partitions", partitionsp.size());
+        if (numMergesConservative + numMergesForced > 0) {
+            buildMergedPartitions(partitionsp);  // modifies partitionsp
+        }
+        V3Stats::addStat("BspMerger, merged partitions - conservative", numMergesConservative);
+        V3Stats::addStat("BspMerger, merged partitions - forced", numMergesForced);
+        V3Stats::addStat("BspMerger, final partitions", partitionsp.size());
+        UINFO(3, "Finished merging" << endl);
     }
 };
 
