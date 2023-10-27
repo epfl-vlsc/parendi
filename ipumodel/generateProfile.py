@@ -175,6 +175,7 @@ if __name__ == "__main__":
     def gList(c1, c2 = gOne, c3 = gOne): return list(set([(c1(), c2(), c3()) for _ in range(NumRand)]))
 
     WidthWWW = gList(gW, gW, gW)
+    WidthIW2 = list(set([(32, x, x)for (x,_,_) in WidthWWW]))
     WidthW3 = list(set([(x, x, x) for (x, _, _) in WidthWWW]))
 
     WidthWQQ = gList(gW, gQ, gQ)
@@ -183,11 +184,13 @@ if __name__ == "__main__":
     WidthWWQ = gList(gW, gW, gQ)
 
     WidthQQQ = gList(gQ, gQ, gQ)
+    WidthIQ2 = list(set([(32, x, x)for (x,_,_) in WidthQQQ]))
     WidthQQW = gList(gQ, gQ, gW)
     WidthQII = gList(gQ, gI, gI)
     WidthQQI = gList(gQ, gQ, gI)
 
     WidthIII = gList(gI, gI, gI)
+    WidthII2 = list(set([(32, x, x)for (x,_,_) in WidthIII]))
     WidthIQI = gList(gI, gQ, gI)
     WidthIWI = gList(gI, gW, gI)
     WidthWII = gList(gW, gI, gI)
@@ -406,8 +409,7 @@ if __name__ == "__main__":
 
 
     # GTS, GTES, LTS, LTES
-    def make_COMPARE(op: str, suffix: str, cases):
-
+    def make_COMPARE_SIGNED(op: str, suffix: str, cases):
         def generateCode(obits: int, lbits: int, rbits: int):
             funcImpl = f"op = VL_{op}_{suffix}(lbits, lp, rp)"
             gen =  VertexGenerator(
@@ -420,29 +422,69 @@ if __name__ == "__main__":
             return gen
         runCases(generateCode, cases, f"VL_{op}_{suffix}")
 
+    def make_COMPARE_UNSIGNED(op: str, suffix: str, cases):
+        def generateCode(obits: int, lbits: int, rbits: int):
+            funcImpl = f"op = VL_{op}_{suffix}(VL_WORDS_I(lbits), lp, rp)"
+            gen =  VertexGenerator(
+                VlFunc(
+                        name = f"VL_{op}_{suffix}_{obits}_{lbits}_{rbits}",
+                        func = funcImpl
+                    ), obits=obits, lbits=lbits, rbits=rbits,
+                                    supervisor=SUPERVISOR, repeats=REPEATS)
+            gen.build()
+            return gen
+        runCases(generateCode, cases, f"VL_{op}_{suffix}")
+
     if shouldProfile("GTS"):
-        make_COMPARE("GTS", "III", WidthIII)
-        make_COMPARE("GTS", "IQQ", WidthIQQ)
+        make_COMPARE_SIGNED("GTS", "III", WidthII2)
+        make_COMPARE_SIGNED("GTS", "IQQ", WidthIQ2)
+        make_COMPARE_SIGNED("GTS", "IWW", WidthIW2)
+
+    if shouldProfile("GT"):
+        make_COMPARE_UNSIGNED("GT", "W", WidthIW2)
 
     if shouldProfile("GTES"):
-        make_COMPARE("GTES", "III", WidthIII)
-        make_COMPARE("GTES", "IQQ", WidthIQQ)
+        make_COMPARE_SIGNED("GTES", "III", WidthII2)
+        make_COMPARE_SIGNED("GTES", "IQQ", WidthIQ2)
+        make_COMPARE_SIGNED("GTES", "IWW", WidthIW2)
+
+    if shouldProfile("GTE"):
+        make_COMPARE_UNSIGNED("GTE", "W", WidthIW2)
 
     if shouldProfile("LTS"):
-        make_COMPARE("LTS", "III", WidthIII)
-        make_COMPARE("LTS", "IQQ", WidthIQQ)
+        make_COMPARE_SIGNED("LTS", "III", WidthII2)
+        make_COMPARE_SIGNED("LTS", "IQQ", WidthIQ2)
+        make_COMPARE_SIGNED("LTS", "IWW", WidthIW2)
+
+    if shouldProfile("LT"):
+        make_COMPARE_UNSIGNED("LT", "W", WidthIW2)
 
     if shouldProfile("LTES"):
-        make_COMPARE("LTES", "III", WidthIII)
-        make_COMPARE("LTES", "IQQ", WidthIQQ)
+        make_COMPARE_SIGNED("LTES", "III", WidthII2)
+        make_COMPARE_SIGNED("LTES", "IQQ", WidthIQ2)
+        make_COMPARE_SIGNED("LTES", "IWW", WidthIW2)
 
-    if shouldProfile("LTS"):
-        make_COMPARE("LTS", "IWW", WidthIWW)
-        make_COMPARE("LTES", "IWW", WidthIWW)
+    if shouldProfile("LTE"):
+        make_COMPARE_UNSIGNED("LTE", "W", WidthIW2)
 
-    if shouldProfile("GTES"):
-        make_COMPARE("GTS", "IWW", WidthIWW)
-        make_COMPARE("GTES", "IWW", WidthIWW)
+    if shouldProfile("EQ"):
+        make_COMPARE_UNSIGNED("EQ", "W", WidthIW2)
+
+    if shouldProfile("NEQ"):
+        make_COMPARE_UNSIGNED("NEQ", "W", WidthIW2)
+
+
+    def make_COMPARE_UNSIGNED(op: str, suffix: str, cases):
+        def generateCode(obits: int, lbits: int, rbits: int):
+            funcImpl = f"op = VL_{op}_{suffix}(VL_WORDS_I(lbits), lp, rp)"
+            gen =  VertexGenerator(
+                VlFunc(
+                        name = f"VL_{op}_{suffix}_{obits}_{lbits}_{rbits}",
+                        func = funcImpl
+                    ), obits=obits, lbits=lbits, rbits=rbits,
+                                    supervisor=SUPERVISOR, repeats=REPEATS)
+            gen.build()
+            return gen
 
     # NEGATE
     def make_NEGATE(suffix: str, cases):
@@ -589,6 +631,28 @@ if __name__ == "__main__":
 
         make_NATIVE_BINOP("<<", "SHIFTL", "I", l32)
         make_NATIVE_BINOP(">>", "SHIFTR", "I", l32)
+
+        lI64 = [(32, 64, 64)]
+        make_NATIVE_BINOP("==", "EQ", "I", l32)
+        make_NATIVE_BINOP("==", "EQ", "Q", lI64)
+        make_NATIVE_BINOP(">", "GT", "I", l32)
+        make_NATIVE_BINOP("<", "LT", "I", l32)
+        make_NATIVE_BINOP(">=", "GTE", "I", l32)
+        make_NATIVE_BINOP("<=", "LTE", "I", l32)
+        make_NATIVE_BINOP(">", "GT", "Q", lI64)
+        make_NATIVE_BINOP("<", "LT", "Q", lI64)
+        make_NATIVE_BINOP(">=", "GTE", "Q", lI64)
+        make_NATIVE_BINOP("<=", "LTE", "Q", lI64)
+
+
+        make_NATIVE_BINOP("&", "AND", "I", l32)
+        make_NATIVE_BINOP("&", "AND", "Q", l64)
+
+        make_NATIVE_BINOP("|", "OR", "I", l32)
+        make_NATIVE_BINOP("|", "OR", "Q", l64)
+
+        make_NATIVE_BINOP("^", "XOR", "I", l32)
+        make_NATIVE_BINOP("^", "XOR", "Q", l64)
 
 
 

@@ -44,8 +44,10 @@ funcs/%: funcs/%.gp
 profile.txt: runner generateProfile.py
 	python3 generateProfile.py -n 60 -j $(JOBS)
 
-V3BspIpuCostModelLinReg.h: profile.txt
-	python3 generateHeader.h
+../src/V3BspIpuCostModelLinReg.h: profile.txt generateHeader.py
+	python3 generateHeader.py
 	clang-format -i $@
+
+
 clean:
 	rm -f funcs/*.cpp funcs/*.gp funcs/*.s

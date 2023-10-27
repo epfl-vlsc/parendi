@@ -19,11 +19,11 @@
 #include "verilatedos.h"
 
 #include "V3InstrCount.h"
+#include "V3BspIpuCostModelLinReg.h"
 
 #include "V3Ast.h"
 
 #include <iomanip>
-
 VL_DEFINE_DEBUG_FUNCTIONS;
 
 /// Estimate the instruction cost for executing all logic within and below
@@ -351,7 +351,7 @@ private:
         // hierarchical view of the cost when in debug mode.
         const uint32_t savedCount = m_instrCount;
         m_instrCount
-            = v3Global.opt.poplar() ? IpuInstrCountOverride::count(nodep) : nodep->instrCount();
+            = v3Global.opt.poplar() ? IpuCostModelLinReg::estimate(nodep) : nodep->instrCount();
         return savedCount;
     }
     void endVisitBase(uint32_t savedCount, AstNode* nodep) {

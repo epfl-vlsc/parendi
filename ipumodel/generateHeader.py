@@ -19,7 +19,7 @@ class CostFit:
             elif l == "Q":
                 return f"isQData({v})"
             elif l == "W":
-                return f"isWlWide({v})"
+                return f"isVlWide({v})"
             else:
                 raise NotImplementedError
         condBits = list(filter(lambda x: x != "_", [x for x in cond]))
@@ -138,25 +138,50 @@ if __name__ == "__main__":
     fitter.lin("CountOnes", "VL_COUNTONES_W", "_W_")
 
     fitter.lin("And", "VL_AND_W", "_W_")
+    fitter.lin("And", "VL_NATIVE_AND_I", "_I_")
+    fitter.lin("And", "VL_NATIVE_AND_Q", "_Q_")
     fitter.lin("Or", "VL_OR_W", "_W_")
+    fitter.lin("Or", "VL_NATIVE_OR_I", "_I_")
+    fitter.lin("Or", "VL_NATIVE_OR_Q", "_Q_")
     fitter.lin("Xor", "VL_XOR_W", "_W_")
+    fitter.lin("Xor", "VL_NATIVE_XOR_I", "_I_")
+    fitter.lin("Xor", "VL_NATIVE_XOR_Q", "_Q_")
     fitter.lin("Not", "VL_NOT_W", "_W_")
 
-    fitter.lin("Gts", "VL_GTS_III", "__I")
-    fitter.lin("Gts", "VL_GTS_IQQ", "__Q")
-    fitter.lin("Gts", "VL_GTS_IWW", "__W")
 
-    fitter.lin("Gtes", "VL_GTES_III", "__I")
-    fitter.lin("Gtes", "VL_GTES_IQQ", "__Q")
-    fitter.lin("Gtes", "VL_GTES_IWW", "__W")
+    fitter.lin("Gt", "VL_GT_W", "__W")
+    fitter.lin("Gt", "VL_NATIVE_GT_Q", "__Q")
+    fitter.lin("Gt", "VL_NATIVE_GT_I", "__I")
 
-    fitter.lin("Lts", "VL_LTS_III", "__I")
-    fitter.lin("Lts", "VL_LTS_IQQ", "__Q")
-    fitter.lin("Lts", "VL_LTS_IWW", "__W")
+    fitter.lin("Lt", "VL_LT_W", "__W")
+    fitter.lin("Lt", "VL_NATIVE_LT_Q", "__Q")
+    fitter.lin("Lt", "VL_NATIVE_LT_I", "__I")
 
-    fitter.lin("Ltes", "VL_LTES_III", "__I")
-    fitter.lin("Ltes", "VL_LTES_IQQ", "__Q")
-    fitter.lin("Ltes", "VL_LTES_IWW", "__W")
+    fitter.lin("Eq", "VL_EQ_W", "__W")
+    fitter.lin("Eq", "VL_NATIVE_EQ_Q", "__Q")
+    fitter.lin("Eq", "VL_NATIVE_EQ_I", "__I")
+
+    fitter.lin("Neq", "VL_NEQ_W", "__W")
+    fitter.lin("Neq", "VL_NATIVE_EQ_Q", "__Q") # Hack
+    fitter.lin("Neq", "VL_NATIVE_EQ_I", "__I") # Hack
+
+
+    fitter.lin("GtS", "VL_GTS_III", "__I")
+    fitter.lin("GtS", "VL_GTS_IQQ", "__Q")
+    fitter.lin("GtS", "VL_GTS_IWW", "__W")
+
+
+    fitter.lin("GteS", "VL_GTES_III", "__I")
+    fitter.lin("GteS", "VL_GTES_IQQ", "__Q")
+    fitter.lin("GteS", "VL_GTES_IWW", "__W")
+
+    fitter.lin("LtS", "VL_LTS_III", "__I")
+    fitter.lin("LtS", "VL_LTS_IQQ", "__Q")
+    fitter.lin("LtS", "VL_LTS_IWW", "__W")
+
+    fitter.lin("LteS", "VL_LTES_III", "__I")
+    fitter.lin("LteS", "VL_LTES_IQQ", "__Q")
+    fitter.lin("LteS", "VL_LTES_IWW", "__W")
 
     fitter.lin("Negate", "VL_NEGATE_W", "_W_")
 
@@ -204,7 +229,7 @@ if __name__ == "__main__":
 
     # fitter.line("A")
     COST_MODEL_NAME = "IpuCostModelLinReg"
-    with open(f"V3Bsp{COST_MODEL_NAME}.h", 'w') as fp:
+    with open(f"../src/V3Bsp{COST_MODEL_NAME}.h", 'w') as fp:
         fp.write(f"""
 // -*- mode: C++; c-file-style: "cc-mode" -*-
 //*************************************************************************
@@ -231,9 +256,9 @@ if __name__ == "__main__":
 
 class {COST_MODEL_NAME} final {{
 public:
-    inline std::pair<int, bool> tryEstimate(AstNode* nodep);
-    inline int estimate(AstNode* nodep) {{
-        return tryEstimate(nodep).first;
+    static inline std::pair<int, bool> tryEstimate(AstNode* nodep, bool useMean = false);
+    static inline int estimate(AstNode* nodep, bool useMean = false) {{
+        return tryEstimate(nodep, useMean).first;
     }}
 }};
 namespace {{
@@ -241,21 +266,26 @@ class IpuCostModelGen final : public VNVisitor {{
 public:
     int m_count = 0;
     bool m_found = true;
-    explicit IpuCostModelGen(AstNode* nodep) {{
+    const bool m_useMean;
+    explicit IpuCostModelGen(AstNode* nodep, bool useMean = false) : m_useMean{{useMean}} {{
         iterate(nodep);
     }}
 private:
-    inline int defaultLatency() {{ m_found = false; return {DEFAULT_LATENCY}; }}
+    inline bool isQData(AstNode* nodep) const {{ return nodep->isQuad(); }}
+    inline bool isVlWide(AstNode* nodep) const {{ return nodep->isWide(); }}
+    inline bool isEData(AstNode* nodep) const {{ return nodep->widthWords() == 1; }}
+    inline bool useMean() const {{ return m_useMean; }}
+    inline int defaultLatency(AstNode* nodep) {{ m_found = false; return {DEFAULT_LATENCY}; }}
     inline void set(int m) {{ m_count = m; }}
 {fitter.emit()}
     void visit(AstNode* nodep) {{
-        set(std::max(defaultLatency(), nodep->instrCount()));
+        set(std::max(defaultLatency(nodep), nodep->instrCount()));
     }}
 
 }};
 }}
-std::pair<int, bool> {COST_MODEL_NAME}::tryEstimate(AstNode* nodep) {{
-    IpuCostModelLinReg c{{nodep}};
+std::pair<int, bool> {COST_MODEL_NAME}::tryEstimate(AstNode* nodep, bool useMean) {{
+    IpuCostModelGen c{{nodep, useMean}};
     return {{c.m_count, c.m_found}};
 }}
 #endif
