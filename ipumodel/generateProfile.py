@@ -9,8 +9,9 @@ import typing
 import pandas as pd
 
 REPEATS = 64
+MUL_W_REPEATS = 16
 SUPERVISOR = True
-
+BUILD_TIMEOUT = 30 # 30 second
 
 class VlFunc:
     def __init__(self, name: str, func: str = None):
@@ -40,7 +41,7 @@ class VertexGenerator:
                 if nbits <= 32:
                     return "IData"
                 elif nbits <= 64:
-                    return "IData"
+                    return "QData"
                 else :
                     return f"VlWide<VL_WORDS_I({nbits})>"
         self.otype = getType(obits)
@@ -75,11 +76,11 @@ struct {self.name()} : public {vertexType} {{
         return ts;
     }}
     {vtxAttr} void compute() {{
-        const uint64_t start = timeNow();
         constexpr int obits = {self.obits};
         constexpr int lbits = {self.lbits};
         constexpr int rbits = {self.rbits};
         constexpr int words = VL_WORDS_I(obits);
+        const uint64_t start = timeNow();
         #pragma clang loop unroll(full)
         for (int i = 0; i < {self.repeats}; i++) {{
             const {self.ltype}& lp = reinterpret_cast<const {self.ltype}*>(in1.data())[i];
@@ -108,11 +109,18 @@ struct {self.name()} : public {vertexType} {{
                     fp.write(text)
         mkCmd = ["make", f"funcs/{self.vlOp.name}.gp"]
         print(f"Compiling {self.name()}")
-        proc = subprocess.run(mkCmd, check=False, capture_output=True, text=True)
-        if (proc.returncode != 0):
-            print(proc.stderr)
-            raise RuntimeError(f"Compiliation failed for {self.name()}")
-        self.path = Path("funcs") / f"{self.vlOp.name}.gp"
+        self.path = None
+        try:
+            proc = subprocess.run(mkCmd, check=False, capture_output=True, text=True, timeout=BUILD_TIMEOUT)
+            if (proc.returncode != 0):
+                print(proc.stderr)
+                raise RuntimeError(f"Compiliation failed for {self.name()}")
+            else:
+                print(f"Finished compiling {self.name()}")
+            self.path = Path("funcs") / f"{self.vlOp.name}.gp"
+        except subprocess.TimeoutExpired as e:
+                print(str(e))
+                print(f"Build time out for {self.name()}!")
 
         return self.path
 
@@ -130,8 +138,15 @@ if __name__ == "__main__":
 
     argParser = argparse.ArgumentParser("Profile operations on the IPU")
     argParser.add_argument("--funcs", "-f", nargs="+", default=[], help="functions to profile")
-
+    argParser.add_argument("--jobs", "-j", type=int, default=1, help="number of jobs")
+    argParser.add_argument("--output", "-o", type=Path, default=Path("profile.txt"), help="output file")
+    argParser.add_argument("--num", "-n", type=int, default=50, help="Number of random cases")
+    argParser.add_argument("--append", "-a", action="store_true", default=False, help="Append to the output")
     args = argParser.parse_args()
+
+    Jobs = args.jobs
+    Outfile = args.output
+    NumRand = args.num
 
     def shouldProfile(s: str):
         if (len(args.funcs) == 0) or (s in args.funcs):
@@ -148,6 +163,8 @@ if __name__ == "__main__":
             "Cycles": pd.Series(dtype=int),
         }
     )
+    if args.append:
+        df = pd.read_table(Outfile, delim_whitespace=True)
 
     print("Generating random cases")
 
@@ -155,10 +172,10 @@ if __name__ == "__main__":
     def gQ(): return randGen.integers(33, 65)
     def gI(): return randGen.integers(1, 33)
     def gOne(): return 1
-    def gList(c1, c2, c3, l = 10): return list(set([(c1(), c2(), c3()) for _ in range(l)]))
+    def gList(c1, c2 = gOne, c3 = gOne): return list(set([(c1(), c2(), c3()) for _ in range(NumRand)]))
 
     WidthWWW = gList(gW, gW, gW)
-    WidthW = list(set([(x, x, x) for (x, _, _) in WidthWWW]))
+    WidthW3 = list(set([(x, x, x) for (x, _, _) in WidthWWW]))
 
     WidthWQQ = gList(gW, gQ, gQ)
     WidthWQI = gList(gW, gQ, gI)
@@ -184,23 +201,57 @@ if __name__ == "__main__":
     Width1Q = gList(gOne, gQ, gOne)
     Width1W = gList(gOne, gW, gOne)
 
+    WidthII = gList(gI, gI)
+    WidthQI = gList(gQ, gI)
+    WidthQQ = gList(gQ, gQ)
+    WidthWI = gList(gW, gI)
+    WidthWQ = gList(gW, gQ)
+    WidthWW = gList(gW, gW)
+    WidthIQ = gList(gI, gQ)
+    WidthIW = gList(gI, gW)
+    WidthI = gList(gI)
+    WidthQ = gList(gQ)
+    WidthW = gList(gW)
+
 
     print("Done")
     def saveData(name: str, obits: int, lbits: int, rbits: int, cycles: int):
         df.loc[len(df)] = [name, obits, lbits, rbits, cycles]
-        df.to_string("data.txt")
+        df.to_string(Outfile)
 
     def runCases(fn, widthCases, funcName: str):
 
-        # ls = pool.starmap(fn, widthCases)
-        arity = len(widthCases[0])
+
+        def fnWrapped(q, args):
+            res = None
+            if len(args) == 1:
+                res = fn(args[0])
+            elif len(args) == 2:
+                res = fn(args[0], args[1])
+            elif len(args) == 3:
+                res = fn(args[0], args[1], args[2])
+            else:
+                res = fn(args[0], args[1], args[2], args[3])
+            q.put(res)
         ls = []
-        if arity == 3:
-            ls = [fn(x, y, z) for (x, y, z) in widthCases]
-        elif arity == 2:
-            ls = [fn(x, y) for (x, y) in widthCases]
-        else:
-            ls = [fn(x, y, z, w) for (x, y, z, w) in widthCases]
+        j = 0
+        while j < len(widthCases):
+            lastJ = min(j + Jobs, len(widthCases))
+            jobCases = widthCases[j : lastJ]
+            j = j + Jobs
+            if len(jobCases) == 0:
+                break
+            ctx = multiprocessing.get_context("spawn")
+            queues = [ctx.Queue() for _ in jobCases]
+            procs = [multiprocessing.Process(target=fnWrapped, args=(queues[i], jobCases[i])) for i in range(len(jobCases))]
+            for p in procs:
+                p.start()
+            pls = [q.get() for q in queues]
+            ls = ls + list(filter(lambda g: g.path != None, pls))
+            # for p in procs:
+            #     p.join()
+
+
         print(f"Profiling {funcName}")
         cmd = ["./runner", "-r", str(REPEATS), "-v"] + \
                        [g.name() for g in ls] + \
@@ -246,18 +297,22 @@ if __name__ == "__main__":
         runCases(generateCode, cases, f"VL_EXTENDS_{suffix}")
 
     if shouldProfile("EXTENDS"):
-        make_EXTENDS("II", WidthIII)
-        make_EXTENDS("QI", WidthQII)
-        make_EXTENDS("QQ", WidthQQQ)
-        make_EXTENDS("WI", WidthWII)
-        make_EXTENDS("WQ", WidthWQQ)
-        make_EXTENDS("WW", WidthWWW)
+        make_EXTENDS("II", WidthII)
+        make_EXTENDS("QI", WidthQI)
+        make_EXTENDS("QQ", WidthQQ)
+        make_EXTENDS("WI", WidthWI)
+        make_EXTENDS("WQ", WidthWQ)
+        make_EXTENDS("WW", WidthWW)
 
 
     # REDOR, REDAND, REDXOR
     def make_REDUCE(op: str, suffix: str, cases):
         def generateCode(obits: int, lbits: int, rbits: int):
-            funcImpl = f"op = VL_RED{op}_{suffix}(lbits, lp)"
+            funcImpl = f"op = VL_RED{op}_{suffix}(lp)"
+            if suffix[0] == "I" or suffix[0] == "W" or suffix[0] == "Q":
+                funcImpl = f"op = VL_RED{op}_{suffix}(lbits, lp)"
+            if op == "OR" and suffix != "W":
+                funcImpl = f"op = VL_RED{op}_{suffix}(lp)"
             gen = VertexGenerator(
                 VlFunc(
                     name= f"VL_RED{op}_{suffix}_{obits}_{lbits}",
@@ -276,9 +331,9 @@ if __name__ == "__main__":
         make_REDUCE("AND", "IW", Width1W)
 
     if shouldProfile("REDOR"):
-        make_REDUCE("OR", "II", Width1I)
-        make_REDUCE("OR", "IQ", Width1Q)
-        make_REDUCE("OR", "IW", Width1W)
+        make_REDUCE("OR", "I", Width1I)
+        make_REDUCE("OR", "Q", Width1Q)
+        make_REDUCE("OR", "W", Width1W)
 
     if shouldProfile("REDXOR"):
         make_REDUCE("XOR", "W", Width1W)
@@ -295,7 +350,9 @@ if __name__ == "__main__":
     # COUNTONES
     def make_COUNTONES(suffix: str, cases):
         def generateCode(obits: int, lbits: int, rbits: int):
-            funcImpl = f"op = VL_COUNTONES_{suffix}(lbits, lp)"
+            funcImpl = f"op = VL_COUNTONES_{suffix}(lp)"
+            if suffix.startswith("W"):
+                funcImpl = f"op = VL_COUNTONES_{suffix}(VL_WORDS_I(lbits), lp)"
             gen = VertexGenerator(
                 VlFunc(
                     name= f"VL_COUNTONES_{suffix}_{obits}_{lbits}",
@@ -309,9 +366,9 @@ if __name__ == "__main__":
         runCases(generateCode, cases, f"VL_COUNTONES_{suffix}")
 
     if shouldProfile("COUNTONES"):
-        make_COUNTONES("I", WidthIII)
-        make_COUNTONES("Q", WidthIQI)
-        make_COUNTONES("W", WidthIWI)
+        make_COUNTONES("I", WidthII)
+        make_COUNTONES("Q", WidthIQ)
+        make_COUNTONES("W", WidthIW)
 
     # TODO COUNTBITS
 
@@ -338,14 +395,14 @@ if __name__ == "__main__":
         runCases(generateCode, cases, f"VL_{op}_{suffix}")
 
     if shouldProfile("AND"):
-        make_BITWISE("AND", "W", WidthW)
+        make_BITWISE("AND", "W", WidthW3)
     if shouldProfile("OR"):
-        make_BITWISE("OR", "W", WidthW)
+        make_BITWISE("OR", "W", WidthW3)
     if shouldProfile("XOR"):
-        make_BITWISE("XOR", "W", WidthW)
-        make_BITWISE("CAHGENXOR", "W", WidthW)
+        make_BITWISE("XOR", "W", WidthW3)
+        # make_BITWISE("CHANGEXOR", "W", WidthW3)
     if shouldProfile("NOT"):
-        make_BITWISE("NOT", "W", WidthW)
+        make_BITWISE("NOT", "W", WidthW3)
 
 
     # GTS, GTES, LTS, LTES
@@ -401,7 +458,7 @@ if __name__ == "__main__":
             return gen
         runCases(generateCode, cases, f"VL_NEGATE_{suffix}")
     if shouldProfile("NEGATE"):
-        make_NEGATE("W", WidthW)
+        make_NEGATE("W", WidthW3)
 
 
     # ADD and SUB, MUL_W
@@ -413,37 +470,40 @@ if __name__ == "__main__":
                         name = f"VL_{op}_{suffix}_{obits}_{lbits}_{rbits}",
                         func = funcImpl
                     ), obits=obits, lbits=lbits, rbits=rbits,
-                                    supervisor=SUPERVISOR, repeats=REPEATS)
+                                    supervisor=SUPERVISOR,
+                                    repeats=MUL_W_REPEATS if (suffix.startswith("W") and op == "MUL")
+                                               else REPEATS)
             gen.build()
             return gen
         runCases(generateCode, cases, f"VL_{op}_{suffix}")
 
     if shouldProfile("ADD"):
-        make_ARITH("ADD", "W", WidthW)
+        make_ARITH("ADD", "W", WidthW3)
     if shouldProfile("SUB"):
-        make_ARITH("SUB", "W", WidthW)
+        make_ARITH("SUB", "W", WidthW3)
     if shouldProfile("MUL"):
-        make_ARITH("MUL", "W", WidthW)
+        make_ARITH("MUL", "W", WidthW3)
 
 
-    def make_MUL(suffix: str, cases):
+    def make_MULS(suffix: str, cases):
         def generateCode(obits: int, lbits: int, rbits: int):
-            funcImpl = f"op = VL_MUL_{suffix}(lbits, lp, rp)"
+            funcImpl = f"op = VL_MULS_{suffix}(lbits, lp, rp)"
             if suffix.startswith("W"):
-                funcImpl = f"VL_MUL_{suffix}(lbits, op, lp, rp)"
+                funcImpl = f"VL_MULS_{suffix}(lbits, op, lp, rp)"
             gen =  VertexGenerator(
                 VlFunc(
-                        name = f"VL_MUL_{suffix}_{obits}_{lbits}_{rbits}",
+                        name = f"VL_MULS_{suffix}_{obits}_{lbits}_{rbits}",
                         func = funcImpl
                     ), obits=obits, lbits=lbits, rbits=rbits,
-                                    supervisor=SUPERVISOR, repeats=REPEATS)
+                                    supervisor=SUPERVISOR,
+                                    repeats=MUL_W_REPEATS if suffix.startswith("W") else REPEATS)
             gen.build()
             return gen
-        runCases(generateCode, cases, f"VL_MUL_{suffix}")
+        runCases(generateCode, cases, f"VL_MULS_{suffix}")
     if shouldProfile("MUL"):
-        make_MUL("MUL", "III", WidthIII)
-        make_MUL("MUL", "QQQ", WidthQQQ)
-        make_MUL("MUL", "WWW", WidthWWW)
+        make_MULS("III", WidthIII)
+        make_MULS("QQQ", WidthQQQ)
+        make_MULS("WWW", WidthWWW)
 
 
 
@@ -499,20 +559,36 @@ if __name__ == "__main__":
 
 
 
+    def make_NATIVE_BINOP(op: str, name: str,  suffix: str, cases):
+        def generateCode(obits: int, lbits: int, rbits: int):
+            funcImpl = f"op = lp {op} rp"
+            gen =  VertexGenerator(
+                VlFunc(
+                        name = f"VL_NATIVE_{name}_{suffix}_{obits}_{lbits}_{rbits}",
+                        func = funcImpl
+                    ), obits=obits, lbits=lbits, rbits=rbits,
+                                    supervisor=SUPERVISOR, repeats=REPEATS)
+            gen.build()
+            return gen
+        runCases(generateCode, cases, f"VL_NATIVE_{name}_{suffix}")
 
 
 
+    if shouldProfile("NATIVE"):
+        l32 = [(32, 32, 32)]
+        l64 = [(64, 64, 64)]
+        make_NATIVE_BINOP("+", "ADD", "I", l32)
+        make_NATIVE_BINOP("+", "ADD", "Q", l64)
+
+        make_NATIVE_BINOP("-", "SUB", "I", l32)
+        make_NATIVE_BINOP("-", "SUB", "Q", l64)
 
 
+        make_NATIVE_BINOP("*", "MUL", "I", l32)
+        make_NATIVE_BINOP("*", "MUL", "Q", l64)
 
-    # shiftlCasesWide = pool.starmap(mkShiftLWWW, wideBitSizes)
-    # shiftrCasesWide = pool.starmap(mkShiftRWWW, wideBitSizes)
-    # shiftrsCasesWide = pool.starmap(mkShiftRSWWW, wideBitSizes)
-
-    # runCases(shiftlCasesWide, "VL_SHIFTL_WWW")
-    # runCases(shiftrCasesWide, "VL_SHIFTR_WWW")
-    # runCases(shiftrsCasesWide, "VL_SHIFTRS_WWW")
-
+        make_NATIVE_BINOP("<<", "SHIFTL", "I", l32)
+        make_NATIVE_BINOP(">>", "SHIFTR", "I", l32)
 
 
 

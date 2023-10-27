@@ -6,6 +6,8 @@ INCLUDES := -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/include/vltstd -I.
 LIBS := -lpoplar -lpopops -lpoputil -lboost_program_options
 
 
+JOBS ?= 30
+
 
 IPU_SCHED_FLAGS :=                    \
 	-X-mllvm -X--Ot 			      \
@@ -24,6 +26,8 @@ IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
 	-X-funroll-loops \
 	$(IPU_SCHED_FLAGS) \
 
+all: profile.txt
+
 
 runner: runner.cpp
 	$(CXX) -O2 $^ $(LIBS)  -o $@
@@ -36,5 +40,12 @@ funcs/%.s: funcs/%.cpp
 
 funcs/%: funcs/%.gp
 
+
+profile.txt: runner generateProfile.py
+	python3 generateProfile.py -n 60 -j $(JOBS)
+
+V3BspIpuCostModelLinReg.h: profile.txt
+	python3 generateHeader.h
+	clang-format -i $@
 clean:
 	rm -f funcs/*.cpp funcs/*.gp funcs/*.s
