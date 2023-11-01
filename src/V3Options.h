@@ -188,14 +188,14 @@ using V3HierBlockOptSet = std::map<const std::string, V3HierarchicalBlockOption>
 class V3IpuMergeStrategyOption final {
 public:
     enum Strategy {
-        BottomUpTopDown = 0,
-        BottomUp = 1,
+        BottomUp = 0,
+        BottomUpTopDown = 1,
         TopDown = 2,
         Hypergraph = 3,
         Invalid = 4
     };
 private:
-    Strategy m_strategy = Strategy::BottomUpTopDown;
+    Strategy m_strategy = Strategy::BottomUp;
     float m_bottomUpThreshold = 0.7;
 
 

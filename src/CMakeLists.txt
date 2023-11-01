@@ -48,6 +48,7 @@ set(HEADERS
     V3BspDifferential.h
     V3BspDpi.h
     V3BspGraph.h
+    V3BspIpuCostModelLinReg.h
     V3BspIpuTiles.h
     V3BspMerger.h
     V3BspModules.h

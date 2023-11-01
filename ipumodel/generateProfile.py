@@ -10,7 +10,7 @@ import pandas as pd
 
 REPEATS = 64
 MUL_W_REPEATS = 16
-SUPERVISOR = True
+SUPERVISOR = False
 BUILD_TIMEOUT = 30 # 30 second
 
 class VlFunc:
@@ -107,7 +107,7 @@ struct {self.name()} : public {vertexType} {{
                     print(f"Generating code {self.name()}")
                     text = self.emit()
                     fp.write(text)
-        mkCmd = ["make", f"funcs/{self.vlOp.name}.gp"]
+        mkCmd = ["make", f"funcs/{self.vlOp.name}.gp", f"funcs/{self.vlOp.name}.s"]
         print(f"Compiling {self.name()}")
         self.path = None
         try:
@@ -117,6 +117,7 @@ struct {self.name()} : public {vertexType} {{
                 raise RuntimeError(f"Compiliation failed for {self.name()}")
             else:
                 print(f"Finished compiling {self.name()}")
+            proc = subprocess.run(mkCmd, check=False, capture_output=True, text=True, timeout=BUILD_TIMEOUT)
             self.path = Path("funcs") / f"{self.vlOp.name}.gp"
         except subprocess.TimeoutExpired as e:
                 print(str(e))
@@ -161,6 +162,7 @@ if __name__ == "__main__":
             "LBits": pd.Series(dtype=int),
             "RBits": pd.Series(dtype=int),
             "Cycles": pd.Series(dtype=int),
+            "Supervisor": pd.Series(dtype=bool)
         }
     )
     if args.append:
@@ -185,12 +187,14 @@ if __name__ == "__main__":
 
     WidthQQQ = gList(gQ, gQ, gQ)
     WidthIQ2 = list(set([(32, x, x)for (x,_,_) in WidthQQQ]))
+    WidthQ3 = list(set([(x, x, x) for (x, _, _) in WidthQQQ]))
     WidthQQW = gList(gQ, gQ, gW)
     WidthQII = gList(gQ, gI, gI)
     WidthQQI = gList(gQ, gQ, gI)
 
     WidthIII = gList(gI, gI, gI)
     WidthII2 = list(set([(32, x, x)for (x,_,_) in WidthIII]))
+    WidthI3 = list(set([(x, x, x) for (x, _, _) in WidthIII]))
     WidthIQI = gList(gI, gQ, gI)
     WidthIWI = gList(gI, gW, gI)
     WidthWII = gList(gW, gI, gI)
@@ -219,7 +223,7 @@ if __name__ == "__main__":
 
     print("Done")
     def saveData(name: str, obits: int, lbits: int, rbits: int, cycles: int):
-        df.loc[len(df)] = [name, obits, lbits, rbits, cycles]
+        df.loc[len(df)] = [name, obits, lbits, rbits, cycles, SUPERVISOR]
         df.to_string(Outfile)
 
     def runCases(fn, widthCases, funcName: str):
@@ -542,10 +546,11 @@ if __name__ == "__main__":
             gen.build()
             return gen
         runCases(generateCode, cases, f"VL_MULS_{suffix}")
-    if shouldProfile("MUL"):
-        make_MULS("III", WidthIII)
-        make_MULS("QQQ", WidthQQQ)
-        make_MULS("WWW", WidthWWW)
+
+    if shouldProfile("MULS"):
+        make_MULS("III", WidthI3)
+        make_MULS("QQQ", WidthQ3)
+        make_MULS("WWW", WidthW3)
 
 
 
@@ -614,11 +619,24 @@ if __name__ == "__main__":
             return gen
         runCases(generateCode, cases, f"VL_NATIVE_{name}_{suffix}")
 
+    def make_NATIVE_UNIOP(op: str, name: str,  suffix: str, cases):
+        def generateCode(obits: int, lbits: int, rbits: int):
+            funcImpl = f"op = {op} lp"
+            gen =  VertexGenerator(
+                VlFunc(
+                        name = f"VL_NATIVE_{name}_{suffix}_{obits}_{lbits}_{rbits}",
+                        func = funcImpl
+                    ), obits=obits, lbits=lbits, rbits=rbits,
+                                    supervisor=SUPERVISOR, repeats=REPEATS)
+            gen.build()
+            return gen
+        runCases(generateCode, cases, f"VL_NATIVE_{name}_{suffix}")
 
 
     if shouldProfile("NATIVE"):
         l32 = [(32, 32, 32)]
         l64 = [(64, 64, 64)]
+        lI64 = [(32, 64, 64)]
         make_NATIVE_BINOP("+", "ADD", "I", l32)
         make_NATIVE_BINOP("+", "ADD", "Q", l64)
 
@@ -632,7 +650,6 @@ if __name__ == "__main__":
         make_NATIVE_BINOP("<<", "SHIFTL", "I", l32)
         make_NATIVE_BINOP(">>", "SHIFTR", "I", l32)
 
-        lI64 = [(32, 64, 64)]
         make_NATIVE_BINOP("==", "EQ", "I", l32)
         make_NATIVE_BINOP("==", "EQ", "Q", lI64)
         make_NATIVE_BINOP(">", "GT", "I", l32)
@@ -644,6 +661,10 @@ if __name__ == "__main__":
         make_NATIVE_BINOP(">=", "GTE", "Q", lI64)
         make_NATIVE_BINOP("<=", "LTE", "Q", lI64)
 
+        make_NATIVE_BINOP("!=", "NEQ", "I", l32)
+        make_NATIVE_BINOP("!=", "NEQ", "Q", lI64)
+
+
 
         make_NATIVE_BINOP("&", "AND", "I", l32)
         make_NATIVE_BINOP("&", "AND", "Q", l64)
@@ -654,6 +675,8 @@ if __name__ == "__main__":
         make_NATIVE_BINOP("^", "XOR", "I", l32)
         make_NATIVE_BINOP("^", "XOR", "Q", l64)
 
+        make_NATIVE_UNIOP("~", "NOT", "I", l32)
+        make_NATIVE_UNIOP("~", "NOT", "Q", l64)
 
 
 

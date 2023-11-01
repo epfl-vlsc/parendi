@@ -47,540 +47,585 @@ private:
     inline bool useMean() const { return m_useMean; }
     inline int defaultLatency(AstNode* nodep) {
         m_found = false;
-        return 14;
+        return nodep->widthWords();
     }
-    inline void set(int m) { m_count = m; }
+    void visit(AstCCast*) override { set(0); }
+    void visit(AstVarRefView*) override { set(0); }
+    void visit(AstNodeVarRef* nodep) override {
+        if (const AstCMethodHard* const callp = VN_CAST(nodep->backp(), CMethodHard)) {
+            if (callp->fromp() == nodep) return set(1);
+        }
+        if (nodep->varp()->isFuncLocal()) {
+            return set(nodep->widthWords());
+        } else {
+            return set(nodep->widthWords() + 1);
+        }
+    }
+
+    inline void set(float m) { m_count = static_cast<int>(std::round(m)); }
+    void visit(AstNodeIf* nodep) override { set(6); }
+    void visit(AstNodeCond* nodep) override {
+        if (AstNodeAssign* const assignp = VN_CAST(nodep->backp(), NodeAssign)) {
+            AstNodeVarRef* const lvp = VN_CAST(assignp->lhsp(), NodeVarRef);
+            AstNodeVarRef* const elsep = VN_CAST(nodep->elsep(), NodeVarRef);
+            if (lvp && elsep && lvp->varp() == elsep->varp()) {
+                set(3);  // can become movz
+                return;
+            }
+        }
+        set(6);
+    }
     void visit(AstExtendS* nodep) {
         if (isEData(nodep) && isEData(nodep->lhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(24.08));
+                return set(4.93);
             else
-                return set(static_cast<uint32_t>(24.08f));
+                return set(4.93f);
         if (isQData(nodep) && isEData(nodep->lhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(17.73));
+                return set(16.17);
             else
-                return set(static_cast<uint32_t>(17.73f));
+                return set(16.17f);
         if (isQData(nodep) && isQData(nodep->lhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(25.10));
+                return set(6.93);
             else
-                return set(static_cast<uint32_t>(25.10f));
+                return set(6.93f);
         if (isVlWide(nodep) && isEData(nodep->lhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(35.30));
+                return set(15.60);
             else
-                return set(static_cast<uint32_t>((0.89f * nodep->widthWords()) + 25.81f));
+                return set((1.00f * nodep->widthWords()) + 5.00f);
         if (isVlWide(nodep) && isQData(nodep->lhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(20.00));
+                return set(21.65);
             else
-                return set(static_cast<uint32_t>((1.09f * nodep->widthWords()) + 9.68f));
+                return set((0.56f * nodep->widthWords()) + 16.33f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(86.83));
+                return set(24.33);
             else
-                return set(static_cast<uint32_t>((0.21f * nodep->widthWords())
-                                                 + (6.81f * nodep->lhsp()->widthWords())
-                                                 + 23.92f));
+                return set((0.55f * nodep->widthWords()) + (1.49f * nodep->lhsp()->widthWords())
+                           + 6.01f);
         return set(defaultLatency(nodep));
     }
     void visit(AstRedAnd* nodep) {
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(13.00));
+                return set(3.07);
             else
-                return set(static_cast<uint32_t>(13.00f));
+                return set(3.07f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(23.00));
+                return set(10.17);
             else
-                return set(static_cast<uint32_t>(23.00f));
+                return set(10.17f);
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(64.32));
+                return set(20.52);
             else
-                return set(static_cast<uint32_t>((6.14f * nodep->lhsp()->widthWords()) + 7.61f));
+                return set((1.99f * nodep->lhsp()->widthWords()) + 2.19f);
         return set(defaultLatency(nodep));
     }
     void visit(AstRedOr* nodep) {
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(13.00));
+                return set(3.00);
             else
-                return set(static_cast<uint32_t>(13.00f));
+                return set(3.00f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(20.00));
+                return set(8.00);
             else
-                return set(static_cast<uint32_t>(20.00f));
+                return set(8.00f);
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(1891.66));
+                return set(410.17);
             else
-                return set(
-                    static_cast<uint32_t>((225.90f * nodep->lhsp()->widthWords()) + -193.84f));
+                return set((64.71f * nodep->lhsp()->widthWords()) + -35.59f);
         return set(defaultLatency(nodep));
     }
     void visit(AstRedXor* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(2105.57));
+                return set(636.56);
             else
-                return set(
-                    static_cast<uint32_t>((236.98f * nodep->lhsp()->widthWords()) + -136.98f));
+                return set((71.63f * nodep->lhsp()->widthWords()) + -24.73f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(19.00));
+                return set(4.00);
             else
-                return set(static_cast<uint32_t>(19.00f));
+                return set(4.00f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(7.00);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(7.00f);
         return set(defaultLatency(nodep));
     }
     void visit(AstCountOnes* nodep) {
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(86.00));
+                return set(18.17);
             else
-                return set(static_cast<uint32_t>(86.00f));
+                return set(18.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(93.00));
+                return set(53.17);
             else
-                return set(static_cast<uint32_t>(93.00f));
+                return set(53.17f);
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(519.34));
+                return set(200.68);
             else
-                return set(
-                    static_cast<uint32_t>((58.06f * nodep->lhsp()->widthWords()) + -59.33f));
+                return set((20.99f * nodep->lhsp()->widthWords()) + -8.49f);
         return set(defaultLatency(nodep));
     }
     void visit(AstAnd* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(117.96));
+                return set(33.87);
             else
-                return set(static_cast<uint32_t>((14.00f * nodep->lhsp()->widthWords()) + -0.00f));
+                return set((4.00f * nodep->lhsp()->widthWords()) + 0.17f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(16.00));
+                return set(8.17);
             else
-                return set(static_cast<uint32_t>(16.00f));
+                return set(8.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstOr* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(117.96));
+                return set(33.87);
             else
-                return set(static_cast<uint32_t>((14.00f * nodep->lhsp()->widthWords()) + -0.00f));
+                return set((4.00f * nodep->lhsp()->widthWords()) + 0.17f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(16.00));
+                return set(8.17);
             else
-                return set(static_cast<uint32_t>(16.00f));
+                return set(8.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstXor* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(117.96));
+                return set(33.87);
             else
-                return set(static_cast<uint32_t>((14.00f * nodep->lhsp()->widthWords()) + -0.00f));
+                return set((4.00f * nodep->lhsp()->widthWords()) + 0.17f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(16.00));
+                return set(8.17);
             else
-                return set(static_cast<uint32_t>(16.00f));
+                return set(8.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstNot* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(109.54));
+                return set(25.28);
             else
-                return set(static_cast<uint32_t>((13.00f * nodep->lhsp()->widthWords()) + 0.00f));
+                return set((3.00f * nodep->lhsp()->widthWords()) + -0.00f);
+        if (isEData(nodep))
+            if (useMean())
+                return set(3.00);
+            else
+                return set(3.00f);
+        if (isQData(nodep))
+            if (useMean())
+                return set(6.00);
+            else
+                return set(6.00f);
         return set(defaultLatency(nodep));
     }
     void visit(AstGt* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(192.17));
+                return set(56.96);
             else
-                return set(static_cast<uint32_t>((23.17f * nodep->rhsp()->widthWords()) + -3.06f));
+                return set((6.99f * nodep->rhsp()->widthWords()) + -1.94f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(23.00));
+                return set(12.67);
             else
-                return set(static_cast<uint32_t>(23.00f));
+                return set(12.67f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstLt* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(200.35));
+                return set(52.72);
             else
-                return set(static_cast<uint32_t>((23.24f * nodep->rhsp()->widthWords()) + 4.51f));
+                return set((6.00f * nodep->rhsp()->widthWords()) + 2.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(23.00));
+                return set(12.67);
             else
-                return set(static_cast<uint32_t>(23.00f));
+                return set(12.67f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstEq* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(69.06));
+                return set(34.87);
             else
-                return set(static_cast<uint32_t>((6.35f * nodep->rhsp()->widthWords()) + 15.58f));
+                return set((4.00f * nodep->rhsp()->widthWords()) + 1.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(32.00));
+                return set(14.00);
             else
-                return set(static_cast<uint32_t>(32.00f));
+                return set(14.00f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstNeq* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(69.06));
+                return set(34.87);
             else
-                return set(static_cast<uint32_t>((6.35f * nodep->rhsp()->widthWords()) + 15.58f));
+                return set((4.00f * nodep->rhsp()->widthWords()) + 1.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(32.00));
+                return set(14.00);
             else
-                return set(static_cast<uint32_t>(32.00f));
+                return set(14.00f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstGtS* nodep) {
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(31.38));
+                return set(9.96);
             else
-                return set(static_cast<uint32_t>(31.38f));
+                return set(9.96f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(47.04));
+                return set(18.44);
             else
-                return set(static_cast<uint32_t>(47.04f));
+                return set(18.44f);
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(356.24));
+                return set(94.70);
             else
-                return set(static_cast<uint32_t>((37.58f * nodep->rhsp()->widthWords()) + 39.60f));
+                return set((9.92f * nodep->rhsp()->widthWords()) + 11.15f);
         return set(defaultLatency(nodep));
     }
     void visit(AstGteS* nodep) {
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(37.38));
+                return set(10.96);
             else
-                return set(static_cast<uint32_t>(37.38f));
+                return set(10.96f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(50.04));
+                return set(20.44);
             else
-                return set(static_cast<uint32_t>(50.04f));
+                return set(20.44f);
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(227.11));
+                return set(67.23);
             else
-                return set(static_cast<uint32_t>((22.51f * nodep->rhsp()->widthWords()) + 37.45f));
+                return set((6.90f * nodep->rhsp()->widthWords()) + 9.06f);
         return set(defaultLatency(nodep));
     }
     void visit(AstLtS* nodep) {
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(31.38));
+                return set(9.96);
             else
-                return set(static_cast<uint32_t>(31.38f));
+                return set(9.96f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(47.04));
+                return set(18.44);
             else
-                return set(static_cast<uint32_t>(47.04f));
+                return set(18.44f);
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(220.37));
+                return set(57.96);
             else
-                return set(static_cast<uint32_t>((22.54f * nodep->rhsp()->widthWords()) + 30.44f));
+                return set((5.90f * nodep->rhsp()->widthWords()) + 8.26f);
         return set(defaultLatency(nodep));
     }
     void visit(AstLteS* nodep) {
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(37.38));
+                return set(10.96);
             else
-                return set(static_cast<uint32_t>(37.38f));
+                return set(10.96f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(50.04));
+                return set(20.44);
             else
-                return set(static_cast<uint32_t>(50.04f));
+                return set(20.44f);
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(349.06));
+                return set(86.35);
             else
-                return set(static_cast<uint32_t>((36.32f * nodep->rhsp()->widthWords()) + 43.06f));
+                return set((8.90f * nodep->rhsp()->widthWords()) + 11.38f);
         return set(defaultLatency(nodep));
     }
     void visit(AstNegate* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(198.65));
+                return set(54.98);
             else
-                return set(
-                    static_cast<uint32_t>((25.00f * nodep->lhsp()->widthWords()) + -12.00f));
+                return set((7.00f * nodep->lhsp()->widthWords()) + -4.00f);
         return set(defaultLatency(nodep));
     }
     void visit(AstAdd* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(185.22));
+                return set(61.57);
             else
-                return set(
-                    static_cast<uint32_t>((24.00f * nodep->lhsp()->widthWords()) + -17.00f));
+                return set((8.00f * nodep->lhsp()->widthWords()) + -5.83f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(26.00));
+                return set(10.17);
             else
-                return set(static_cast<uint32_t>(26.00f));
+                return set(10.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstSub* nodep) {
         if (isVlWide(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(200.22));
+                return set(73.00);
             else
-                return set(static_cast<uint32_t>((24.00f * nodep->lhsp()->widthWords()) + -2.00f));
+                return set((9.00f * nodep->lhsp()->widthWords()) + -2.83f);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(22.00));
+                return set(10.17);
             else
-                return set(static_cast<uint32_t>(22.00f));
+                return set(10.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstMul* nodep) {
-        if (isVlWide(nodep))
-            if (useMean())
-                return set(static_cast<uint32_t>(9814.24));
-            else
-                return set(
-                    static_cast<uint32_t>((2338.45f * nodep->lhsp()->widthWords()) + -9889.34f));
+        if (nodep->isWide())
+            return set(2.31 * nodep->widthWords() * nodep->widthWords() * nodep->widthWords()
+                       + -10.80 * nodep->widthWords() * nodep->widthWords()
+                       + 308.63 * nodep->widthWords() + -853.18);
         if (isEData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(14.00));
+                return set(4.17);
             else
-                return set(static_cast<uint32_t>(14.00f));
+                return set(4.17f);
         if (isQData(nodep))
             if (useMean())
-                return set(static_cast<uint32_t>(72.00));
+                return set(27.17);
             else
-                return set(static_cast<uint32_t>(72.00f));
+                return set(27.17f);
+        return set(defaultLatency(nodep));
+    }
+    void visit(AstMulS* nodep) {
+        if (nodep->isWide())
+            return set(1.98 * nodep->widthWords() * nodep->widthWords() * nodep->widthWords()
+                       + -3.55 * nodep->widthWords() * nodep->widthWords()
+                       + 263.54 * nodep->widthWords() + -749.20);
+        if (isEData(nodep))
+            if (useMean())
+                return set(9.96);
+            else
+                return set(9.96f);
+        if (isQData(nodep))
+            if (useMean())
+                return set(33.76);
+            else
+                return set(33.76f);
         return set(defaultLatency(nodep));
     }
     void visit(AstShiftL* nodep) {
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(211.55));
+                return set(60.79);
             else
-                return set(static_cast<uint32_t>(
-                    (9.08f * nodep->widthWords()) + (0.26f * nodep->lhsp()->widthWords())
-                    + (0.26f * nodep->rhsp()->widthWords()) + 122.34f));
+                return set((4.36f * nodep->widthWords()) + (-0.08f * nodep->lhsp()->widthWords())
+                           + (-0.08f * nodep->rhsp()->widthWords()) + 21.60f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(265.15));
+                return set(73.55);
             else
-                return set(static_cast<uint32_t>(
-                    (8.60f * nodep->widthWords()) + (-0.22f * nodep->lhsp()->widthWords())
-                    + (-0.22f * nodep->rhsp()->widthWords()) + 196.72f));
+                return set((4.06f * nodep->widthWords()) + (-0.09f * nodep->lhsp()->widthWords())
+                           + (-0.09f * nodep->rhsp()->widthWords()) + 40.98f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(213.78));
+                return set(63.07);
             else
-                return set(static_cast<uint32_t>(
-                    (9.39f * nodep->widthWords()) + (-0.33f * nodep->lhsp()->widthWords())
-                    + (-0.33f * nodep->rhsp()->widthWords()) + 134.32f));
+                return set((4.18f * nodep->widthWords()) + (0.00f * nodep->lhsp()->widthWords())
+                           + (0.00f * nodep->rhsp()->widthWords()) + 24.64f);
         if (isEData(nodep) && isEData(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(83.23));
+                return set(20.98);
             else
-                return set(static_cast<uint32_t>(83.23f));
+                return set(20.98f);
         if (isEData(nodep) && isEData(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(35.45));
+                return set(13.51);
             else
-                return set(static_cast<uint32_t>(35.45f));
+                return set(13.51f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(106.13));
+                return set(28.55);
             else
-                return set(static_cast<uint32_t>(106.13f));
+                return set(28.55f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(58.47));
+                return set(20.73);
             else
-                return set(static_cast<uint32_t>(58.47f));
+                return set(20.73f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(44.00));
+                return set(11.17);
             else
-                return set(static_cast<uint32_t>(44.00f));
+                return set(11.17f);
+        if (isEData(nodep))
+            if (useMean())
+                return set(4.17);
+            else
+                return set(4.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstShiftR* nodep) {
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(205.27));
+                return set(55.27);
             else
-                return set(static_cast<uint32_t>(
-                    (10.71f * nodep->widthWords()) + (0.03f * nodep->lhsp()->widthWords())
-                    + (0.03f * nodep->rhsp()->widthWords()) + 104.89f));
+                return set((3.59f * nodep->widthWords()) + (-0.05f * nodep->lhsp()->widthWords())
+                           + (-0.05f * nodep->rhsp()->widthWords()) + 22.76f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(257.45));
+                return set(67.08);
             else
-                return set(static_cast<uint32_t>(
-                    (9.48f * nodep->widthWords()) + (-0.32f * nodep->lhsp()->widthWords())
-                    + (-0.32f * nodep->rhsp()->widthWords()) + 183.32f));
+                return set((3.63f * nodep->widthWords()) + (-0.10f * nodep->lhsp()->widthWords())
+                           + (-0.10f * nodep->rhsp()->widthWords()) + 38.36f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(211.30));
+                return set(58.33);
             else
-                return set(static_cast<uint32_t>(
-                    (10.42f * nodep->widthWords()) + (0.23f * nodep->lhsp()->widthWords())
-                    + (0.23f * nodep->rhsp()->widthWords()) + 110.91f));
+                return set((3.62f * nodep->widthWords()) + (-0.05f * nodep->lhsp()->widthWords())
+                           + (-0.05f * nodep->rhsp()->widthWords()) + 26.21f);
         if (isEData(nodep) && isEData(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(83.23));
+                return set(20.98);
             else
-                return set(static_cast<uint32_t>(83.23f));
+                return set(20.98f);
         if (isEData(nodep) && isEData(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(35.45));
+                return set(13.51);
             else
-                return set(static_cast<uint32_t>(35.45f));
+                return set(13.51f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(106.13));
+                return set(28.55);
             else
-                return set(static_cast<uint32_t>(106.13f));
+                return set(28.55f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(58.47));
+                return set(20.73);
             else
-                return set(static_cast<uint32_t>(58.47f));
+                return set(20.73f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(45.00));
+                return set(11.17);
             else
-                return set(static_cast<uint32_t>(45.00f));
+                return set(11.17f);
+        if (isEData(nodep))
+            if (useMean())
+                return set(4.17);
+            else
+                return set(4.17f);
         return set(defaultLatency(nodep));
     }
     void visit(AstShiftRS* nodep) {
         if (isEData(nodep) && isEData(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(36.37));
+                return set(10.05);
             else
-                return set(static_cast<uint32_t>(36.37f));
+                return set(10.05f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(74.60));
+                return set(25.72);
             else
-                return set(static_cast<uint32_t>(74.60f));
+                return set(25.72f);
         if (isEData(nodep) && isQData(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(70.92));
+                return set(17.53);
             else
-                return set(static_cast<uint32_t>(70.92f));
+                return set(17.53f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isEData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(249.68));
+                return set(73.77);
             else
-                return set(static_cast<uint32_t>(
-                    (9.07f * nodep->widthWords()) + (0.04f * nodep->lhsp()->widthWords())
-                    + (0.04f * nodep->rhsp()->widthWords()) + 164.43f));
+                return set((4.18f * nodep->widthWords()) + (-0.13f * nodep->lhsp()->widthWords())
+                           + (-0.13f * nodep->rhsp()->widthWords()) + 37.20f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(289.63));
+                return set(86.01);
             else
-                return set(static_cast<uint32_t>(
-                    (8.57f * nodep->widthWords()) + (-0.35f * nodep->lhsp()->widthWords())
-                    + (-0.35f * nodep->rhsp()->widthWords()) + 223.60f));
+                return set((3.79f * nodep->widthWords()) + (-0.15f * nodep->lhsp()->widthWords())
+                           + (-0.15f * nodep->rhsp()->widthWords()) + 56.70f);
         if (isVlWide(nodep) && isVlWide(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(250.32));
+                return set(75.20);
             else
-                return set(static_cast<uint32_t>(
-                    (10.09f * nodep->widthWords()) + (0.21f * nodep->lhsp()->widthWords())
-                    + (0.21f * nodep->rhsp()->widthWords()) + 153.37f));
+                return set((4.03f * nodep->widthWords()) + (0.00f * nodep->lhsp()->widthWords())
+                           + (0.00f * nodep->rhsp()->widthWords()) + 38.17f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isVlWide(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(136.32));
+                return set(39.50);
             else
-                return set(static_cast<uint32_t>(136.32f));
+                return set(39.50f);
         if (isEData(nodep) && isEData(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(56.58));
+                return set(15.28);
             else
-                return set(static_cast<uint32_t>(56.58f));
+                return set(15.28f);
         if (isQData(nodep) && isQData(nodep->lhsp()) && isQData(nodep->rhsp()))
             if (useMean())
-                return set(static_cast<uint32_t>(90.65));
+                return set(26.37);
             else
-                return set(static_cast<uint32_t>(90.65f));
+                return set(26.37f);
         return set(defaultLatency(nodep));
     }
 

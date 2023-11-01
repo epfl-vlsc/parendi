@@ -6,7 +6,7 @@ import typing
 from enum import Enum
 
 
-DEFAULT_LATENCY = 14
+DEFAULT_LATENCY = 1
 
 
 
@@ -41,8 +41,8 @@ class CostFit:
             text = f"{intercept:0.2f}f"
         useMean = ""
         if (mean != 0.0):
-            useMean = f"if (useMean()) return set(static_cast<uint32_t>({mean:0.2f})); else "
-        text = f"{condCode} {useMean} return set(static_cast<uint32_t>({text}));"
+            useMean = f"if (useMean()) return set({mean:0.2f}); else "
+        text = f"{condCode} {useMean} return set({text});"
         return text
 
     def __init__(self, df: pd.DataFrame):
@@ -59,9 +59,11 @@ class CostFit:
             self.codeGen[node] = []
         self.codeGen[node].append(text)
 
-    def lin(self, node: str, name: str, widthInfo: str = ""):
+    def lin(self, node: str, name: str, numOperands: int, widthInfo: str):
         data = self.df.loc[self.df["Func"] == name]
         ys = data['Cycles'].tolist()
+        ys = [y if s else y / 6 for y, s in  zip(ys, data['Supervisor'])]
+        xsAll = [data['OWords'].tolist(), data['LWords'].tolist(), data['RWords'].tolist()]
         mean = np.mean(ys)
         print(f"{name} has {len(ys)} samples with mean {mean:0.2f}")
 
@@ -73,7 +75,6 @@ class CostFit:
 
         assert len(widthInfo) == 3, f"invalid width pattern {widthInfo}"
 
-        xsAll = [data['OWords'].tolist(), data['LWords'].tolist(), data['RWords'].tolist()]
         xs = []
         for (c, x) in zip(widthInfo, xsAll) :
             if c != "_":
@@ -83,6 +84,15 @@ class CostFit:
         reg = LinearRegression().fit(xs, ys)
         code = CostFit.mkFormula(widthInfo, reg.coef_, reg.intercept_, mean)
         self.saveResult(node, code)
+
+    def cubeWide(self, node: str, name: str):
+        data = self.df.loc[self.df["Func"] == name]
+        ys = data['Cycles'].tolist()
+        ys = [y if s else y / 6 for y, s in  zip(ys, data['Supervisor'])]
+        xs = data['OWords'].tolist()
+        c3, c2, c1, c0 = np.polyfit(xs, ys, deg=3)
+        text = f"if(nodep->isWide()) return set({c3:0.2f} * nodep->widthWords() * nodep->widthWords() * nodep->widthWords() + {c2:0.2f} * nodep->widthWords() * nodep->widthWords() + {c1: 0.2f} * nodep->widthWords() + {c0:0.2f});"
+        self.saveResult(node, text)
 
     def fallback(self, node: str, cost: int):
         if not node in self.anyCode:
@@ -112,119 +122,128 @@ if __name__ == "__main__":
 
     fitter = CostFit(pd.read_table(dfFileName, delim_whitespace=True))
 
-    fitter.lin("ExtendS", "VL_EXTENDS_II", "II_")
-    fitter.lin("ExtendS", "VL_EXTENDS_QI", "QI_")
-    fitter.lin("ExtendS", "VL_EXTENDS_QQ", "QQ_")
-    fitter.lin("ExtendS", "VL_EXTENDS_WI", "WI_")
-    fitter.lin("ExtendS", "VL_EXTENDS_WQ", "WQ_")
-    fitter.lin("ExtendS", "VL_EXTENDS_WW", "WW_")
+    fitter.lin("ExtendS", "VL_EXTENDS_II", 1, "II_")
+    fitter.lin("ExtendS", "VL_EXTENDS_QI", 1, "QI_")
+    fitter.lin("ExtendS", "VL_EXTENDS_QQ", 1, "QQ_")
+    fitter.lin("ExtendS", "VL_EXTENDS_WI", 1, "WI_")
+    fitter.lin("ExtendS", "VL_EXTENDS_WQ", 1, "WQ_")
+    fitter.lin("ExtendS", "VL_EXTENDS_WW", 1, "WW_")
 
-    fitter.lin("RedAnd", "VL_REDAND_II", "_I_")
-    fitter.lin("RedAnd", "VL_REDAND_IQ", "_Q_")
-    fitter.lin("RedAnd", "VL_REDAND_IW", "_W_")
-
-
-    fitter.lin("RedOr", "VL_REDOR_I", "_I_")
-    fitter.lin("RedOr", "VL_REDOR_Q", "_Q_")
-    fitter.lin("RedOr", "VL_REDOR_W", "_W_")
+    fitter.lin("RedAnd", "VL_REDAND_II", 1, "_I_")
+    fitter.lin("RedAnd", "VL_REDAND_IQ", 1, "_Q_")
+    fitter.lin("RedAnd", "VL_REDAND_IW", 1, "_W_")
 
 
-    fitter.lin("RedXor", "VL_REDXOR_W", "_W_")
-    fitter.lin("RedXor", "VL_REDXOR_32", "_I_")
-    fitter.lin("RedXor", "VL_REDXOR_64", "_Q_")
-
-    fitter.lin("CountOnes", "VL_COUNTONES_I", "_I_")
-    fitter.lin("CountOnes", "VL_COUNTONES_Q", "_Q_")
-    fitter.lin("CountOnes", "VL_COUNTONES_W", "_W_")
-
-    fitter.lin("And", "VL_AND_W", "_W_")
-    fitter.lin("And", "VL_NATIVE_AND_I", "_I_")
-    fitter.lin("And", "VL_NATIVE_AND_Q", "_Q_")
-    fitter.lin("Or", "VL_OR_W", "_W_")
-    fitter.lin("Or", "VL_NATIVE_OR_I", "_I_")
-    fitter.lin("Or", "VL_NATIVE_OR_Q", "_Q_")
-    fitter.lin("Xor", "VL_XOR_W", "_W_")
-    fitter.lin("Xor", "VL_NATIVE_XOR_I", "_I_")
-    fitter.lin("Xor", "VL_NATIVE_XOR_Q", "_Q_")
-    fitter.lin("Not", "VL_NOT_W", "_W_")
+    fitter.lin("RedOr", "VL_REDOR_I", 1, "_I_")
+    fitter.lin("RedOr", "VL_REDOR_Q", 1, "_Q_")
+    fitter.lin("RedOr", "VL_REDOR_W", 1, "_W_")
 
 
-    fitter.lin("Gt", "VL_GT_W", "__W")
-    fitter.lin("Gt", "VL_NATIVE_GT_Q", "__Q")
-    fitter.lin("Gt", "VL_NATIVE_GT_I", "__I")
+    fitter.lin("RedXor", "VL_REDXOR_W", 1, "_W_")
+    fitter.lin("RedXor", "VL_REDXOR_32", 1, "_I_")
+    fitter.lin("RedXor", "VL_REDXOR_64", 1, "_Q_")
 
-    fitter.lin("Lt", "VL_LT_W", "__W")
-    fitter.lin("Lt", "VL_NATIVE_LT_Q", "__Q")
-    fitter.lin("Lt", "VL_NATIVE_LT_I", "__I")
+    fitter.lin("CountOnes", "VL_COUNTONES_I", 1, "_I_")
+    fitter.lin("CountOnes", "VL_COUNTONES_Q", 1, "_Q_")
+    fitter.lin("CountOnes", "VL_COUNTONES_W", 1, "_W_")
 
-    fitter.lin("Eq", "VL_EQ_W", "__W")
-    fitter.lin("Eq", "VL_NATIVE_EQ_Q", "__Q")
-    fitter.lin("Eq", "VL_NATIVE_EQ_I", "__I")
-
-    fitter.lin("Neq", "VL_NEQ_W", "__W")
-    fitter.lin("Neq", "VL_NATIVE_EQ_Q", "__Q") # Hack
-    fitter.lin("Neq", "VL_NATIVE_EQ_I", "__I") # Hack
-
-
-    fitter.lin("GtS", "VL_GTS_III", "__I")
-    fitter.lin("GtS", "VL_GTS_IQQ", "__Q")
-    fitter.lin("GtS", "VL_GTS_IWW", "__W")
-
-
-    fitter.lin("GteS", "VL_GTES_III", "__I")
-    fitter.lin("GteS", "VL_GTES_IQQ", "__Q")
-    fitter.lin("GteS", "VL_GTES_IWW", "__W")
-
-    fitter.lin("LtS", "VL_LTS_III", "__I")
-    fitter.lin("LtS", "VL_LTS_IQQ", "__Q")
-    fitter.lin("LtS", "VL_LTS_IWW", "__W")
-
-    fitter.lin("LteS", "VL_LTES_III", "__I")
-    fitter.lin("LteS", "VL_LTES_IQQ", "__Q")
-    fitter.lin("LteS", "VL_LTES_IWW", "__W")
-
-    fitter.lin("Negate", "VL_NEGATE_W", "_W_")
-
-    fitter.lin("Add", "VL_ADD_W", "_W_")
-    fitter.lin("Add", "VL_NATIVE_ADD_I", "_I_")
-    fitter.lin("Add", "VL_NATIVE_ADD_Q", "_Q_")
-    fitter.lin("Sub", "VL_SUB_W", "_W_")
-    fitter.lin("Sub", "VL_NATIVE_SUB_I", "_I_")
-    fitter.lin("Sub", "VL_NATIVE_SUB_Q", "_Q_")
-    fitter.lin("Mul", "VL_MUL_W", "_W_")
-    fitter.lin("Mul", "VL_NATIVE_MUL_I", "_I_")
-    fitter.lin("Mul", "VL_NATIVE_MUL_Q", "_Q_")
+    fitter.lin("And", "VL_AND_W", 2, "_W_")
+    fitter.lin("And", "VL_NATIVE_AND_I", 2, "_I_")
+    fitter.lin("And", "VL_NATIVE_AND_Q", 2, "_Q_")
+    fitter.lin("Or", "VL_OR_W", 2, "_W_")
+    fitter.lin("Or", "VL_NATIVE_OR_I", 2, "_I_")
+    fitter.lin("Or", "VL_NATIVE_OR_Q", 2, "_Q_")
+    fitter.lin("Xor", "VL_XOR_W", 2, "_W_")
+    fitter.lin("Xor", "VL_NATIVE_XOR_I", 2, "_I_")
+    fitter.lin("Xor", "VL_NATIVE_XOR_Q", 2, "_Q_")
+    fitter.lin("Not", "VL_NOT_W", 1, "_W_")
+    fitter.lin("Not", "VL_NATIVE_NOT_I", 1, "_I_")
+    fitter.lin("Not", "VL_NATIVE_NOT_Q", 1, "_Q_")
 
 
-    fitter.lin("ShiftL", "VL_SHIFTL_WWI", "WWI")
-    fitter.lin("ShiftL", "VL_SHIFTL_WWW", "WWW")
-    fitter.lin("ShiftL", "VL_SHIFTL_WWQ", "WWQ")
-    fitter.lin("ShiftL", "VL_SHIFTL_IIW", "IIW")
-    fitter.lin("ShiftL", "VL_SHIFTL_IIQ", "IIQ")
-    fitter.lin("ShiftL", "VL_SHIFTL_QQW", "QQW")
-    fitter.lin("ShiftL", "VL_SHIFTL_QQQ", "QQQ")
-    fitter.lin("ShiftL", "VL_SHIFTL_QQI", "QQI")
+    fitter.lin("Gt", "VL_GT_W", 2, "__W")
+    fitter.lin("Gt", "VL_NATIVE_GT_Q", 2, "__Q")
+    fitter.lin("Gt", "VL_NATIVE_GT_I", 2, "__I")
+
+    fitter.lin("Lt", "VL_LT_W", 2, "__W")
+    fitter.lin("Lt", "VL_NATIVE_LT_Q", 2, "__Q")
+    fitter.lin("Lt", "VL_NATIVE_LT_I", 2, "__I")
+
+    fitter.lin("Eq", "VL_EQ_W", 2, "__W")
+    fitter.lin("Eq", "VL_NATIVE_EQ_Q", 2, "__Q")
+    fitter.lin("Eq", "VL_NATIVE_EQ_I", 2, "__I")
+
+    fitter.lin("Neq", "VL_NEQ_W", 2, "__W")
+    fitter.lin("Neq", "VL_NATIVE_NEQ_Q", 2, "__Q")
+    fitter.lin("Neq", "VL_NATIVE_NEQ_I", 2, "__I")
 
 
-    fitter.lin("ShiftR", "VL_SHIFTR_WWI", "WWI")
-    fitter.lin("ShiftR", "VL_SHIFTR_WWW", "WWW")
-    fitter.lin("ShiftR", "VL_SHIFTR_WWQ", "WWQ")
-    fitter.lin("ShiftR", "VL_SHIFTR_IIW", "IIW")
-    fitter.lin("ShiftR", "VL_SHIFTR_IIQ", "IIQ")
-    fitter.lin("ShiftR", "VL_SHIFTR_QQW", "QQW")
-    fitter.lin("ShiftR", "VL_SHIFTR_QQQ", "QQQ")
-    fitter.lin("ShiftR", "VL_SHIFTR_QQI", "QQI")
+    fitter.lin("GtS", "VL_GTS_III", 2, "__I")
+    fitter.lin("GtS", "VL_GTS_IQQ", 2, "__Q")
+    fitter.lin("GtS", "VL_GTS_IWW", 2, "__W")
 
 
-    fitter.lin("ShiftRS", "VL_SHIFTRS_III", "III")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_QQI", "QQI")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_IQI", "IQI")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_WWI", "WWI")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_WWW", "WWW")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_WWQ", "WWQ")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_QQW", "QQW")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_IIQ", "IIQ")
-    fitter.lin("ShiftRS", "VL_SHIFTRS_QQQ", "QQQ")
+    fitter.lin("GteS", "VL_GTES_III", 2, "__I")
+    fitter.lin("GteS", "VL_GTES_IQQ", 2, "__Q")
+    fitter.lin("GteS", "VL_GTES_IWW", 2, "__W")
+
+    fitter.lin("LtS", "VL_LTS_III", 2, "__I")
+    fitter.lin("LtS", "VL_LTS_IQQ", 2, "__Q")
+    fitter.lin("LtS", "VL_LTS_IWW", 2, "__W")
+
+    fitter.lin("LteS", "VL_LTES_III", 2, "__I")
+    fitter.lin("LteS", "VL_LTES_IQQ", 2, "__Q")
+    fitter.lin("LteS", "VL_LTES_IWW", 2, "__W")
+
+    fitter.lin("Negate", "VL_NEGATE_W", 1, "_W_")
+
+    fitter.lin("Add", "VL_ADD_W", 2, "_W_")
+    fitter.lin("Add", "VL_NATIVE_ADD_I", 2, "_I_")
+    fitter.lin("Add", "VL_NATIVE_ADD_Q", 2, "_Q_")
+    fitter.lin("Sub", "VL_SUB_W", 2, "_W_")
+    fitter.lin("Sub", "VL_NATIVE_SUB_I", 2, "_I_")
+    fitter.lin("Sub", "VL_NATIVE_SUB_Q", 2, "_Q_")
+    # fitter.lin("Mul", "VL_MUL_W", 2, "_W_")
+    fitter.cubeWide("Mul", "VL_MUL_W")
+    fitter.lin("Mul", "VL_NATIVE_MUL_I", 2, "_I_")
+    fitter.lin("Mul", "VL_NATIVE_MUL_Q", 2, "_Q_")
+
+    fitter.cubeWide("MulS", "VL_MULS_WWW")
+    fitter.lin("MulS", "VL_MULS_III", 2, "_I_")
+    fitter.lin("MulS", "VL_MULS_QQQ", 2, "_Q_")
+
+
+    fitter.lin("ShiftL", "VL_SHIFTL_WWI", 2, "WWI")
+    fitter.lin("ShiftL", "VL_SHIFTL_WWW", 2, "WWW")
+    fitter.lin("ShiftL", "VL_SHIFTL_WWQ", 2, "WWQ")
+    fitter.lin("ShiftL", "VL_SHIFTL_IIW", 2, "IIW")
+    fitter.lin("ShiftL", "VL_SHIFTL_IIQ", 2, "IIQ")
+    fitter.lin("ShiftL", "VL_SHIFTL_QQW", 2, "QQW")
+    fitter.lin("ShiftL", "VL_SHIFTL_QQQ", 2, "QQQ")
+    fitter.lin("ShiftL", "VL_SHIFTL_QQI", 2, "QQI")
+    fitter.lin("ShiftL", "VL_NATIVE_SHIFTL_I", 2, "_I_")
+
+    fitter.lin("ShiftR", "VL_SHIFTR_WWI", 2, "WWI")
+    fitter.lin("ShiftR", "VL_SHIFTR_WWW", 2, "WWW")
+    fitter.lin("ShiftR", "VL_SHIFTR_WWQ", 2, "WWQ")
+    fitter.lin("ShiftR", "VL_SHIFTR_IIW", 2, "IIW")
+    fitter.lin("ShiftR", "VL_SHIFTR_IIQ", 2, "IIQ")
+    fitter.lin("ShiftR", "VL_SHIFTR_QQW", 2, "QQW")
+    fitter.lin("ShiftR", "VL_SHIFTR_QQQ", 2, "QQQ")
+    fitter.lin("ShiftR", "VL_SHIFTR_QQI", 2, "QQI")
+    fitter.lin("ShiftR", "VL_NATIVE_SHIFTR_I", 2, "_I_")
+
+
+    fitter.lin("ShiftRS", "VL_SHIFTRS_III", 2, "III")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_QQI", 2, "QQI")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_IQI", 2, "IQI")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_WWI", 2, "WWI")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_WWW", 2, "WWW")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_WWQ", 2, "WWQ")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_QQW", 2, "QQW")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_IIQ", 2, "IIQ")
+    fitter.lin("ShiftRS", "VL_SHIFTRS_QQQ", 2, "QQQ")
+
 
 
     # fitter.line("A")
@@ -275,8 +294,36 @@ private:
     inline bool isVlWide(AstNode* nodep) const {{ return nodep->isWide(); }}
     inline bool isEData(AstNode* nodep) const {{ return nodep->widthWords() == 1; }}
     inline bool useMean() const {{ return m_useMean; }}
-    inline int defaultLatency(AstNode* nodep) {{ m_found = false; return {DEFAULT_LATENCY}; }}
-    inline void set(int m) {{ m_count = m; }}
+    inline int defaultLatency(AstNode* nodep) {{
+        m_found = false;
+        return nodep->widthWords();
+    }}
+    void visit(AstCCast*) override {{ set(0); }}
+    void visit(AstVarRefView*) override {{ set(0); }}
+    void visit(AstNodeVarRef* nodep) override {{
+        if (const AstCMethodHard* const callp = VN_CAST(nodep->backp(), CMethodHard)) {{
+            if (callp->fromp() == nodep) return set(1);
+        }}
+        if (nodep->varp()->isFuncLocal()) {{
+            return set(nodep->widthWords());
+        }} else {{
+            return set(nodep->widthWords() + 1);
+        }}
+    }}
+
+    inline void set(float m) {{ m_count = static_cast<int>(std::round(m)); }}
+    void visit(AstNodeIf* nodep) override {{ set(6); }}
+    void visit(AstNodeCond* nodep) override {{
+        if (AstNodeAssign* const assignp = VN_CAST(nodep->backp(), NodeAssign)) {{
+            AstNodeVarRef* const lvp = VN_CAST(assignp->lhsp(), NodeVarRef);
+            AstNodeVarRef* const elsep = VN_CAST(nodep->elsep(), NodeVarRef);
+            if (lvp && elsep && lvp->varp() == elsep->varp()) {{
+                set(3);  // can become movz
+                return;
+            }}
+        }}
+        set(6);
+    }}
 {fitter.emit()}
     void visit(AstNode* nodep) {{
         set(std::max(defaultLatency(nodep), nodep->instrCount()));

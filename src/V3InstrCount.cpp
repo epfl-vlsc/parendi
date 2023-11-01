@@ -173,7 +173,7 @@ private:
         static inline int reduceXor(AstNode* nodep) {
             if (nodep->isWide()) {
                 return nodep->widthWords() + 10;
-            } else if (nodep->isWide()) {
+            } else if (nodep->isQuad()) {
                 return 20;
             } else {
                 return 10;
@@ -266,8 +266,9 @@ private:
 
 public:
     static int count(AstNode* nodep) {
-        const IpuInstrCountOverride vi{nodep};
-        return vi.m_count;
+        return IpuCostModelLinReg::estimate(nodep);
+        // const IpuInstrCountOverride vi{nodep};
+        // return vi.m_count;
     }
 };
 class InstrCountVisitor final : public VNVisitor {
@@ -351,7 +352,7 @@ private:
         // hierarchical view of the cost when in debug mode.
         const uint32_t savedCount = m_instrCount;
         m_instrCount
-            = v3Global.opt.poplar() ? IpuCostModelLinReg::estimate(nodep) : nodep->instrCount();
+            = v3Global.opt.poplar() ? IpuInstrCountOverride::count(nodep) : nodep->instrCount();
         return savedCount;
     }
     void endVisitBase(uint32_t savedCount, AstNode* nodep) {
