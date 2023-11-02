@@ -46,9 +46,11 @@ private:
 public:
     explicit VlBitSet(size_t maxElems)
         : m_maxElems{maxElems} {
-        UASSERT(m_maxElems > 0, "can not construct empty bitset");
-        const uint64_t numWords = (maxElems - 1) / BitsPerWord + 1;
-        m_bits.resize(numWords);
+        // UASSERT(m_maxElems > 0, "cannot construct empty bitset");
+        if (m_maxElems > 0) {
+            const uint64_t numWords = (maxElems - 1) / BitsPerWord + 1;
+            m_bits.resize(numWords);
+        }
     }
 
     explicit VlBitSet(size_t maxElems, std::initializer_list<size_t> ilist)
@@ -77,13 +79,19 @@ public:
     }
 
     inline void insert(size_t v) {
-        const auto index = indexTuple(v);
-        m_bits[index.first] |= (1ULL << index.second);
+        if (m_maxElems) {
+            const auto index = indexTuple(v);
+            m_bits[index.first] |= (1ULL << index.second);
+        }
     }
 
     inline bool contains(size_t v) const {
-        const auto index = indexTuple(v);
-        return m_bits[index.first] & (1ULL << index.second);
+        if (m_maxElems) {
+            const auto index = indexTuple(v);
+            return m_bits[index.first] & (1ULL << index.second);
+        } else {
+            return false;
+        }
     }
 
     inline void intersectInPlace(const VlBitSet& other) {
