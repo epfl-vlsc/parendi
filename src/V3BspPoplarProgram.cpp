@@ -427,7 +427,9 @@ private:
 
                 *m_exchangeDump << sourceClassp->name() << " " << tileIdFrom << " "
                                 << targetClassp->name() << " " << tileIdTo << " "
-                                << totalWords * VL_BYTES_I(VL_IDATASIZE) << std::endl;
+                                << totalWords * VL_BYTES_I(VL_IDATASIZE)  << " "
+                                << fromp->name() << " "
+                                << AstNode::dedotName(fromp->origName()) << std::endl;
             }
 
             auto toHandle = m_handles(top).tensor;
@@ -530,7 +532,7 @@ public:
         m_exchangeDump = std::unique_ptr<std::ofstream>(
             V3File::new_ofstream(v3Global.opt.makeDir() + "/" + "exchangeDump.txt"));
         if (m_exchangeDump) {
-            *m_exchangeDump << "SourceVertex SourceTile TargetVertex TargetTile Bytes"
+            *m_exchangeDump << "SourceVertex SourceTile TargetVertex TargetTile Bytes SourceVar Name"
                             << std::endl;
         }
         // AstClass*

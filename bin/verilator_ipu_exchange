@@ -1,0 +1,73 @@
+#!/bin/env python3
+
+import numpy as np
+import argparse
+import pandas as pd
+from pathlib import Path
+
+
+def ipuId(t: int):
+    return int(t / 1472)
+
+def prettyBytes(b: int):
+        if (b < (1 << 10)):
+            return f"{b:.1f} B"
+        elif (b < (1 << 20)):
+            return f"{b / 1024: 0.1f} KiB"
+        elif (b < (1 << 30)):
+            return f"{b / 1024 / 1024: .1f} MiB"
+        else:
+            return f"{b / 1024 / 1024 / 1024: .1f} GiB"
+
+def processData(df: pd.DataFrame, numIpus: int):
+
+    groups = df.groupby(["SourceVertex", "SourceVar"])
+
+    # (bytes, bytes * fanout)
+    exchangeMatrix = [[(0, 0) for _ in range(numIpus)] for _ in range(numIpus)]
+    fanoutVec = []
+    cutSize = 0
+    for (vtx, vr), data in groups:
+        # print(f"{vtx}.{vr}:")
+        sourceTile = data.iloc[0]['SourceTile']
+        targetTile = data.iloc[0]['TargetTile']
+        sourceIpu = ipuId(sourceTile)
+        targetIpu = ipuId(targetTile)
+        numBytes = data.iloc[0]['Bytes']
+        fanout = len(data.index)
+        prevBytes, prevBytesFanout = exchangeMatrix[sourceIpu][targetIpu]
+        exchangeMatrix[sourceIpu][targetIpu] = (prevBytes + numBytes, prevBytesFanout + numBytes * fanout)
+        fanoutVec.append(fanout)
+        if sourceIpu != targetIpu:
+            # print(f"{data.iloc[0]['Name']} IPU{sourceIpu} -> IPU{targetIpu} {numBytes}")
+            cutSize += numBytes
+
+    print(f"CutSize: {cutSize} bytes")
+    for sourceIpu in range(numIpus):
+        for targetIpu in range(numIpus):
+            nBytes, nBytesFanout = exchangeMatrix[sourceIpu][targetIpu]
+            print(f"IPU{sourceIpu} -> IPU{targetIpu}   {prettyBytes(nBytes)}  {prettyBytes(nBytesFanout)}")
+
+
+if __name__ == "__main__":
+
+    argParser = argparse.ArgumentParser("Summarize IPU exchange")
+    argParser.add_argument("obj_dir", help="object directories", metavar="DIR", type=Path)
+
+    args = argParser.parse_args()
+
+
+    objDir: Path = args.obj_dir
+
+    exchangeDumpPath = objDir / "exchangeDump.txt"
+
+    exchangeDumpDf = pd.read_table(exchangeDumpPath, delim_whitespace=True)
+
+    numTiles = np.max([np.max(exchangeDumpDf['SourceTile']), np.max(exchangeDumpDf['TargetTile'])]) + 1
+    numIpus = int(np.ceil(numTiles / 1472))
+    print(f"{numTiles} tiles over {numIpus} IPU(s)")
+    # print(exchangeDumpDf)
+    processData(exchangeDumpDf, numIpus)
+
+
+
