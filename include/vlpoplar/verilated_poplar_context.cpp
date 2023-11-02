@@ -20,6 +20,16 @@
 #error "VL_IPU_TRACE_BUFFER_SIZE is not defined!"
 #endif
 
+#if defined(VL_INSTRUMENT)
+#define GRAPH_FILE_EXT ".graph.binVL_INSTRUMENT"
+#elif defined(POPLAR_INSTRUMENT)
+#define GRAPH_FILE_EXT ".graph.binPOP_INSTRUMENT"
+#else
+#define GRAPH_FILE_EXT ".graph.bin"
+#endif
+
+#define GRAPH_BINARY ROOT_NAME GRAPH_FILE_EXT
+
 void VlPoplarContext::init(int argc, char* argv[]) {
 
     // get the first available device
@@ -297,7 +307,7 @@ void VlPoplarContext::buildReEntrant() {
         }));
 
 #ifndef GRAPH_RUN
-    std::ofstream execOut(ROOT_NAME ".graph.bin", std::ios::binary);
+    std::ofstream execOut(GRAPH_BINARY, std::ios::binary);
     exec->serialize(execOut);
 #endif
 }
@@ -321,7 +331,7 @@ void VlPoplarContext::runReEntrant() {
     measure(
         [this]() {
 #ifndef GRAPH_COMPILE
-            std::ifstream graphIn(OBJ_DIR "/" ROOT_NAME ".graph.bin", std::ios::binary);
+            std::ifstream graphIn(OBJ_DIR "/" GRAPH_BINARY, std::ios::binary);
             exec = std::make_unique<poplar::Executable>(poplar::Executable::deserialize(graphIn));
             graphIn.close();
 #endif

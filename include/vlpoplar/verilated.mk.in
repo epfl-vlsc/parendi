@@ -1,4 +1,3 @@
-
 CXX ?= g++
 POPC ?= popc
 INCLUDES := -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/include/vltstd -I.
@@ -51,19 +50,22 @@ OBJS_HOST = $(HOST_SOURCES:cpp=o)
 OBJS_GP = $(CODELETS:cpp=gp)
 OBJS_S = $(CODELETS:cpp=s)
 
+BIN_SUFFIX :=
 INSTRUMENT ?= 0
 ifneq ($(INSTRUMENT), 0)
 HOST_FLAGS += -DPOPLAR_INSTRUMENT
+BIN_SUFFIX := POPLAR_INSTRUMENT
 endif
 
 VL_INSTRUMENT ?= 0
 ifneq ($(VL_INSTRUMENT), 0)
 HOST_FLAGS += -DVL_INSTRUMENT
+BIN_SUFFIX := VL_INSTRUMENT
 endif
 
 GRAPH_COMPILE_FLAGS = -DGRAPH_COMPILE
 GRAPH_RUN_FLAGS = -DGRAPH_RUN
-GRAPH_BINARY_DEP = $(VMAIN_ROOT).graph.bin
+GRAPH_BINARY_DEP = $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX)
 PRECOMPILE ?= 1
 ifeq ($(PRECOMPILE), 0)
 GRAPH_RUN_FLAGS += -DGRAPH_COMPILE
@@ -71,7 +73,7 @@ GRAPH_BINARY_DEP =
 endif
 
 
-all: $(VMAIN) $(GRAPH_BINARY_DEP)
+all: $(VMAIN)$(BIN_SUFFIX) $(GRAPH_BINARY_DEP)
 
 VlTimeStamp.gp: $(VERIPOPLAR_ROOT)/include/vlpoplar/verilated_timestamp.cpp
 	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
@@ -87,14 +89,14 @@ vertex: $(OBJ_GP)
 $(OBJS_HOST):%.o: %.cpp
 	$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@
 
-$(VMAIN)_graph_compiler: $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) VlTimeStamp.gp
+$(VMAIN)_graph_compiler$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) VlTimeStamp.gp
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) -o $@
-$(VMAIN_ROOT).graph.bin: $(VMAIN)_graph_compiler
+$(VMAIN_ROOT).graph.bin$(BIN_SUFFIX): $(VMAIN)_graph_compiler$(BIN_SUFFIX)
 	./$< $(GRAPH_FLAGS)
-$(VMAIN): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
+$(VMAIN)$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_RUN_FLAGS) -o $@
 
 clean_main:
-	rm -f $(VMAIN) $(VMAIN_ROOT).graph.bin $(VMAIN)_graph_compiler VlTimeStamp.gp
+	rm -f $(VMAIN)$(BIN_SUFFIX) $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX) $(VMAIN)_graph_compiler$(BIN_SUFFIX) VlTimeStamp.gp
 clean:
 	rm -rf *.o *.gp *.s report *.graph.bin VMain VMain_graph_compiler
