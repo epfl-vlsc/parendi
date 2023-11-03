@@ -48,6 +48,7 @@ set(HEADERS
     V3BspDifferential.h
     V3BspDpi.h
     V3BspGraph.h
+    V3BspHyperMerger.h
     V3BspIpuCostModelLinReg.h
     V3BspIpuTiles.h
     V3BspMerger.h
@@ -207,6 +208,7 @@ set(COMMON_SOURCES
     V3BspDifferential.cpp
     V3BspDpi.cpp
     V3BspGraph.cpp
+    V3BspHyperMerger.cpp
     V3BspIpuTiles.cpp
     V3BspMerger.cpp
     V3BspModules.cpp

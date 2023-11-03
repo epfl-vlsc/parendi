@@ -226,6 +226,8 @@ public:
             m_strategy = Strategy::TopDown;
         } else if (n == "BottomUpTopDown") {
             m_strategy = Strategy::BottomUpTopDown;
+        } else if (n == "Hypergraph") {
+            m_strategy = Strategy::Hypergraph;
         } else {
             m_strategy = Strategy::Invalid;
         }

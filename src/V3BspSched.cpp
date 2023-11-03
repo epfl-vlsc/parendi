@@ -75,6 +75,7 @@
 // reuse some code from V3Sched
 #include "V3Ast.h"
 #include "V3BspGraph.h"
+#include "V3BspHyperMerger.h"
 #include "V3BspMerger.h"
 #include "V3BspModules.h"
 #include "V3BspResync.h"
@@ -219,7 +220,11 @@ void schedule(AstNetlist* netlistp) {
     V3Stats::statsStage("bspGraph");
     // merge small partitions into larger ones
     if (v3Global.opt.fIpuMerge()) {
-        V3BspMerger::merge(splitGraphsp);
+        if (v3Global.opt.ipuMergeStrategy().hypergraph()) {
+            V3BspHyperMerger::mergeAll(splitGraphsp);
+        } else {
+            V3BspMerger::mergeAll(splitGraphsp);
+        }
         V3Stats::statsStage("bspMerge");
     }
     // Create a module for each DepGraph. To do this we also need to determine

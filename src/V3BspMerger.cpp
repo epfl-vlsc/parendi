@@ -167,14 +167,22 @@ inline bool HeapKey::operator<(const HeapKey& other) const {
     // user greater to turn the max-heap into a min-heap
     return (corep->cost() >= other.corep->cost());
 }
-inline uint32_t targetCoreCount() {
+static inline uint32_t targetCoreCount() {
     uint32_t nTiles = v3Global.opt.tiles();
     if (nTiles > v3Global.opt.tilesPerIpu()) {
         nTiles--;  // When multiple IPUs are used, keep the zeroth tile free
     }
     return nTiles * v3Global.opt.workers();
 }
-
+template <typename Fn>
+static void iterVertex(V3Graph* const graphp, Fn&& fn) {
+    using Traits = FunctionTraits<Fn>;
+    using Arg = typename Traits::template arg<0>::type;
+    for (V3GraphVertex *vtxp = graphp->verticesBeginp(), *nextp; vtxp; vtxp = nextp) {
+        nextp = vtxp->verticesNextp();
+        if (Arg const vp = dynamic_cast<Arg>(vtxp)) { fn(vp); }
+    }
+}
 class PartitionMerger {
 private:
     struct NodeInfo {
@@ -208,16 +216,6 @@ private:
     MinHeap m_heap;
 
     std::vector<std::unique_ptr<DepGraph>> m_partitionsp;
-
-    template <typename Fn>
-    void iterVertex(V3Graph* const graphp, Fn&& fn) {
-        using Traits = FunctionTraits<Fn>;
-        using Arg = typename Traits::template arg<0>::type;
-        for (V3GraphVertex *vtxp = graphp->verticesBeginp(), *nextp; vtxp; vtxp = nextp) {
-            nextp = vtxp->verticesNextp();
-            if (Arg const vp = dynamic_cast<Arg>(vtxp)) { fn(vp); }
-        }
-    }
 
     template <typename Fn>
     void iterEdges(CoreVertex* corep, GraphWay way, Fn&& fn) {
@@ -305,23 +303,29 @@ private:
                 // compute and cache the cost of each node
                 if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
                     auto& infoRef = m_nodeInfo(compp->nodep());
-                    const uint32_t numInstr
-                        = V3InstrCount::count(compp->nodep(), false, ofsp.get());
+
                     if (PliCheck::check(compp->nodep())) { hasPli[pix] = true; }
-                    costAccum += numInstr;
+
                     if (!infoRef.visited) {
+                        uint32_t numInstr
+                            = V3InstrCount::count(compp->nodep(), false, ofsp.get());
                         infoRef.visited = true;
                         infoRef.nodeIndex = nodeIndex;
                         m_instrCount.push_back(numInstr);
+                        costAccum += numInstr;
                         nodeIndex += 1;
                     } else if (infoRef.visited && !infoRef.hasDuplicates) {
                         // the second visit, mark as duplicate
                         infoRef.hasDuplicates = true;
-                        m_dupInstrCount.push_back(cachedInstrCount(compp->nodep()));
+                        const uint32_t numInstr = cachedInstrCount(compp->nodep());
+                        costAccum += numInstr;
+                        m_dupInstrCount.push_back(numInstr);
                         infoRef.nodeDupIndex = dupIndex;
                         dupIndex += 1;
                     } else {
                         // don't care, third or later visits
+                        const uint32_t numInstr = cachedInstrCount(compp->nodep());
+                        costAccum += numInstr;
                     }
                 }
             });
@@ -546,8 +550,10 @@ private:
         CostType worstCost = coreCost.back();
 
         worstCost = worstCost.percentile(v3Global.opt.ipuMergeStrategy().threshold());
-        UINFO(3, "Max permissible cost is " << worstCost << " and the max absolute cost is "
-                                            << coreCost.back() << endl);
+        UINFO(0, "Max permissible cost is "
+                     << worstCost << " and the max absolute cost is " << coreCost.back()
+                     << "(threshold = " << v3Global.opt.ipuMergeStrategy().threshold() << ")"
+                     << endl);
         if (!(worstCost > CostType::zero())) {
             UINFO(3, "Conservative merge is not possible" << endl);
             // Do not attempt to merge since we may end up increasing the execution time.
@@ -751,7 +757,7 @@ private:
         iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
             coresLeftp.push_back(corep);
             auto deleteEdge = [corep](GraphWay way) {
-                for (V3GraphEdge* edgep = corep->beginp(way), *nextp; edgep; edgep = nextp) {
+                for (V3GraphEdge *edgep = corep->beginp(way), *nextp; edgep; edgep = nextp) {
                     nextp = edgep->nextp(way);
                     VL_DO_DANGLING(edgep->unlinkDelete(), edgep);
                 }
@@ -1006,7 +1012,145 @@ public:
     }
 };
 
-void V3BspMerger::merge(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
+void V3BspMerger::merge(std::vector<std::unique_ptr<DepGraph>>& oldFibersp,
+                        const std::vector<std::vector<std::size_t>>& indices) {
+    struct NodeVtx {
+        ConstrCommitVertex* commitp = nullptr;
+        ConstrDefVertex* defp = nullptr;
+        ConstrPostVertex* postp = nullptr;
+        ConstrInitVertex* initp = nullptr;
+        CompVertex* compp = nullptr;
+    };
+
+    std::ofstream summary{v3Global.opt.makeDir() + "/" + "mergedCostEstimate.txt"};
+    // clang-format off
+        summary << "Vertex" << "            "
+                << "Cost  " << "            "
+                << "Memory" << "            "
+                << "Fibers" << std::endl;
+    // clang-format on
+    std::vector<std::unique_ptr<DepGraph>> newPartitionsp;
+    for (int pix = 0; pix < indices.size(); pix++) {
+        // reconstruct the partitions
+        // corep->partp()
+        const auto& includedParts = indices[pix];
+        std::unique_ptr<std::ofstream> ofsp;
+        uint32_t totalCost = 0;
+        uint32_t memUsage = 0;
+
+        // summary << pix << "            " << instrCount[pix] << "            "
+        //         << (memoryUsage[pix] * VL_EDATASIZE / VL_BYTESIZE) << "            "
+        //         << includedParts.size() << std::endl;
+
+        UASSERT(includedParts.size() > 0, "invalid paritition size");
+        // if (includedParts.size() == 1) {
+        //     // this one has single fiber
+        //     newPartitionsp.emplace_back(std::move(oldFibersp[includedParts.front()]));
+        //     if (ofsp) {
+        //         for (V3GraphVertex* vtxp = newPartitionsp.back()->verticesBeginp(); vtxp;
+        //              vtxp = vtxp->verticesNextp()) {
+        //             if (CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp)) {
+        //                 totalCost += V3InstrCount::count(compp->nodep(), false, ofsp.get());
+        //             }
+        //         }
+        //     }
+        //     continue;
+        // }
+
+        // a merged partition
+
+        std::unordered_map<AstNode*, NodeVtx> nodeLookup;
+        // user3u has the new vertices
+        newPartitionsp.emplace_back(std::make_unique<DepGraph>());
+        const auto& newPartp = newPartitionsp.back();
+        // iterate the vertices and clone them if not already cloned
+        for (const int fiberId : includedParts) {
+            const auto& oldPartp = oldFibersp[fiberId];
+            for (V3GraphVertex* vtxp = oldPartp->verticesBeginp(); vtxp;
+                 vtxp = vtxp->verticesNextp()) {
+                auto cloneOnce = [&newPartp](auto const origp, auto newp) {
+                    // clone only clone does not exist, since fibers share compuate, the
+                    // clone may already exist.
+                    if (origp && !(*newp)) { *newp = origp->clone(newPartp.get()); }
+                };
+
+                if (ConstrVertex* const constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
+                    UASSERT(constrp->vscp(), "vscp should not be nullptr");
+                    auto& linker = nodeLookup[constrp->vscp()];
+                    auto const commitp = dynamic_cast<ConstrCommitVertex*>(vtxp);
+                    auto const defp = dynamic_cast<ConstrDefVertex*>(vtxp);
+                    auto const postp = dynamic_cast<ConstrPostVertex*>(vtxp);
+                    auto const initp = dynamic_cast<ConstrInitVertex*>(vtxp);
+                    cloneOnce(commitp, &linker.commitp);
+                    cloneOnce(defp, &linker.defp);
+                    cloneOnce(postp, &linker.postp);
+                    cloneOnce(initp, &linker.initp);
+                } else {
+                    CompVertex* const compp = dynamic_cast<CompVertex*>(vtxp);
+                    UASSERT(compp, "ill-constructed fiber " << fiberId << endl);
+                    if (ofsp && !nodeLookup[compp->nodep()].compp) {
+                        totalCost += V3InstrCount::count(compp->nodep(), false, ofsp.get());
+                    }
+                    cloneOnce(compp, &nodeLookup[compp->nodep()].compp);
+                }
+            }
+        }
+        summary << pix << "            " << totalCost << "            "
+                << (memUsage * VL_EDATASIZE / VL_BYTESIZE) << "            "
+                << includedParts.size() << std::endl;
+        // now iterate old edges and clone them
+        auto getNewVtxp = [&nodeLookup](AnyVertex* const oldp) -> AnyVertex* {
+            AnyVertex* newp = nullptr;
+            if (auto const compp = dynamic_cast<CompVertex*>(oldp)) {
+                newp = nodeLookup[compp->nodep()].compp;
+            } else {
+                auto const constrp = dynamic_cast<ConstrVertex*>(oldp);
+                auto& linker = nodeLookup[constrp->vscp()];
+                if (dynamic_cast<ConstrCommitVertex*>(oldp)) {
+                    newp = linker.commitp;
+                } else if (dynamic_cast<ConstrDefVertex*>(oldp)) {
+                    newp = linker.defp;
+                } else if (dynamic_cast<ConstrPostVertex*>(oldp)) {
+                    newp = linker.postp;
+                } else if (dynamic_cast<ConstrInitVertex*>(oldp)) {
+                    newp = linker.initp;
+                }
+            }
+            UASSERT(newp, "vertex not cloned");
+            return newp;
+        };
+        for (int fiberId : includedParts) {
+            const auto& oldPartp = oldFibersp[fiberId];
+            // TODO: do not create redundant edges
+            for (V3GraphVertex* vtxp = oldPartp->verticesBeginp(); vtxp;
+                 vtxp = vtxp->verticesNextp()) {
+                for (V3GraphEdge* edgep = vtxp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+                    // DepEdge* dedgep = dynamic_cast<DepEdge*>(edgep);
+                    // UASSERT(dedgep, "invalid edge type");
+                    ConstrVertex* const fromConstrp = dynamic_cast<ConstrVertex*>(edgep->fromp());
+                    CompVertex* const toCompp = dynamic_cast<CompVertex*>(edgep->top());
+                    if (fromConstrp && toCompp) {
+                        auto newFromp = dynamic_cast<ConstrVertex*>(getNewVtxp(fromConstrp));
+                        auto newTop = dynamic_cast<CompVertex*>(getNewVtxp(toCompp));
+                        newPartp->addEdge(newFromp, newTop);
+                    } else {
+                        ConstrVertex* const toConstrp = dynamic_cast<ConstrVertex*>(edgep->top());
+                        CompVertex* const frompCompp = dynamic_cast<CompVertex*>(edgep->fromp());
+                        UASSERT(toConstrp && frompCompp, "ill-constructed graph");
+                        auto newFromp = dynamic_cast<CompVertex*>(getNewVtxp(frompCompp));
+                        auto newTop = dynamic_cast<ConstrVertex*>(getNewVtxp(toConstrp));
+                        newPartp->addEdge(newFromp, newTop);
+                    }
+                }
+            }
+        }
+        newPartp->removeRedundantEdges(V3GraphEdge::followAlwaysTrue);
+    }
+
+    oldFibersp.clear();
+    oldFibersp = std::move(newPartitionsp);  // BOOM we are done
+}
+void V3BspMerger::mergeAll(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
     PartitionMerger{partitionsp};
 }
 
