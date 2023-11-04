@@ -167,7 +167,8 @@ public:
 };
 class V3BspMerger final {
 public:
-    static void mergeAll(std::vector<std::unique_ptr<DepGraph>>& partitionsp);
+    static void mergeAll(std::vector<std::unique_ptr<DepGraph>>& partitionsp,
+                         uint32_t targetTileCount, uint32_t targetWorkerCount);
     static void merge(std::vector<std::unique_ptr<DepGraph>>& oldFibersp,
                       const std::vector<std::vector<std::size_t>>& indices);
 };

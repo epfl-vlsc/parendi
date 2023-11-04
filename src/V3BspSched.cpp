@@ -76,6 +76,7 @@
 #include "V3Ast.h"
 #include "V3BspGraph.h"
 #include "V3BspHyperMerger.h"
+#include "V3BspIpuDevicePartitioning.h"
 #include "V3BspMerger.h"
 #include "V3BspModules.h"
 #include "V3BspResync.h"
@@ -218,14 +219,35 @@ void schedule(AstNetlist* netlistp) {
     auto& logicClasses = std::get<0>(deps);
     auto& logicRegions = std::get<1>(deps);
     V3Stats::statsStage("bspGraph");
-    // merge small partitions into larger ones
-    if (v3Global.opt.fIpuMerge()) {
+
+    std::vector<V3BspIpuDevicePartitioning::PartitionResult> devPartitions;
+    auto performPartitionMerge = [](std::vector<std::unique_ptr<DepGraph>>& graphsp,
+                                    uint32_t numTiles, uint32_t numWorkers) {
         if (v3Global.opt.ipuMergeStrategy().hypergraph()) {
-            V3BspHyperMerger::mergeAll(splitGraphsp);
+            v3Global.rootp()->v3fatal("Unimplemented Hypergrpah merge strategy");
+            // V3BspHyperMerger::mergeAll(devPart.fibersp);
         } else {
-            V3BspMerger::mergeAll(splitGraphsp);
+            V3BspMerger::mergeAll(graphsp, numTiles, numWorkers);
         }
         V3Stats::statsStage("bspMerge");
+    };
+    auto deviceModel = IpuDevModel::instance();
+    if (v3Global.opt.fInterIpuComm()) {
+        // prepartition fibers into IPU devices
+        devPartitions
+            = std::move(V3BspIpuDevicePartitioning::partitionFibers(splitGraphsp, deviceModel));
+        V3Stats::statsStage("bspDevicePartitionPreMerge");
+        // splitGraphs should be dead, modified by above
+        UASSERT(splitGraphsp.size() == 0, "expected empty");
+        for (auto& devPart : devPartitions) {
+            performPartitionMerge(devPart.fibersp, devPart.usableTiles,
+                                  deviceModel.numAvailWorkers);
+            // devPart.fibersp has been "shrunk"
+            for (auto& fiberp : devPart.fibersp) { splitGraphsp.emplace_back(std::move(fiberp)); }
+        }
+    } else {
+        performPartitionMerge(splitGraphsp, deviceModel.numAvailTiles,
+                              deviceModel.numAvailWorkers);
     }
     // Create a module for each DepGraph. To do this we also need to determine
     // whether a varialbe is solely referenced locally or by multiple cores.

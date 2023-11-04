@@ -232,7 +232,8 @@ private:
         std::vector<std::vector<std::size_t>> indices;
 
         for (int i = 0; i < indicesTmp.size(); i++) {
-            UINFO(5, "Checking partition " << i << " with " << indicesTmp.size() << " fibers " << endl);
+            UINFO(5, "Checking partition " << i << " with " << indicesTmp.size() << " fibers "
+                                           << endl);
             if (indicesTmp[i].size() > 0) {
 
                 indices.emplace_back(std::move(indicesTmp[i]));
@@ -243,7 +244,8 @@ private:
         }
         if (indices.size() < ways()) {
             v3Global.rootp()->v3warn(UNOPTTHREADS, "Failed to reach the desired thread count "
-                                                       << indices.size() << " < " << ways() << endl);
+                                                       << indices.size() << " < " << ways()
+                                                       << endl);
         }
 
         V3BspMerger::merge(depGraphsp, indices);

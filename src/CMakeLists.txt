@@ -50,6 +50,7 @@ set(HEADERS
     V3BspGraph.h
     V3BspHyperMerger.h
     V3BspIpuCostModelLinReg.h
+    V3BspIpuDevicePartitioning.h
     V3BspIpuTiles.h
     V3BspMerger.h
     V3BspModules.h
@@ -209,6 +210,7 @@ set(COMMON_SOURCES
     V3BspDpi.cpp
     V3BspGraph.cpp
     V3BspHyperMerger.cpp
+    V3BspIpuDevicePartitioning.cpp
     V3BspIpuTiles.cpp
     V3BspMerger.cpp
     V3BspModules.cpp

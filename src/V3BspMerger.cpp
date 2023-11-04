@@ -167,13 +167,7 @@ inline bool HeapKey::operator<(const HeapKey& other) const {
     // user greater to turn the max-heap into a min-heap
     return (corep->cost() >= other.corep->cost());
 }
-static inline uint32_t targetCoreCount() {
-    uint32_t nTiles = v3Global.opt.tiles();
-    if (nTiles > v3Global.opt.tilesPerIpu()) {
-        nTiles--;  // When multiple IPUs are used, keep the zeroth tile free
-    }
-    return nTiles * v3Global.opt.workers();
-}
+
 template <typename Fn>
 static void iterVertex(V3Graph* const graphp, Fn&& fn) {
     using Traits = FunctionTraits<Fn>;
@@ -198,7 +192,9 @@ private:
         ConstrInitVertex* initp = nullptr;
         CompVertex* compp = nullptr;
     };
-
+    const uint32_t m_targetTileCount;
+    const uint32_t m_targetWorkerCount;
+    inline uint32_t targetCoreCount() const { return m_targetTileCount * m_targetWorkerCount; }
     const VNUser1InUse m_user1InUse;
     const VNUser2InUse m_user2InUse;
     const VNUser3InUse m_user3Inuse;
@@ -307,8 +303,7 @@ private:
                     if (PliCheck::check(compp->nodep())) { hasPli[pix] = true; }
 
                     if (!infoRef.visited) {
-                        uint32_t numInstr
-                            = V3InstrCount::count(compp->nodep(), false, ofsp.get());
+                        uint32_t numInstr = V3InstrCount::count(compp->nodep(), false, ofsp.get());
                         infoRef.visited = true;
                         infoRef.nodeIndex = nodeIndex;
                         m_instrCount.push_back(numInstr);
@@ -979,7 +974,10 @@ private:
     }
 
 public:
-    explicit PartitionMerger(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
+    explicit PartitionMerger(std::vector<std::unique_ptr<DepGraph>>& partitionsp,
+                             uint32_t targetTileCount, uint32_t targetWorkerCount)
+        : m_targetTileCount{targetTileCount}
+        , m_targetWorkerCount{targetWorkerCount} {
 
         UINFO(10, "merging " << partitionsp.size() << " to " << targetCoreCount() << endl);
         if (partitionsp.empty() || partitionsp.size() <= targetCoreCount()) { return; }
@@ -1150,8 +1148,9 @@ void V3BspMerger::merge(std::vector<std::unique_ptr<DepGraph>>& oldFibersp,
     oldFibersp.clear();
     oldFibersp = std::move(newPartitionsp);  // BOOM we are done
 }
-void V3BspMerger::mergeAll(std::vector<std::unique_ptr<DepGraph>>& partitionsp) {
-    PartitionMerger{partitionsp};
+void V3BspMerger::mergeAll(std::vector<std::unique_ptr<DepGraph>>& partitionsp,
+                           uint32_t targetTileCount, uint32_t targetWorkerCount) {
+    PartitionMerger{partitionsp, targetTileCount, targetWorkerCount};
 }
 
 };  // namespace V3BspSched
