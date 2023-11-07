@@ -79,6 +79,7 @@
 #include "V3BspIpuDevicePartitioning.h"
 #include "V3BspMerger.h"
 #include "V3BspModules.h"
+#include "V3BspIpuTiles.h"
 #include "V3BspResync.h"
 #include "V3BspRetiming.h"
 #include "V3EmitCBase.h"
@@ -232,7 +233,7 @@ void schedule(AstNetlist* netlistp) {
         V3Stats::statsStage("bspMerge");
     };
     auto deviceModel = IpuDevModel::instance();
-    if (v3Global.opt.fInterIpuComm()) {
+    if (v3Global.opt.fInterIpuComm() && v3Global.opt.fPreMergeIpuPartition()) {
         // prepartition fibers into IPU devices
         devPartitions
             = std::move(V3BspIpuDevicePartitioning::partitionFibers(splitGraphsp, deviceModel));
@@ -254,7 +255,9 @@ void schedule(AstNetlist* netlistp) {
     V3BspModules::makeModules(netlistp, splitGraphsp, logicClasses.m_initial,
                               logicClasses.m_static, logicRegions.m_act);
 
-    // std::exit(0);
+    // Set the tile ids already
+    V3BspIpuPlace::placeAll(netlistp, deviceModel);
+
 }
 
 };  // namespace V3BspSched

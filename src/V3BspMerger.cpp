@@ -545,7 +545,7 @@ private:
         CostType worstCost = coreCost.back();
 
         worstCost = worstCost.percentile(v3Global.opt.ipuMergeStrategy().threshold());
-        UINFO(0, "Max permissible cost is "
+        UINFO(3, "Max permissible cost is "
                      << worstCost << " and the max absolute cost is " << coreCost.back()
                      << "(threshold = " << v3Global.opt.ipuMergeStrategy().threshold() << ")"
                      << endl);

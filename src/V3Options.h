@@ -432,14 +432,15 @@ private:
     bool m_fSubst;       // main switch: -fno-subst: substitute expression temp values
     bool m_fSubstConst;  // main switch: -fno-subst-const: final constant substitution
     bool m_fTable;       // main switch: -fno-table: lookup table creation
-    bool m_fIpuSupervisor; // main switch: -fno-ipu-supervisor: use ipu supervisor contexts when possible
+    bool m_fIpuSupervisor = true; // main switch: -fno-ipu-supervisor: use ipu supervisor contexts when possible
     bool m_fIpuRetime = false;   // main switch: -fipu-retime: attempt retiming optimization
     bool m_fIpuMerge  = true;   // main switch: -fno-ipu-merge: do not merge partitions
     bool m_fIpuDiffExchange = true; // main switch: -fno-ipu-diff-exchange: disable differential exchange
     bool m_fSplitExtraWide = false; // main switch: -fsplit-extra-wide: split extra wide variables
     bool m_fIpuResync = false;      // main switch: -fipu-resync: resynchronize bsp partitions
     bool m_fInterIpuComm = true; // main switch: -fno-inter-ipu-comm: do not optimize inter-ipu communcation
-    bool m_fModelDupsInMerge = true; // main switch: -fno-model-dups-in-merge: do not model duplicates while mergin
+    bool m_fPreMergeIpuPartition = true; // main switch: -fno-pre-merge-ipu-partition: do not partition across devices before merge
+
     // clang-format on
 
     bool m_available = false;  // Set to true at the end of option parsing
@@ -716,6 +717,7 @@ public:
     bool fSplitExtraWide() const { return m_fSplitExtraWide; }
     bool fIpuResync() const { return m_fIpuResync; }
     bool fInterIpuComm() const { return m_fInterIpuComm; }
+    bool fPreMergeIpuPartition() const { return m_fPreMergeIpuPartition; }
     string traceClassBase() const { return m_traceFormat.classBase(); }
     string traceClassLang() const { return m_traceFormat.classBase() + (systemC() ? "Sc" : "C"); }
     string traceSourceBase() const { return m_traceFormat.sourceName(); }

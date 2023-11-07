@@ -37,9 +37,11 @@ struct IpuDevModel {
     const uint32_t numTilesPerIpu;
 
     /// returns the number of IPUs needed to host that many fibers
-    inline uint32_t numIpusNeeded() const { return numIpusUsed(numAvailTiles); }
-    inline uint32_t numIpusUsed(uint32_t tileCount) const {
-        return (tileCount - 1) / (numTilesPerIpu * numAvailWorkers) + 1;
+    inline uint32_t numIpusNeeded() const { return numIpusUsed(numAvailTiles * numAvailWorkers); }
+    inline uint32_t numIpusUsed(uint32_t fiberCount) const {
+        return (std::min(numAvailTiles * numAvailWorkers, fiberCount) - 1)
+                   / (numTilesPerIpu * numAvailWorkers)
+               + 1;
     }
     inline uint32_t usableAvailTiles() const {
         if (numIpusNeeded() == 1) { return numAvailTiles; }

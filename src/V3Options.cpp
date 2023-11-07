@@ -1229,6 +1229,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-fsplit-extra-wide", FOnOff, &m_fSplitExtraWide);
     DECL_OPTION("-fipu-resync", FOnOff, &m_fIpuResync);
     DECL_OPTION("-finter-ipu-comm", FOnOff, &m_fInterIpuComm);
+    DECL_OPTION("-fpre-merge-ipu-partition", FOnOff, &m_fPreMergeIpuPartition);
     DECL_OPTION("-G", CbPartialMatch, [this](const char* optp) { addParameter(optp, false); });
     DECL_OPTION("-gate-stmts", Set, &m_gateStmts);
     DECL_OPTION("-gdb", CbCall, []() {});  // Processed only in bin/verilator shell
@@ -2051,7 +2052,6 @@ void V3Options::optimize(int level) {
     m_fSubst = flag;
     m_fSubstConst = flag;
     m_fTable = flag;
-    m_fIpuSupervisor = flag;
     // And set specific optimization levels
     if (level >= 3) {
         m_inlineMult = -1;  // Maximum inlining

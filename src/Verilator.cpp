@@ -23,7 +23,6 @@
 #include "V3Branch.h"
 #include "V3Broken.h"
 #include "V3BspDifferential.h"
-#include "V3BspIpuTiles.h"
 #include "V3BspPoplarProgram.h"
 #include "V3BspSched.h"
 #include "V3BspStraggler.h"
@@ -471,8 +470,6 @@ static void process() {
             V3BspDifferential::differentialUnpack(v3Global.rootp());
         }
 
-        // set the tile ids
-        V3BspIpuTiles::tileAll(v3Global.rootp());
         // create a poplar program
         V3BspPoplarProgram::createProgram(v3Global.rootp());
     }

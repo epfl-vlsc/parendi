@@ -106,7 +106,8 @@ public:
                 unlocatedCompute.push_back(classp);
         });
 
-        const bool multiIpu = (unlocatedCompute.size() > v3Global.opt.tilesPerIpu() * v3Global.opt.workers());
+        const bool multiIpu
+            = (unlocatedCompute.size() > v3Global.opt.tilesPerIpu() * v3Global.opt.workers());
         UASSERT(!multiIpu
                     || unlocatedCompute.size()
                            <= (v3Global.opt.tiles() - 1) * v3Global.opt.workers(),
@@ -210,23 +211,24 @@ private:
         }
         inline int fanoutCost(int words, int fanout) { return baseCost(fanout) + words * 2; }
         void build() {
-            // In a hypergraph with N edges, we have and edgeIndex array of size N + 1
+            // In a hypergraph with N edges, we have an edgeIndex array of size N + 1
             // that is used to index into a second array that contains the list of
-            // node indeices on each edge.
-            // edgeIndex = [i0, i2, i3, ... iN, iN+1]
+            // node incident on each edge.
+            // edgeIndex = [i0, i2, i3, ... iN-1, iN+1]
             // edge      = [....] // length depends on the connectivity degree of the graph
             // nodesOnEdge(edgeId) = edge[edgeIndex[edgeId] : edgeIndex[edgeId + 1]]
-
+            // see hMetis manual page 14 (Figure 6): eptr is m_edgeINdex and eind is m_hyperedges
+            // https://course.ece.cmu.edu/~ee760/760docs/hMetisManual.pdf
             for (const auto& nodeSet : m_edgeNodes) {
                 m_edgeIndex.push_back(m_hyperedges.size());
                 std::copy(nodeSet.cbegin(), nodeSet.cend(), std::back_inserter(m_hyperedges));
             }
             m_edgeIndex.push_back(m_hyperedges.size());
-            for (int ix = 0; ix < m_weights.size(); ix++) {
-                int words = m_weights[ix];
-                const int fanout = m_edgeNodes[ix].size() - 1;
-                m_weights[ix] = fanoutCost(words, fanout);
-            }
+            // for (int ix = 0; ix < m_weights.size(); ix++) {
+            //     int words = m_weights[ix];
+            //     const int fanout = m_edgeNodes[ix].size() - 1;
+            //     m_weights[ix] = fanoutCost(words, fanout);
+            // }
         }
 
         NetBuilder() = default;
@@ -401,6 +403,7 @@ private:
                 }
             }
             UINFO(5, "Reassignment finished for IPU" << ipuId << endl);
+            kahypar_context_free(kcontextp);
         }
     }
 
@@ -445,7 +448,6 @@ public:
     }
 };
 
-
 }  // namespace
 
 void V3BspIpuTiles::tileAll(AstNetlist* netlistp) {
@@ -453,5 +455,7 @@ void V3BspIpuTiles::tileAll(AstNetlist* netlistp) {
     PoplarSetTileAndWorkerId{netlistp};
     // now if there are more than one IPUs, perform a k-way partition to minimize inter-IPU
     // communication
-    if (v3Global.opt.fInterIpuComm()) { PartitionAndAssignTileNumbers::tryPartition(netlistp); }
+    if (v3Global.opt.fInterIpuComm() && !v3Global.opt.fPreMergeIpuPartition()) {
+        PartitionAndAssignTileNumbers::tryPartition(netlistp);
+    }
 }

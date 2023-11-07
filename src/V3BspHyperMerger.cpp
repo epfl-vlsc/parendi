@@ -93,13 +93,13 @@ private:
             std::fill_n(st.begin(), st.size(), 0);
         };
         HyperNodeStore<uint32_t> memUsage;
-        HyperNodeStore<uint32_t> nodeCost;
         HyperNodeStore<uint32_t> nodeDupCost;
-        HyperNodeStore<uint32_t> nodeDegree;
+        HyperNodeStore<uint32_t> nodeDupCostNorm;
+        HyperNodeStore<uint32_t> nodeCost;
         HyperNodeStore<kahypar_hypernode_weight_t> hyperNodeWeights;
         initNodeStore(memUsage);
+        initNodeStore(nodeDupCostNorm);
         initNodeStore(nodeCost);
-        initNodeStore(nodeDegree);
         initNodeStore(nodeDupCost);
         initNodeStore(hyperNodeWeights);
 
@@ -158,22 +158,24 @@ private:
         std::vector<std::size_t> hyperEdgePtr;  /// eptr in hmetis manual page 14
         std::vector<HyperEdgeId> hyperEdges;  /// eind in hmethis manual page 14
         std::vector<kahypar_hyperedge_weight_t> hyperEdgeWeights;
+
         for (AstNode* astNodep : hyperEdgeAstNodesp) {
             auto& info = m_compInfo(astNodep);
             UASSERT(info.isHyperedge(), "ill-constructed hyper edges");
             hyperEdgePtr.push_back(hyperEdges.size());
             for (const HyperNodeId hyperNode : info.users) {
-                nodeDegree[hyperNode]++;
                 nodeDupCost[hyperNode] += info.cost;
+                nodeDupCostNorm[hyperNode] += (info.cost / info.users.size());
                 hyperEdges.push_back(hyperNode);
             }
             hyperEdgeWeights.push_back(info.cost);
         }
         hyperEdgePtr.push_back(hyperEdges.size());
+
         for (HyperNodeId id = 0; id < depGraphsp.size(); id++) {
-            uint32_t dupPenalty = nodeDegree[id] > 0 ? nodeDupCost[id] / nodeDegree[id] : 0;
-            hyperNodeWeights[id] = nodeCost[id] + dupPenalty;
-            UASSERT(hyperNodeWeights[id] > 0, "non-positive hypernode weight!");
+
+            UASSERT(nodeDupCost[id] >= nodeDupCostNorm[id], "non-positive hypernode weight!");
+            hyperNodeWeights[id] = nodeCost[id] - nodeDupCost[id] + nodeDupCostNorm[id];
         }
 
         // Call KaHyPar
