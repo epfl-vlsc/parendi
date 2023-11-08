@@ -14,12 +14,13 @@
 
 cmake_minimum_required(VERSION 3.15)
 cmake_policy(SET CMP0091 NEW) # Use MSVC_RUNTIME_LIBRARY to select the runtime
-project(Verilator
+project(Parendi
     VERSION 5.007
     HOMEPAGE_URL https://verilator.org
     LANGUAGES CXX
 )
 
+math(EXPR VERILATOR_VERSION_INTEGER "1000000 * ${CMAKE_PROJECT_VERSION_MAJOR} + 1000 * ${CMAKE_PROJECT_VERSION_MINOR}")
 option(DEBUG_AND_RELEASE_AND_COVERAGE
     "Builds both the debug and release binaries, overriding CMAKE_BUILD_TYPE. Not supported under MSBuild.")
 
