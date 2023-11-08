@@ -89,6 +89,8 @@ vertex: $(OBJ_GP)
 $(OBJS_HOST):%.o: %.cpp
 	$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@
 
+$(VMAIN)_objects: $(OBJS_HOST) $(OBJS_GP)
+
 $(VMAIN)_graph_compiler$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) VlTimeStamp.gp
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) -o $@
 $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX): $(VMAIN)_graph_compiler$(BIN_SUFFIX)
