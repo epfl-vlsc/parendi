@@ -186,6 +186,69 @@ public:
 };
 
 // ######################################################################
+//  Is this a substitution worth it?
+
+class GateCheapVisitor final : public VNVisitor {
+private:
+    // RETURN STATE
+    bool m_isCheap = true;
+    // Driving logic
+    GateLogicVertex* const m_logicVertexp;
+    // Variable produced by logic
+    GateVarVertex* const m_vvertexp;
+
+    void clearCheap(const char* because) {
+        if (m_isCheap) {
+            m_isCheap = false;
+            UINFO(9, "Clear cheap because" << because << endl);
+        }
+    }
+    // VISITORS
+
+    void visit(AstShiftL* nodep) override {
+        if (nodep->isWide()) { clearCheap("wide SHIFTL"); }
+    }
+    void visit(AstShiftR* nodep) override {
+        if (nodep->isWide()) { clearCheap("wide SHIFTR"); }
+    }
+    void visit(AstShiftRS* nodep) override {
+        if (nodep->isWide()) { clearCheap("wide SHIFTRS"); }
+    }
+    void visit(AstNode* nodep) override {
+        if (!m_isCheap) { return; }
+        iterateChildren(nodep);
+    }
+
+public:
+    explicit GateCheapVisitor(GateLogicVertex* const logicVertexp, GateVarVertex* const vvertexp)
+        : m_logicVertexp{m_logicVertexp}
+        , m_vvertexp{vvertexp} {
+
+
+        if (vvertexp->outEmpty()) { return; }
+        // only wide variables should be considered expensive, since later C++ compilers will not
+        // be able to fully remove duplications caused by substitution
+        if (!m_vvertexp->varScp()->isWide()) { return; }
+
+        int n = 0;
+        for (V3GraphEdge* edgep = vvertexp->outBeginp(); edgep; edgep = edgep->outNextp()) {
+            UINFO(1, "edge weigth of " << vvertexp->varScp()->prettyNameQ() << " = "
+                                       << edgep->weight() << endl);
+            n += edgep->weight();
+        }
+        if (n == 1) {
+            // single consumer, consider cheap despite being wide
+            return;
+        }
+
+        iterate(logicVertexp->nodep());
+
+    }
+    inline bool isCheap() const { return m_isCheap; }
+    ~GateCheapVisitor() override = default;
+};
+
+// ######################################################################
 //  Is this a simple expression with a single input and single output?
 
 class GateOkVisitor final : public VNVisitor {
@@ -578,7 +641,6 @@ void GateVisitor::optimizeSignals(bool allowMultiIn) {
         // Consider "inlining" variables
         if (!vvertexp) continue;
 
-
         if (vvertexp->inEmpty()) {  // Can't deal with no sources
             vvertexp->clearReducibleAndDedupable("inEmpty");
         } else if (!vvertexp->inSize1()) {  // Can't deal with more than one src
@@ -602,6 +664,9 @@ void GateVisitor::optimizeSignals(bool allowMultiIn) {
 
         // Was it ok?
         if (!okVisitor.isSimple()) continue;
+
+        // Is it cheap enough
+        if (!GateCheapVisitor{logicVertexp, vvertexp}.isCheap()) continue;
 
         // Does it read multiple source variables?
         if (okVisitor.rhsVarRefs().size() > 1) {
