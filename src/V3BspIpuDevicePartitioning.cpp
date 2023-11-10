@@ -22,7 +22,7 @@
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
 #include "V3InstrCount.h"
-
+#include "V3Stats.h"
 #include <V3File.h>
 #include <algorithm>
 #include <libkahypar.h>
@@ -207,6 +207,7 @@ private:
         UINFO(3, "Starting KaHyPar partitioner "
                      << "\n\t# HN = " << numNodes << " # HE = " << numEdges
                      << " ways = " << numDevices << endl);
+
         std::vector<kahypar_hypernode_weight_t> nodeWeights(numNodes);
         std::fill(nodeWeights.begin(), nodeWeights.end(), 1);  // unit weight
 
@@ -217,6 +218,9 @@ private:
                           hyperEdgeWeights.data(), hyperEdgeIndexer.data(), hyperEdges.data(),
                           &objective, kctxp.get(), partitionIds.data());
         UINFO(3, "Objective = " << objective << endl);
+        V3Stats::addStat("IPU partitioning, cut size ", objective);
+        V3Stats::addStat("IPU partitioning, hyperedges ", numEdges);
+        V3Stats::addStat("IPU partitioning, hypernodes ", numNodes);
 
         std::vector<V3BspIpuDevicePartitioning::PartitionResult> resultsp;
         auto usableTiles = m_devModel.usableTilesPerDevice();
@@ -393,6 +397,7 @@ V3BspIpuDevicePartitioning::partitionFibers(std::vector<std::unique_ptr<DepGraph
         return res;
     }
     return DevicePartitionPreFiberMerge{devModel}(fibersp);
+    V3Stats::statsStage("ipuPartitioning");
 }
 
 void V3BspIpuPlace::placeAll(AstNetlist* nodep, const IpuDevModel& devModel) {
