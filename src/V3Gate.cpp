@@ -200,7 +200,7 @@ private:
     void clearCheap(const char* because) {
         if (m_isCheap) {
             m_isCheap = false;
-            UINFO(9, "Clear cheap because" << because << endl);
+            UINFO(9, "Clear cheap because " << because << endl);
         }
     }
     // VISITORS
