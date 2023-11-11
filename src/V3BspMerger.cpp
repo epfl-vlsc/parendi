@@ -624,8 +624,7 @@ private:
             }
             // allow mergin below the desired core count if the user wants it.
             didSomething = v3Global.opt.ipuMergeStrategy().minimizeTileCount();
-            if (bestNeighbor && isFeasible(bestCost)
-                && (bestCost < costWithNext || !secondMinNodep || !isFeasible(costWithNext))) {
+            if (bestNeighbor && isFeasible(bestCost)) {
                 // found a neighbor, merge it
                 UINFO(8, "Merging with neighbor: " << bestCost << endl);
                 doMerge(corep, bestNeighbor, bestCost);
@@ -667,7 +666,6 @@ private:
     }
 
     uint32_t mergeForced() {
-
         UASSERT(m_heap.empty(), "heap should be empty");
         // get the current cost estimates
         std::vector<CostType> coreCost = gatherCost();
@@ -675,6 +673,7 @@ private:
         if (numCores <= targetCoreCount()) {
             return 0;  // nothing to do
         }
+
 
         iterVertex(m_coreGraphp.get(), [&](CoreVertex* corep) {
             // PLI or not, add it to the heap

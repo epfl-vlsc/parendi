@@ -1710,9 +1710,11 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
         m_ipuMergeStrategy.threshold(th);
     });
     DECL_OPTION("-ipu-merge-minimize-tile-count", OnOff, &m_ipuMergeStrategy.minimizeTileCount());
+    DECL_OPTION("-ipu-merge-ignore-duplication-cost", OnOff, &m_ipuMergeStrategy.ignoreDupCost());
     DECL_OPTION("-y", CbVal, [this, &optdir](const char* valp) {
         addIncDirUser(parseFileArg(optdir, string(valp)));
     });
+
     parser.finalize();
 
     for (int i = 0; i < argc;) {
