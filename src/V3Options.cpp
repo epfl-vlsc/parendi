@@ -1709,7 +1709,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
         float th = std::atof(valp);
         m_ipuMergeStrategy.threshold(th);
     });
-
+    DECL_OPTION("-ipu-merge-minimize-tile-count", OnOff, &m_ipuMergeStrategy.minimizeTileCount());
     DECL_OPTION("-y", CbVal, [this, &optdir](const char* valp) {
         addIncDirUser(parseFileArg(optdir, string(valp)));
     });

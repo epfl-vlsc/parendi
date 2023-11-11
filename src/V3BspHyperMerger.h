@@ -30,7 +30,8 @@ namespace V3BspSched {
 
 class V3BspHyperMerger final {
 public:
-    static void mergeAll(std::vector<std::unique_ptr<DepGraph>>& partitionsp);
+    static void mergeAll(std::vector<std::unique_ptr<DepGraph>>& partitionsp, uint32_t numTiles,
+                         uint32_t numWorkers);
 };
 }  // namespace V3BspSched
 

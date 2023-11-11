@@ -197,8 +197,8 @@ public:
 private:
     Strategy m_strategy = Strategy::BottomUp;
     float m_bottomUpThreshold = 0.7;
-
-
+    bool m_minimizeTileCount = false;
+    bool m_ignoreDupCost = false;
 public:
     bool bottomUp() const { return m_strategy == Strategy::BottomUp; }
     bool topDown() const { return m_strategy == Strategy::TopDown; }
@@ -207,6 +207,10 @@ public:
     bool valid() const { return m_strategy != Strategy::Invalid; }
     float threshold() const { return m_bottomUpThreshold; }
     void threshold(float v) { m_bottomUpThreshold = v; }
+    bool minimizeTileCount() const { return m_minimizeTileCount; }
+    bool& minimizeTileCount() { return m_minimizeTileCount; }
+    bool ignoreDupCost() const { return m_ignoreDupCost; }
+    bool& ignoreDupCost() { return m_ignoreDupCost; }
 
     const char* ascii() const {
         static const char* const m_names[] = {

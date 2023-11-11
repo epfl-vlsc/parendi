@@ -238,6 +238,8 @@ private:
         size_t varIndex = 0;
         size_t varDupIndex = 0;
         size_t numDupVars = 0;
+        VDouble0 statsCostSeq;
+        VDouble0 statsFiberSumCost;
         std::vector<uint32_t> totalCost;
         std::vector<uint32_t> totalMem;
         std::vector<bool> hasPli;
@@ -313,6 +315,7 @@ private:
                         // the second visit, mark as duplicate
                         infoRef.hasDuplicates = true;
                         const uint32_t numInstr = cachedInstrCount(compp->nodep());
+                        statsCostSeq += numInstr;
                         costAccum += numInstr;
                         m_dupInstrCount.push_back(numInstr);
                         infoRef.nodeDupIndex = dupIndex;
@@ -326,16 +329,33 @@ private:
             });
             totalCost[pix] = costAccum;
             totalMem[pix] = memAccum;
+            statsFiberSumCost += costAccum;
             // iterVertex<DepGraph, AnyVertex>(graphp.get(), )
         }
         m_coreGraphp = std::make_unique<MultiCoreGraph>();
         std::vector<CoreVertex*> coresp;
 
+
+        // some stats
+        V3Stats::addStat("BspMerger, sequential cost", statsCostSeq);
+        V3Stats::addStat("BspMerger, fibers total cost", statsFiberSumCost);
         // number of nodes that have duplicates
         const size_t numDups = m_dupInstrCount.size();
         const size_t numVarDups = m_dupVarSize.size();
         UINFO(3, "There are " << numDups << " nodes that have duplicates" << endl);
         V3Stats::addStat("BspMerger, nodes with duplicates ", numDups);
+        V3Stats::addStat("BspMerger, variables with duplicates ", numVarDups);
+        V3Stats::addStat("BspMerger, max cost", *std::max_element(totalCost.begin(), totalCost.end()));
+
+        if (totalCost.size() >= 2) {
+            V3Stats::addStat(
+                    "BspMerger, median cost",
+                    totalCost.size() % 2 == 0
+                        ? (totalCost[totalCost.size() / 2] + totalCost[totalCost.size() / 2 - 1]) / 2
+                        : totalCost[totalCost.size() / 2]);
+        } else if (totalCost.size() == 1) {
+            V3Stats::addStat("BspMerger, median cost", totalCost.front());
+        }
         for (int pix = 0; pix < partitionsp.size(); pix++) {
             // now create a CoreVertex for each partition
             const auto& depGraphp = partitionsp[pix];
@@ -344,6 +364,7 @@ private:
             corep->instrCount(totalCost[pix]);
             corep->memoryWords(totalMem[pix]);
             corep->hasPli(hasPli[pix]);
+
             // Fill-in the duplicate set within the core
             iterVertex(depGraphp.get(), [&](AnyVertex* const vtxp) {
                 if (ConstrVertex* constrp = dynamic_cast<ConstrVertex*>(vtxp)) {
@@ -416,9 +437,11 @@ private:
         const uint32_t recvReduction = sumRecvFrom(core1p, core2p) + sumRecvFrom(core2p, core1p);
 
         // compute the duplicatation instruction count between the two core
-        VlBitSet dupInCommon = VlBitSet::doIntersect(core1p->dupSet(), core2p->dupSet());
         uint32_t dupCostCommon = 0;
-        dupInCommon.foreach([&](size_t dupIx) { dupCostCommon += m_dupInstrCount[dupIx]; });
+        if (!v3Global.opt.ipuMergeStrategy().ignoreDupCost()) {
+            VlBitSet dupInCommon = VlBitSet::doIntersect(core1p->dupSet(), core2p->dupSet());
+            dupInCommon.foreach([&](size_t dupIx) { dupCostCommon += m_dupInstrCount[dupIx]; });
+        }
 
         // compute the variable duplication count between the two cores
         VlBitSet varDupInCommon = VlBitSet::doIntersect(core1p->dupVarSet(), core2p->dupVarSet());
@@ -567,9 +590,9 @@ private:
         });
 
         HeapNode* minNodep = m_heap.max();
-
+        bool didSomething = true;
         // Conservatively merge: avoid an increase to the critical path
-        while (numCores > targetCoreCount() && !m_heap.empty() && minNodep
+        while ((numCores > targetCoreCount() || didSomething) && !m_heap.empty() && minNodep
                && minNodep->key().corep->cost() <= worstCost) {
             // try merging minNodep with a neighbor
             CoreVertex* bestNeighbor = nullptr;
@@ -599,6 +622,8 @@ private:
             if (secondMinNodep) {
                 costWithNext = costAfterMerge(corep, secondMinNodep->key().corep);
             }
+            // allow mergin below the desired core count if the user wants it.
+            didSomething = v3Global.opt.ipuMergeStrategy().minimizeTileCount();
             if (bestNeighbor && isFeasible(bestCost)
                 && (bestCost < costWithNext || !secondMinNodep || !isFeasible(costWithNext))) {
                 // found a neighbor, merge it
@@ -620,6 +645,7 @@ private:
                 // tough luck, cannot merge minNodep with anything, discard it
                 UINFO(8, "Could not merge" << endl);
                 m_heap.remove(minNodep);
+                didSomething = false;
                 // UASSERT(!m_heap.max(), "expected empty heap");
             }
             minNodep = m_heap.max();

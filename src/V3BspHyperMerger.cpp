@@ -23,6 +23,7 @@
 #include "V3AstUserAllocator.h"
 #include "V3BspMerger.h"
 #include "V3InstrCount.h"
+#include "V3Stats.h"
 
 #include <V3File.h>
 #include <algorithm>
@@ -31,19 +32,10 @@
 #include <numeric>
 #include <set>
 #include <unordered_map>
-
 VL_DEFINE_DEBUG_FUNCTIONS;
 
 namespace V3BspSched {
 namespace {
-
-inline static uint32_t ways() {
-    uint32_t nTiles = v3Global.opt.tiles();
-    if (nTiles > v3Global.opt.tilesPerIpu()) {
-        nTiles--;  // When multiple IPUs are used, keep the zeroth tile free
-    }
-    return nTiles * v3Global.opt.workers();
-}
 
 class BspHyperMerger final {
 private:
@@ -70,6 +62,8 @@ private:
             : cost(0)
             , m_id(-1) {}
     };
+
+    const uint32_t m_ways;
 
     const VNUser1InUse m_user1InUse;
     const VNUser2InUse m_user2InUse;
@@ -104,7 +98,7 @@ private:
         initNodeStore(hyperNodeWeights);
 
         HyperEdgeStore<AstNode*> hyperEdgeAstNodesp;
-        uint32_t sequentialCost = 0;
+        VDouble0 sequentialCost;
         for (HyperNodeId gix = 0; gix < depGraphsp.size(); gix++) {
             memoryUsageClearAll();
             auto& graphp = depGraphsp[gix];
@@ -175,7 +169,11 @@ private:
         for (HyperNodeId id = 0; id < depGraphsp.size(); id++) {
 
             UASSERT(nodeDupCost[id] >= nodeDupCostNorm[id], "non-positive hypernode weight!");
-            hyperNodeWeights[id] = nodeCost[id] - nodeDupCost[id] + nodeDupCostNorm[id];
+            if (v3Global.opt.ipuMergeStrategy().ignoreDupCost()) {
+                hyperNodeWeights[id] = nodeCost[id];
+            } else {
+                hyperNodeWeights[id] = nodeCost[id] - nodeDupCost[id] + nodeDupCostNorm[id];
+            }
         }
 
         // Call KaHyPar
@@ -190,12 +188,26 @@ private:
         std::vector<PartitionId> partitions;
         partitions.resize(numNodes);
         std::fill(partitions.begin(), partitions.end(), -1);
-
-        if (debug() >= 0) {
+        V3Stats::addStat("BspMerger, sequential cost", sequentialCost);
+        V3Stats::addStat("BspMerger, fibers total cost",
+                         std::accumulate(nodeCost.begin(), nodeCost.end(), 0));
+        V3Stats::addStat("BspMerger, nodes with duplicates", hyperNodeWeights.size());
+        V3Stats::addStat("BspMerger, max cost",
+                         *std::max_element(nodeCost.begin(), nodeCost.end()));
+        if (nodeCost.size() >= 2) {
+            V3Stats::addStat(
+                "BspMerger, median cost",
+                nodeCost.size() % 2 == 0
+                    ? (nodeCost[nodeCost.size() / 2] + nodeCost[nodeCost.size() / 2 - 1]) / 2
+                    : nodeCost[nodeCost.size() / 2]);
+        } else if (nodeCost.size() == 1) {
+            V3Stats::addStat("BspMerger, median cost", nodeCost.front());
+        }
+        if (debug() >= 3) {
             // clang-format off
             uint32_t unadjustedCost = std::accumulate(hyperNodeWeights.begin(), hyperNodeWeights.end(), 0);
             uint32_t maxCost = *std::max_element(hyperNodeWeights.begin(), hyperNodeWeights.end());
-            UINFO(0, "\n\tSequential cost: " << sequentialCost <<
+            UINFO(3, "\n\tSequential cost: " << sequentialCost <<
                      "\n\tmax cost:        " << maxCost        <<
                      "\n\tcost sum:        " << unadjustedCost <<
                      "\n\ttarget:          " << static_cast<float>(unadjustedCost) / ways() << endl);
@@ -240,8 +252,9 @@ private:
 
                 indices.emplace_back(std::move(indicesTmp[i]));
             } else {
-                v3Global.rootp()->v3warn(UNOPTTHREADS,
-                                         "Empty partition " << i << " by KaHyPar" << endl);
+                if (debug() >= 3)
+                    v3Global.rootp()->v3warn(UNOPTTHREADS,
+                                             "Empty partition " << i << " by KaHyPar" << endl);
             }
         }
         if (indices.size() < ways()) {
@@ -252,20 +265,24 @@ private:
 
         V3BspMerger::merge(depGraphsp, indices);
     }
+    inline uint32_t ways() { return m_ways; }
 
 public:
-    explicit BspHyperMerger(std::vector<std::unique_ptr<DepGraph>>& depGraphsp) {
+    explicit BspHyperMerger(std::vector<std::unique_ptr<DepGraph>>& depGraphsp, uint32_t numTiles,
+                            uint32_t numWorkers)
+        : m_ways(numTiles * numWorkers) {
         buildHypergraph(depGraphsp);
     }
 };
 
 };  // namespace
-void V3BspHyperMerger::mergeAll(std::vector<std::unique_ptr<DepGraph>>& depGraphsp) {
-    if (depGraphsp.empty() || depGraphsp.size() < ways()) {
+void V3BspHyperMerger::mergeAll(std::vector<std::unique_ptr<DepGraph>>& depGraphsp,
+                                uint32_t numTiles, uint32_t numWorkers) {
+    if (depGraphsp.empty() || depGraphsp.size() < numTiles * numWorkers) {
         UINFO(3, "No need to merge fibers" << endl);
         return;
     }
-    BspHyperMerger impl{depGraphsp};
+    BspHyperMerger impl{depGraphsp, numTiles, numWorkers};
 }
 
 }  // namespace V3BspSched

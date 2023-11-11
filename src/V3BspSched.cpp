@@ -223,8 +223,8 @@ void schedule(AstNetlist* netlistp) {
     auto performPartitionMerge = [](std::vector<std::unique_ptr<DepGraph>>& graphsp,
                                     uint32_t numTiles, uint32_t numWorkers) {
         if (v3Global.opt.ipuMergeStrategy().hypergraph()) {
-            v3Global.rootp()->v3fatal("Unimplemented Hypergrpah merge strategy");
-            // V3BspHyperMerger::mergeAll(devPart.fibersp);
+
+            V3BspHyperMerger::mergeAll(graphsp, numTiles, numWorkers);
         } else {
             V3BspMerger::mergeAll(graphsp, numTiles, numWorkers);
         }
