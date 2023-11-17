@@ -438,7 +438,7 @@ private:
         m_packagep = new AstPackage{m_netlistp->fileline(), V3BspModules::builtinBspPkg};
         m_packagep->level(3);  // lives under a cell (2) under top (1)
         UASSERT(m_topScopep, "No top scope!");
-        // a cell instance of the pakage that is added to the top module
+        // a cell instance of the package that is added to the top module
         m_packageCellp = new AstCell{fl,
                                      fl,
                                      m_modNames.get(V3BspModules::builtinBspPkg + "Inst"),

@@ -40,7 +40,6 @@ struct UnpackUpdate {
         std::vector<AstNode*> recipesp;
         std::vector<AstVarScope*> rvsp;  // ensure unique elements
         AstVarScope* condp = nullptr;
-        AstVarScope* condInitp = nullptr;
     } subst;
     AstVarScope* origVscp = nullptr;
     AstClass* const classp = nullptr;
@@ -195,8 +194,10 @@ private:
     AstNodeAssign* m_assignp = nullptr;
     AstNetlist* m_netlistp = nullptr;
 
-    AstCFunc* m_initComputep = nullptr;
-    AstClass* m_initClassp = nullptr;
+    // AstCFunc* m_initComputep = nullptr;
+    // AstClass* m_initClassp = nullptr;
+    AstCell* m_bspCellp = nullptr;
+    AstScope* m_bspScopep = nullptr;
     AstCFunc* m_initExchangep = nullptr;
     AstCFunc* m_exchangep = nullptr;
 
@@ -243,14 +244,111 @@ private:
         AstAssign* const assignp = new AstAssign{tVscp->fileline(), tSelp, sSelp};
         return assignp;
     }
+
+    struct InitClassWrapper {
+        AstClass* const classp = nullptr;
+        AstCFunc* const computep = nullptr;
+        AstVarScope* const instp = nullptr;
+    };
+
+    InitClassWrapper createInitialClass(AstClass* fromp) {
+        // find the bsp cell, that scopes all bsp classes
+        if (!m_bspCellp) {
+            for (AstNode* nodep = m_netlistp->topModulep()->stmtsp(); nodep;
+                 nodep = nodep->nextp()) {
+                AstCell* cellp = VN_CAST(nodep, Cell);
+                if (cellp && cellp->modp()
+                    && (cellp->modp()->name() == V3BspSched::V3BspModules::builtinBspPkg)) {
+                    m_bspCellp = cellp;
+                }
+            }
+            UASSERT(m_bspCellp, "did not find top BSP cell");
+            for (AstNode* nodep = m_bspCellp->modp()->stmtsp(); nodep; nodep = nodep->nextp()) {
+                if (VN_IS(nodep, Scope)) { m_bspScopep = VN_AS(nodep, Scope); }
+            }
+            UASSERT(m_bspScopep, "did not find the bsp scope");
+        }
+        // create a BspInitial class to clear the condition variables
+        const auto className = m_newNames.get("initClass");
+        AstClass* const classp = new AstClass{fromp->fileline(), className};
+        const auto pkgName = m_newNames.get("initClassPkg");
+        classp->classOrPackagep(new AstClassPackage{fromp->fileline(), pkgName});
+        classp->classOrPackagep()->classp(classp);
+
+        UASSERT(fromp->flag().tileId() >= 0 && fromp->flag().workerId() >= 0,
+                "tile id  or worker id not set");
+        // set the flags according the the compute class it corresponds to
+        VClassFlag flags = VClassFlag{}
+                               .append(VClassFlag::BSP_BUILTIN)
+                               .append(VClassFlag::BSP_INIT_BUILTIN)
+                               .withTileId(fromp->flag().tileId())
+                               .withWorkerId(fromp->flag().workerId());
+
+        if (fromp->flag().isSupervisor()) { flags = flags.append(VClassFlag::BSP_SUPERVISOR); }
+        classp->flag(flags);
+        classp->level(4);
+
+        AstScope* scopep = new AstScope{fromp->fileline(), classp,
+                                        m_netlistp->topScopep()->scopep()->name() + "."
+                                            + m_bspScopep->name() + "." + className,
+                                        m_bspScopep, m_bspCellp};
+        classp->addStmtsp(scopep);
+        AstCFunc* cfuncp = new AstCFunc{fromp->fileline(), "compute", scopep, "void"};
+        scopep->addBlocksp(cfuncp);
+        cfuncp->dontCombine(true);
+        cfuncp->isMethod(true);
+        cfuncp->isInline(true);
+        // add the class to the netlist
+        m_netlistp->addModulesp(classp->classOrPackagep());
+        m_netlistp->addModulesp(classp);
+
+        // create a datatype for it
+
+        AstClassRefDType* const dtypep = new AstClassRefDType{fromp->fileline(), classp, nullptr};
+        dtypep->classOrPackagep(classp->classOrPackagep());
+        m_netlistp->typeTablep()->addTypesp(dtypep);
+
+        AstVar* const classInstp
+            = new AstVar{fromp->fileline(), VVarType::VAR, m_newNames.get("vtxInstInit"), dtypep};
+        classInstp->lifetime(VLifetime::STATIC);
+        AstVarScope* const classVscp = new AstVarScope{
+            classInstp->fileline(), m_netlistp->topScopep()->scopep(), classInstp};
+        m_netlistp->topScopep()->scopep()->addVarsp(classVscp);
+        m_netlistp->topModulep()->addStmtsp(classInstp);
+        return {.classp = classp, .computep = cfuncp, .instp = classVscp};
+    }
+    AstVarScope* addConditionToInitialClass(AstVarScope* const condVscp,
+                                    const InitClassWrapper& initInfo) {
+        // initialize it to zero in the initial class, this is used to ensure no write
+        // takes place in the receiver before actually sending from here AstVar* const
+        AstVar* const condVarInitp = condVscp->varp()->cloneTree(false);
+        condVarInitp->lifetime(VLifetime::STATIC);
+        condVarInitp->bspFlag({VBspFlag::MEMBER_OUTPUT});
+        AstVarScope* const condInitVscp
+            = new AstVarScope{condVscp->fileline(), initInfo.computep->scopep(), condVarInitp};
+        initInfo.computep->scopep()->addVarsp(condInitVscp);
+        initInfo.computep->scopep()->modp()->addStmtsp(condVarInitp);
+
+        AstAssign* const initClearp
+            = new AstAssign{condVscp->fileline(),
+                            new AstVarRef{condVscp->fileline(), condInitVscp, VAccess::WRITE},
+                            new AstConst{condVscp->fileline(), AstConst::WidthedValue{},
+                                         condVscp->dtypep()->width(), 0}};
+
+        initInfo.computep->addStmtsp(initClearp);
+        return condInitVscp;
+    }
+
     void addLogicToReader(AstCFunc* cfuncp) {
 
         AstScope* const scopep = cfuncp->scopep();
         AstNode::user3ClearTree();
-
+        const InitClassWrapper initInfo
+            = createInitialClass(VN_AS(cfuncp->scopep()->modp(), Class));
         // AstNode::user4ClearTree();
         // // set user4p for every varp received (remote) to point to the local var
-        // for (AstVarScope* vscp = scopep->varsp(); vscp; vscp = VN_AS(vscp->nextp(), VarScope)) {
+        // for (AstVarScope* vscp = scopep->varsp(); vscp; vscp = VN_AS(vscp->nextp(),
+        // VarScope)) {
         //     AstVar* const varp = vscp->varp();
         //     AstVar* const sourcep = varp->user2p();
         //     if (sourcep) { sourcep->user4p(vscp); }
@@ -286,8 +384,9 @@ private:
             AstVarScope* const clsInstp = VN_AS(m_classp->user2p(), VarScope);
             AstVarScope* const srcInstp = VN_AS(scratchpad.classp->user2p(), VarScope);
             // in the initialize function, set this.condVscp = init.condVscp
-            m_initExchangep->addStmtsp(mkCopyOp(condVscp, clsInstp, scratchpad.subst.condInitp,
-                                                VN_AS(m_initClassp->user2p(), VarScope)));
+            AstVarScope* const condVscpInInitClassp = addConditionToInitialClass(condVscp, initInfo);
+            m_initExchangep->addStmtsp(mkCopyOp(condVscp, clsInstp, condVscpInInitClassp, initInfo.instp));
+
             // but also copy from the writer
             m_exchangep->addStmtsp(mkCopyOp(condVscp, clsInstp, scratchpad.subst.condp, srcInstp));
             /// prepare for clone and subst, set user3p to the new Vscp
@@ -354,8 +453,8 @@ private:
         if (classp->user1() == VU_WRITER) {
             UINFO(4, "Visiting writer class " << classp->prettyNameQ() << endl);
             m_classp = classp;
-            // count the times each variable is updated, if cannot determine the count statically,
-            // remove the unpack variable from the scratchpad
+            // count the times each variable is updated, if cannot determine the count
+            // statically, remove the unpack variable from the scratchpad
             { UnpackWriteAnalysisVisitor{classp, m_updates}; }
             // mark the member variables, so that we know we do not need to promote them
             // Perhpas we could also check AstVar::isFuncLocal() instead?
@@ -397,8 +496,8 @@ private:
         const bool lvalue = vrefp->access().isWriteOrRW();
 
         if (!lvalue || !marked(vrefp->varp())) {
-            return;  // we don't care about this ArraySel, does not need optimization or cannot be
-                     // optimized
+            return;  // we don't care about this ArraySel, does not need optimization or cannot
+                     // be optimized
         }
         UnpackUpdate& scratchpad = getScratchpad(vrefp->varp());
         UASSERT_OBJ(scratchpad.numUpdates, vrefp, "no write observed!");
@@ -439,24 +538,7 @@ private:
                 m_nbaFuncp->addStmtsp(assignClearp);
             }
 
-            // initialize it to zero in the initial class, this is used to ensure no write takes
-            // place in the receiver before actually sending from here
-            AstVar* const condVarInitp = condVarp->cloneTree(false);
-            condVarInitp->lifetime(VLifetime::STATIC);
-            condVarInitp->bspFlag({VBspFlag::MEMBER_OUTPUT});
-            AstVarScope* const condInitVscp
-                = new AstVarScope{vrefp->fileline(), m_initComputep->scopep(), condVarInitp};
-            m_initComputep->scopep()->addVarsp(condInitVscp);
-            m_initComputep->scopep()->modp()->addStmtsp(condVarInitp);
-            scratchpad.subst.condInitp = condInitVscp;
-            AstAssign* const initClearp = new AstAssign{
-                vrefp->fileline(), new AstVarRef{vrefp->fileline(), condInitVscp, VAccess::WRITE},
-                new AstConst{vrefp->fileline(), AstConst::WidthedValue{}, condDTypep->width(), 0}};
-            if (m_initComputep->stmtsp()) {
-                m_initComputep->stmtsp()->addHereThisAsNext(initClearp);
-            } else {
-                m_initComputep->addStmtsp(initClearp);
-            }
+
         }
         AstNodeAssign* const parentAssignp = [aselp]() {
             // find the parent statement (should be NodeAssign)
@@ -469,9 +551,9 @@ private:
             return;  // already processed
         }
         parentAssignp->user1(true);
-        // if rhs is not simple varref, make it. Pathologically the rhs could be ArraySel itself,
-        // so we may end up copying the whole array on the rhs if we don't "capture" its selection
-        // here.
+        // if rhs is not simple varref, make it. Pathologically the rhs could be ArraySel
+        // itself, so we may end up copying the whole array on the rhs if we don't "capture"
+        // its selection here.
         if (!VN_IS(parentAssignp->rhsp(), VarRef)) {
             UINFO(4, "Making rhs of assign a varref " << parentAssignp << endl);
             AstVar* rhsVarp = new AstVar{parentAssignp->rhsp()->fileline(), VVarType::MEMBER,
@@ -531,19 +613,6 @@ public:
         AstNode::user2ClearTree();
         AstNode::user3ClearTree();
 
-        // find the compute method in the init class
-        for (AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
-            AstClass* const classp = VN_CAST(nodep, Class);
-            if (classp && classp->flag().isBspInit()) {
-                classp->foreach([&](AstCFunc* funcp) {
-                    if (funcp->name() == "compute") {
-                        m_initComputep = funcp;
-                        m_initClassp = classp;
-                    }
-                });
-            }
-        }
-
         // set userp2 of every AstClass to point to its unique instance at the top scope
         for (AstVarScope* vscp = netlistp->topScopep()->scopep()->varsp(); vscp;
              vscp = VN_AS(vscp->nextp(), VarScope)) {
@@ -565,8 +634,6 @@ public:
 
         UASSERT(m_exchangep, "could not find exchange");
         UASSERT(m_initExchangep, "could not find initialize");
-        UASSERT(m_initComputep, "could not find initial class");
-        UASSERT(m_initClassp, "init class not found");
 
         auto foreachCopyp = [this](auto&& fn) {
             for (AstAssign *copyp = VN_AS(m_exchangep->stmtsp(), Assign), *nextp; copyp;
@@ -607,14 +674,14 @@ public:
                 classp->user1(VU_WRITER);  // mark this class as being a writer
             }
         });
-        // iterate any class marked as VU_WRITER, analyze it to ensure we can determine the number
-        // of writes to the selected unpack variables statically and then sample write conditions
-        // for potential readers
+        // iterate any class marked as VU_WRITER, analyze it to ensure we can determine the
+        // number of writes to the selected unpack variables statically and then sample write
+        // conditions for potential readers
         iterateChildren(netlistp);
 
         // Go through all the copy operations again, clear the writer classes and mark
-        // the readers (a write may also be reader of some other variable, or some variable of its
-        // own).
+        // the readers (a write may also be reader of some other variable, or some variable of
+        // its own).
         foreachCopyp([&](AstAssign* copyp) {
             AstMemberSel* const sourcep = VN_AS(copyp->rhsp(), MemberSel);
             AstMemberSel* const targetp = VN_AS(copyp->lhsp(), MemberSel);
