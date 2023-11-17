@@ -235,7 +235,6 @@ void schedule(AstNetlist* netlistp) {
         // prepartition fibers into IPU devices
         auto devPartitions
             = V3BspIpuDevicePartitioning::partitionFibers(splitGraphsp, deviceModel);
-        V3Stats::statsStage("bspDevicePartitionPreMerge");
         // splitGraphs should be dead, modified by above
         UASSERT(splitGraphsp.size() == 0, "expected empty");
         for (auto& devPart : devPartitions) {
@@ -244,6 +243,7 @@ void schedule(AstNetlist* netlistp) {
             // devPart.fibersp has been "shrunk"
             for (auto& fiberp : devPart.fibersp) { splitGraphsp.emplace_back(std::move(fiberp)); }
         }
+        V3Stats::statsStage("bspDevicePartitionPreMerge");
     } else {
         // do not partition across devices, or do it after merging
         const uint32_t numIpusUsed = deviceModel.numIpusUsed(splitGraphsp.size());
@@ -261,6 +261,7 @@ void schedule(AstNetlist* netlistp) {
                     splitGraphsp.emplace_back(std::move(fiberp));
                 }
             }
+            V3Stats::statsStage("bspDevicePartitionPostMerge");
         }
     }
     // Create a module for each DepGraph. To do this we also need to determine
