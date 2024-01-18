@@ -112,8 +112,8 @@ Like Verilator, the objects are in the `obj_dir` directory. Since we passed `--b
 ./obj_dir/VHelloParendi
 ```
 
-
-
+### Running RocketChip simulations
+COMING SOON
 
 
 ### Running a demo on Paperspace
