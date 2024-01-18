@@ -132,7 +132,7 @@ COMING SOON
 
 ## Unsupported features
 The following features are currently unsupported:
-- C++ test hardness
+- C++ test harness
 - `--timing` is unsupported
 - `UNOPTFLAT` cannot be bypassed with `--poplar`
 - Unpacked structs, classes, queues, and associative arrays
