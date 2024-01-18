@@ -22,12 +22,14 @@ Args = parser.parse_args()
 
 os.chdir(Args.directory)
 
-rev = 'UNKNOWN_REV'
+rev = "UNKNOWN"
 data = os.popen('git describe').read()
+commit = os.popen('git rev-parse --short HEAD').read().strip()
 
 match = re.search(r'^(v[0-9].*)', data)
 if match:
     rev = match.group(1)
+rev = rev + " " + commit
 rev = re.sub('_', '.', rev)
 
 data = os.popen('git status').read()

@@ -183,7 +183,7 @@ private:
         // 1472 tiles)
         std::unique_ptr<kahypar_context_t, std::function<void(kahypar_context_t*)>> kctxp{
             kahypar_context_new(), [](kahypar_context_t* p) { kahypar_context_free(p); }};
-        kahypar_configure_context_from_file(kctxp.get(), (v3Global.opt.getenvVERIPOPLAR_ROOT()
+        kahypar_configure_context_from_file(kctxp.get(), (v3Global.opt.getenvPARENDI_ROOT()
                                                           + "/include/vlpoplar/KaHyParConfig.ini")
                                                              .c_str());
 

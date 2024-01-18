@@ -1,7 +1,7 @@
 
 CXX ?= g++
 POPC ?= popc
-INCLUDES := -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/include/vltstd -I.
+INCLUDES := -I$(PARENDI_ROOT)/include -I$(PARENDI_ROOT)/include/vltstd -I.
 
 LIBS := -lpoplar -lpopops -lpoputil -lboost_program_options
 

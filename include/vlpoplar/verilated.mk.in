@@ -1,6 +1,6 @@
 CXX ?= g++
 POPC ?= popc
-INCLUDES := -I$(VERIPOPLAR_ROOT)/include -I$(VERIPOPLAR_ROOT)/include/vltstd -I.
+INCLUDES := -I$(PARENDI_ROOT)/include -I$(PARENDI_ROOT)/include/vltstd -I.
 LIBS := -lpoplar -lpopops -lpoputil -lpthread
 
 HOST_DEFINES =  \
@@ -85,9 +85,9 @@ IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
 
 
 VERILATOR_CPP =  \
-	$(VERIPOPLAR_ROOT)/include/verilated.cpp \
-	$(VERIPOPLAR_ROOT)/include/verilated_threads.cpp \
-	$(VERIPOPLAR_ROOT)/include/vlpoplar/verilated_poplar_context.cpp
+	$(PARENDI_ROOT)/include/verilated.cpp \
+	$(PARENDI_ROOT)/include/verilated_threads.cpp \
+	$(PARENDI_ROOT)/include/vlpoplar/verilated_poplar_context.cpp
 
 
 HOST_SOURCES += $(USER_CPP)
@@ -120,7 +120,7 @@ endif
 
 all: $(VMAIN)$(BIN_SUFFIX) $(GRAPH_BINARY_DEP)
 
-VlTimeStamp.gp: $(VERIPOPLAR_ROOT)/include/vlpoplar/verilated_timestamp.cpp
+VlTimeStamp.gp: $(PARENDI_ROOT)/include/vlpoplar/verilated_timestamp.cpp
 	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
 
 $(OBJS_GP):%.gp: %.cpp

@@ -442,7 +442,7 @@ void V3Options::ccSet() {  // --cc
     m_outFormatOk = true;
     m_systemC = false;
 }
-void V3Options::poplarSet() { // --poplar
+void V3Options::poplarSet() {  // --poplar
     m_outFormatOk = true;
     m_systemC = false;
     m_poplar = true;
@@ -727,18 +727,13 @@ string V3Options::getenvSYSTEMC_LIBDIR() {
 }
 
 string V3Options::getenvVERILATOR_ROOT() {
-    string var = V3Os::getenvStr("VERILATOR_ROOT", "");
-    if (var == "" && string(DEFENV_VERILATOR_ROOT) != "") {
-        var = DEFENV_VERILATOR_ROOT;
-        V3Os::setenvStr("VERILATOR_ROOT", var, "Hardcoded at build time");
-    }
-    if (var == "") v3fatal("$VERILATOR_ROOT needs to be in environment\n");
-    return var;
+    // Kind of a hack, to get around not ever picking up VERILATOR_ROOT if it is defined.
+    return V3Options::getenvPARENDI_ROOT();
 }
 
-string V3Options::getenvVERIPOPLAR_ROOT() {
-    string var = V3Os::getenvStr("VERIPOPLAR_ROOT", "");
-    if (var == "") v3fatal("$VERIPOPLAR_ROOT needs to be in environment\n");
+string V3Options::getenvPARENDI_ROOT() {
+    string var = V3Os::getenvStr("PARENDI_ROOT", "");
+    if (var == "") v3fatal("$PARENDI_ROOT needs to be in environment\n");
     return var;
 }
 
@@ -1604,24 +1599,25 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-workers", CbVal, [this, fl](const char* valp) {
         m_workers = std::atoi(valp);
         if (m_workers <= 0) fl->v3fatal("--workers should be >= 0: " << valp);
-        if (m_workers > 6) fl->v3warn(UNOPT, "suboptimal parallel performance with --worker > 6: " << valp);
+        if (m_workers > 6)
+            fl->v3warn(UNOPT, "suboptimal parallel performance with --worker > 6: " << valp);
     });
-    DECL_OPTION("-max-unpack-copies", CbVal, [this](const char* valp){
-        m_maxUnpackCopies = std::atoi(valp);
-    });
-    DECL_OPTION("-diff-exchange-threshold", CbVal, [this](const char* valp) {
-        m_diffExchangeThreshold = std::atoi(valp);
-    });
+    DECL_OPTION("-max-unpack-copies", CbVal,
+                [this](const char* valp) { m_maxUnpackCopies = std::atoi(valp); });
+    DECL_OPTION("-diff-exchange-threshold", CbVal,
+                [this](const char* valp) { m_diffExchangeThreshold = std::atoi(valp); });
     DECL_OPTION("-resync-threshold", CbVal, [this, fl](const char* valp) {
         m_resyncThreshold = std::atof(valp);
         if (m_resyncThreshold > 1.0 || m_resyncThreshold < 0.0) {
-            fl->v3fatal("--resync-threshold should be >= 0.0 and =< 1.0 but was given " << valp << endl);
+            fl->v3fatal("--resync-threshold should be >= 0.0 and =< 1.0 but was given " << valp
+                                                                                        << endl);
         }
     });
     DECL_OPTION("-kahypar-imbalance", CbVal, [this, fl](const char* valp) {
         m_kahyparImbalance = std::atof(valp);
         if (m_kahyparImbalance > 1.0 || m_kahyparImbalance < 0.0) {
-            fl->v3fatal("--kahypar-imbalance should be >= 0.0 and <= 1.0 but was given " << valp << endl);
+            fl->v3fatal("--kahypar-imbalance should be >= 0.0 and <= 1.0 but was given " << valp
+                                                                                         << endl);
         }
     });
     DECL_OPTION("-tiles-per-ipu", CbVal, [this, fl](const char* valp) {
@@ -1701,11 +1697,11 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-ipu-merge-strategy", CbVal, [this, fl](const char* valp) {
         m_ipuMergeStrategy.setFrom(valp);
         if (!m_ipuMergeStrategy.valid()) {
-            fl->v3fatal("Invalid merge strategy \"" << valp
-                << "\"! Strategies can be " << V3IpuMergeStrategyOption::list() << endl);
+            fl->v3fatal("Invalid merge strategy \"" << valp << "\"! Strategies can be "
+                                                    << V3IpuMergeStrategyOption::list() << endl);
         }
     });
-    DECL_OPTION("-ipu-merge-threshold", CbVal, [this, fl](const char* valp){
+    DECL_OPTION("-ipu-merge-threshold", CbVal, [this, fl](const char* valp) {
         float th = std::atof(valp);
         m_ipuMergeStrategy.threshold(th);
     });

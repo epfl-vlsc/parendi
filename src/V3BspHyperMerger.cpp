@@ -180,7 +180,7 @@ private:
         kahypar_context_t* kcontextp = kahypar_context_new();
         kahypar_configure_context_from_file(
             kcontextp,
-            (v3Global.opt.getenvVERIPOPLAR_ROOT() + "/include/vlpoplar/KaHyParConfigMerge.ini")
+            (v3Global.opt.getenvPARENDI_ROOT() + "/include/vlpoplar/KaHyParConfigMerge.ini")
                 .c_str());
         const double imbalance = 0.03;
         const HyperNodeId numNodes = hyperNodeWeights.size();

@@ -50,7 +50,7 @@ public:
                                            + EmitCBaseVisitor::topClassName() + ".mk"};
 
         ofp->puts("# Generated Makefile \n");
-        ofp->puts("VERIPOPLAR_ROOT ?= " + v3Global.opt.getenvVERIPOPLAR_ROOT() + "\n\n");
+        ofp->puts("PARENDI_ROOT ?= " + v3Global.opt.getenvPARENDI_ROOT() + "\n\n");
 
         ofp->puts("CODELETS =  \\\n");
         iterateCFiles([](AstCFile* cfilep) { return cfilep->codelet() || cfilep->constPool(); },
@@ -66,7 +66,7 @@ public:
                       });
         ofp->puts("\n");
         ofp->puts("\n");
-       
+
         ofp->puts("USER_CPP = \\\n");
         for (const auto& cpp : v3Global.opt.cppFiles()) { ofp->puts("\t" + cpp + "\\\n"); }
         string graphFile
@@ -79,7 +79,7 @@ public:
         ofp->puts("TILES_USED := " + cvtToStr(v3Global.opt.tiles()) + "\n");
         ofp->puts("WORKERS_USED := " + cvtToStr(v3Global.opt.workers()) + "\n");
         ofp->puts("\n");
-        ofp->puts("include $(VERIPOPLAR_ROOT)/include/vlpoplar/verilated.mk\n");
+        ofp->puts("include $(PARENDI_ROOT)/include/vlpoplar/verilated.mk\n");
 
         // ofp->puts("HOST_SOURCES += $(USER_CPP)\n");
         // ofp->puts("OBJS_HOST = $(HOST_SOURCES:cpp=o)\n");
