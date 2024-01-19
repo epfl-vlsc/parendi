@@ -1,7 +1,7 @@
 
 <head>
     <h1 align='center'>
-    <img src="docs/image/logo_flat.svg", width='640', align='middle', hover='Parendi'><br/>
+    <img src="docs/image/logo_flat.png", width='640', align='middle', hover='Parendi'><br/>
     Thousand-way Parallel RTL Simulation
     </h1>
 </head>
