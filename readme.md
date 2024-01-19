@@ -21,7 +21,8 @@ The primary audience for Parendi right is researchers working on parallel RTL si
 ## Requirements
 
 #### Hardware
-To get something running, you would need access to an IPU. Currently, [Paperspace](https://gcore.com) offers 4 hours of free IPU usage; that's more than enough to try things out, but for long-running simulations experiments or development, you may need to rent one (e.g., from [GCore](https://gcore.com)).
+To get something running, you would need access to an IPU. Currently, [Paperspace](https://gcore.com) offers 6 hours of free IPU usage; that's more than enough to try things out, but for long-running simulations experiments or development, you may need to rent one (e.g., from [GCore](https://gcore.com)).
+There is link to the Paperspace demo [below](#running-a-demo-on-paperspace).
 
 #### Software
 
@@ -118,12 +119,9 @@ Like Verilator, the objects are in the `obj_dir` directory. Since we passed `--b
 ./obj_dir/VHelloParendi
 ```
 
-### Running RocketChip simulations
-COMING SOON
-
 
 ### Running a demo on Paperspace
-COMING SOON
+For in easy to run demo in the cloud (free for now) [follow this guide](https://github.com/epfl-vlsc/parendi-paperspace-demo).
 
 
 ### Running 5888-core simulation on GCore
