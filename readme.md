@@ -121,7 +121,7 @@ Like Verilator, the objects are in the `obj_dir` directory. Since we passed `--b
 
 
 ### Running a demo on Paperspace
-For in easy to run demo in the cloud (free for now) [follow this guide](https://github.com/epfl-vlsc/parendi-paperspace-demo).
+For an easy-to-run demo in the cloud (free for now) [follow this guide](https://github.com/epfl-vlsc/parendi-paperspace-demo).
 
 
 ### Running 5888-core simulation on GCore
