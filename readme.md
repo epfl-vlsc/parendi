@@ -1,6 +1,12 @@
-# Parendi: Thousand-way Parallel RTL Simulation on the Graphcore IPU
 
-Parendi is a parallel RTL simulator for research on the [Graphcore IPU](https://www.graphcore.ai). It can parallelize RTL simulation of large SoCs (hundreds of cores) to up to 5888 IPU cores.
+<head>
+    <h1 align='center'>
+    <img src="docs/image/logo_flat.svg", width='320', align='middle', hover='Parendi'><br/>
+    Thousand-way Parallel RTL Simulation
+    </h1>
+</head>
+
+Parendi is a thousand-way parallel RTL simulator for research on the [Graphcore IPU](https://www.graphcore.ai). It can parallelize RTL simulation of large SoCs (hundreds of cores) to up to 5888 IPU cores.
 
 Parendi is built on [Verilator](https://www.veripool.org/verilator) and uses much of its facility but has its new partitioning, optimizations, and code generation passes.
 Parendi can be viewed as an extension to Verilator that on top of generating C++ (`--cc`), SystemC (`--sc`), can now generate code that is compiled with Graphcores's [Poplar](https://docs.graphcore.ai/en/latest/child-pages/poplar.html#poplar) SDK (`--poplar`).
