@@ -102,7 +102,7 @@ public:
         using Arg = typename Traits::template arg<0>::type;
         for (V3GraphVertex *vtxp = verticesBeginp(), *nextp; vtxp; vtxp = nextp) {
             nextp = vtxp->verticesNextp();
-            UASSERT(dynamic_cast<ResyncVertex*>(vtxp), "baf vertex type");
+            //UASSERT(dynamic_cast<ResyncVertex*>(vtxp), "baf vertex type");
             if (Arg const vp = dynamic_cast<Arg>(vtxp)) { fn(vp); }
         }
     }

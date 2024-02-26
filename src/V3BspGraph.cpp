@@ -445,13 +445,12 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
 
 //==============================================================================
 // Data structure for creating disjoint sets, not very optimized for performance..
-template <class Key, class Hash = std::hash<Key>, class KeyEqual = std::equal_to<Key>,
-          class Allocator = std::allocator<Key>>
+template <class Key, class Hash = std::hash<Key>, class KeyEqual = std::equal_to<Key>>
 class DisjointSets {
 private:
-    using SetType = std::unordered_set<Key, Hash, KeyEqual, Allocator>;
-    using MapType = std::unordered_map<Key, SetType, Hash, KeyEqual, Allocator>;
-    using LookupType = std::unordered_map<Key, Key, Hash, KeyEqual, Allocator>;
+    using SetType = std::unordered_set<Key, Hash, KeyEqual>;
+    using MapType = std::unordered_map<Key, SetType, Hash, KeyEqual>;
+    using LookupType = std::unordered_map<Key, Key, Hash, KeyEqual>;
 
     MapType m_sets;
     LookupType m_rep;
