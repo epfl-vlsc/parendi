@@ -1099,7 +1099,7 @@ public:
             puts(")");
         }
     }
-    void visit(AstPredicatedStmt* nodep) {
+    void visit(AstPredicatedStmt* nodep) override {
         puts("/*predicated*/if (");
         iterateAndNextConstNull(nodep->condp());
         puts("){\n");

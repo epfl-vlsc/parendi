@@ -47,9 +47,7 @@ struct UnpackUpdate {
 
     UnpackUpdate(AstClass* const clsp, AstUnpackArrayDType* const tp)
         : classp{clsp}
-        , dtypep{tp}
-        , numUpdates{0}
-        , diffCost{0} {}
+        , dtypep{tp} {}
     operator bool() const { return (classp != nullptr && dtypep != nullptr); }
 };
 
@@ -107,7 +105,7 @@ private:
             }
         }
     }
-    void visit(AstNodeVarRef* vrefp) {
+    void visit(AstNodeVarRef* vrefp) override {
         AstVar* const varp = vrefp->varp();
         if (vrefp->access().isWriteOrRW() && m_updates.count(varp)) {
             // unpack variable is being updated as a whole, cannot do diff exchange

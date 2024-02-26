@@ -1140,7 +1140,7 @@ private:
     void applySubst(AstNode* nodep) { iterateChildren(nodep); }
 
     // substitute reference with what's in user1p
-    void visit(AstNodeVarRef* vrefp) {
+    void visit(AstNodeVarRef* vrefp) override {
         AstVarScope* const oldVscp = vrefp->varScopep();
         AstVarScope* const newVscp = LocalSubst::get(oldVscp);
         if (!newVscp) { return; }
