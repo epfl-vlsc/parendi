@@ -1,0 +1,149 @@
+CXX ?= g++
+POPC ?= popc
+INCLUDES := -I$(PARENDI_ROOT)/include -I$(PARENDI_ROOT)/include/vltstd -I/opt/homebrew/include/ -I.
+LIBS :=
+
+HOST_DEFINES =  \
+	-DVPROGRAM="$(VMAIN_ROOT)" \
+	-DVPROGRAM_HEADER="\"$(VMAIN_ROOT).h\"" \
+	-DROOT_NAME="\"$(VMAIN_ROOT)\""\
+	-DCODELET_LIST="\"$(VMAIN_ROOT).list\""\
+	-DOBJ_DIR="\"$(OBJ_DIR)\""
+
+VL_IPU_TRACE_BUFFER_SIZE ?= 1024
+
+HOST_FLAGS = --std=c++17 -g $(INCLUDES) $(HOST_DEFINES) \
+				-Wno-parentheses-equality -DVL_IPU_TRACE_BUFFER_SIZE=$(VL_IPU_TRACE_BUFFER_SIZE)
+
+HOST_FLAGS += -DVL_NUM_TILES_USED=$(TILES_USED)
+HOST_FLAGS += -DVL_NUM_WORKERS_USED=$(WORKERS_USED)
+
+# Schedule optimization flags add --X-mllvm -X--Ot to ensure min cycle count, but may run out of instruction memory.
+# --enable-misched            - Enable the machine instruction scheduling pass.
+# --misched=<value>           - Machine instruction scheduler to use
+#     =default                    -   Use the target's default scheduler choice.
+#     =converge                   -   Standard converging scheduler.
+#     =ilpmax                     -   Schedule bottom-up for max ILP
+#     =ilpmin                     -   Schedule bottom-up for min ILP
+# --misched-bottomup          - Force bottom-up list scheduling
+# --misched-cluster           - Enable memop clustering.
+# --misched-cyclicpath        - Enable cyclic critical path analysis.
+# --misched-dcpl              - Print critical path length to stdout
+# --misched-fusion            - Enable scheduling for macro fusion.
+# --misched-limit=<uint>      - Limit ready list to N instructions
+# --misched-postra            - Run MachineScheduler post regalloc (independent of preRA sched)
+# --misched-regpressure       - Enable register pressure scheduling.
+# --misched-topdown           - Force top-down list scheduling
+# --post-RA-scheduler                                             - Enable scheduling after register allocation
+# --postra-sched-debugdiv=<int>                                   - Debug control MBBs that are scheduled
+# --postra-sched-debugmod=<int>                                   - Debug control MBBs that are scheduled
+# --pragma-unroll-and-jam-threshold=<uint>                        - Unrolled size limit for loops with an unroll_and_jam(full) or unroll_count pragma.
+# --pragma-unroll-threshold=<uint>                                - Unrolled size limit for loops with an unroll(full) or unroll_count pragma.
+# --pragma-vectorize-memory-check-threshold=<uint>                - The maximum allowed number of runtime memory checks with a vectorize(enable) pragma.
+# --pragma-vectorize-scev-check-threshold=<uint>                  - The maximum number of SCEV checks allowed with a vectorize(enable) pragma
+# --pre-RA-sched=<value>                                          - Instruction schedulers available (before register allocation):
+# 	=default                                                      -   Best scheduler for the target
+# 	=fast                                                         -   Fast suboptimal list scheduling
+# 	=linearize                                                    -   Linearize DAG, no scheduling
+# 	=list-burr                                                    -   Bottom-up register reduction list scheduling
+# 	=source                                                       -   Similar to list-burr but schedules in source order when possible
+# 	=list-hybrid                                                  -   Bottom-up register pressure aware list scheduling which tries to balance latency and register pressure
+# 	=list-ilp                                                     -   Bottom-up register pressure aware list scheduling which tries to balance ILP and register pressure
+# 	=vliw-td                                                      -   VLIW scheduler
+# --enable-post-misched                       - Enable the post-ra machine instruction scheduling pass.
+
+
+SCHED_OPT ?= 0 # enables padding with nops, use it for small design for about 16% improvement but fails compilaiton of large
+
+IPU_SCHED_FLAGS := \
+	-X-mllvm -X--misched=ilpmin		    \
+	-X-mllvm -X--enable-misched         \
+	-X-mllvm -X--enable-post-misched    \
+	-X-mllvm -X--pre-RA-sched=list-burr \
+	-X-mllvm -X--post-RA-scheduler      \
+	-X-mllvm -X--verify-misched         \
+	-X-mllvm -X--misched-regpressure    \
+	-X-mllvm -X--misched-bottomup	    \
+	-X-mllvm -X--misched-cluster
+
+ifeq ($(SCHED_OPT), 1)
+IPU_SCHED_FLAGS :=                     	  \
+	-X-mllvm -X--Ot 			       	  \
+	$(IPU_SCHED_FLAGS)
+endif
+
+
+
+IPU_FLAGS := -O3 $(INCLUDES) -Wno-parentheses-equality \
+	-X-finline-functions \
+	-X-finline-hint-functions \
+	-X-fno-builtin-memset \
+	-X-fno-builtin-memcpy \
+	-X-funroll-loops \
+	$(IPU_SCHED_FLAGS) \
+	-DVL_IPU_TRACE_BUFFER_SIZE=$(VL_IPU_TRACE_BUFFER_SIZE)
+
+
+VERILATOR_CPP =  \
+	$(PARENDI_ROOT)/include/verilated.cpp \
+	$(PARENDI_ROOT)/include/verilated_threads.cpp \
+	$(PARENDI_ROOT)/include/vlopenmp/verilated_openmp_context.cpp
+
+
+HOST_SOURCES += $(USER_CPP)
+OBJS_HOST = $(HOST_SOURCES:cpp=o)
+OBJS_GP = $(CODELETS:cpp=gp)
+OBJS_S = $(CODELETS:cpp=s)
+
+BIN_SUFFIX :=
+INSTRUMENT ?= 0
+ifneq ($(INSTRUMENT), 0)
+HOST_FLAGS += -DPOPLAR_INSTRUMENT
+BIN_SUFFIX := POPLAR_INSTRUMENT
+endif
+
+VL_INSTRUMENT ?= 0
+ifneq ($(VL_INSTRUMENT), 0)
+HOST_FLAGS += -DVL_INSTRUMENT
+BIN_SUFFIX := VL_INSTRUMENT
+endif
+
+GRAPH_COMPILE_FLAGS = -DGRAPH_COMPILE
+GRAPH_RUN_FLAGS = -DGRAPH_RUN
+GRAPH_BINARY_DEP = $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX)
+PRECOMPILE ?= 1
+ifeq ($(PRECOMPILE), 0)
+GRAPH_RUN_FLAGS += -DGRAPH_COMPILE
+GRAPH_BINARY_DEP =
+endif
+
+
+all: $(VMAIN)$(BIN_SUFFIX) $(GRAPH_BINARY_DEP)
+
+VlTimeStamp.gp: $(PARENDI_ROOT)/include/vlopenmp/verilated_timestamp.cpp
+	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
+
+$(OBJS_GP):%.gp: %.cpp
+	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
+$(OBJS_S):%.s: %.cpp
+	$(POPC) $^ $(IPU_FLAGS) -S --target ipu2 -o $@
+
+assembly: $(OBJS_S)
+vertex: $(OBJ_GP)
+
+$(OBJS_HOST):%.o: %.cpp
+	$(CXX) $^ -c $(HOST_FLAGS) $(LIBS) -o $@
+
+$(VMAIN)_objects: $(OBJS_HOST) $(OBJS_GP)
+
+$(VMAIN)_graph_compiler$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) VlTimeStamp.gp
+	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) -o $@
+$(VMAIN_ROOT).graph.bin$(BIN_SUFFIX): $(VMAIN)_graph_compiler$(BIN_SUFFIX)
+	./$< $(GRAPH_FLAGS)
+$(VMAIN)$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
+	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_RUN_FLAGS) -o $@
+
+clean_main:
+	rm -f $(VMAIN)$(BIN_SUFFIX) $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX) $(VMAIN)_graph_compiler$(BIN_SUFFIX) VlTimeStamp.gp
+clean:
+	rm -rf *.o *.gp *.s report *.graph.bin VMain VMain_graph_compiler

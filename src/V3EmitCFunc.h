@@ -549,7 +549,7 @@ public:
         displayNode(nodep, nodep->fmtp()->scopeNamep(), text, nodep->fmtp()->exprsp(), false);
     }
     void visit(AstDelegate* nodep) override {
-        UASSERT(v3Global.opt.poplar(), "Invalid node type " << nodep << endl);
+        UASSERT((v3Global.opt.openmp()) || (v3Global.opt.poplar()), "Invalid node type " << nodep << endl);
         puts("/* DELEGATED function from ");
         puts(nodep->fileline()->ascii());
         puts(" ");

@@ -438,7 +438,7 @@ private:
 
         // compute the duplicatation instruction count between the two core
         uint32_t dupCostCommon = 0;
-        if (!v3Global.opt.ipuMergeStrategy().ignoreDupCost()) {
+        if (!v3Global.opt.BspMergeStrategy().ignoreDupCost()) {
             VlBitSet dupInCommon = VlBitSet::doIntersect(core1p->dupSet(), core2p->dupSet());
             dupInCommon.foreach([&](size_t dupIx) { dupCostCommon += m_dupInstrCount[dupIx]; });
         }
@@ -567,10 +567,10 @@ private:
 
         CostType worstCost = coreCost.back();
 
-        worstCost = worstCost.percentile(v3Global.opt.ipuMergeStrategy().threshold());
+        worstCost = worstCost.percentile(v3Global.opt.BspMergeStrategy().threshold());
         UINFO(3, "Max permissible cost is "
                      << worstCost << " and the max absolute cost is " << coreCost.back()
-                     << "(threshold = " << v3Global.opt.ipuMergeStrategy().threshold() << ")"
+                     << "(threshold = " << v3Global.opt.BspMergeStrategy().threshold() << ")"
                      << endl);
         if (!(worstCost > CostType::zero())) {
             UINFO(3, "Conservative merge is not possible" << endl);
@@ -623,7 +623,7 @@ private:
                 costWithNext = costAfterMerge(corep, secondMinNodep->key().corep);
             }
             // allow mergin below the desired core count if the user wants it.
-            didSomething = v3Global.opt.ipuMergeStrategy().minimizeTileCount();
+            didSomething = v3Global.opt.BspMergeStrategy().minimizeTileCount();
             if (bestNeighbor && isFeasible(bestCost)) {
                 // found a neighbor, merge it
                 UINFO(8, "Merging with neighbor: " << bestCost << endl);
@@ -1010,14 +1010,14 @@ public:
         buildMultiCoreGraph(partitionsp);
         uint32_t numMergesConservative = 0;
         uint32_t numMergesForced = 0;
-        if (v3Global.opt.ipuMergeStrategy().topDown()) {
+        if (v3Global.opt.BspMergeStrategy().topDown()) {
             UINFO(3, "TopDown merge" << endl);
             numMergesForced = mergeLongestProcessingTimeFirst();
-        } else if (v3Global.opt.ipuMergeStrategy().bottomUpTopDown()) {
+        } else if (v3Global.opt.BspMergeStrategy().bottomUpTopDown()) {
             UINFO(3, "BottomUpTopDown merge " << endl);
             numMergesConservative = mergeConservatively();
             numMergesForced = mergeLongestProcessingTimeFirst();
-        } else if (v3Global.opt.ipuMergeStrategy().bottomUp()) {
+        } else if (v3Global.opt.BspMergeStrategy().bottomUp()) {
             UINFO(3, "BottomUp merge " << endl);
             numMergesConservative = mergeConservatively();
             numMergesForced = mergeForced();

@@ -43,3 +43,6 @@ verilator-config-version.cmake
 /.vscode/
 build
 temp
+BC
+openmpmodel
+hello_parendi.v

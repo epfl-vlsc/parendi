@@ -169,7 +169,7 @@ private:
         for (HyperNodeId id = 0; id < depGraphsp.size(); id++) {
 
             UASSERT(nodeDupCost[id] >= nodeDupCostNorm[id], "non-positive hypernode weight!");
-            if (v3Global.opt.ipuMergeStrategy().ignoreDupCost()) {
+            if (v3Global.opt.BspMergeStrategy().ignoreDupCost()) {
                 hyperNodeWeights[id] = nodeCost[id];
             } else {
                 hyperNodeWeights[id] = nodeCost[id] - nodeDupCost[id] + nodeDupCostNorm[id];

@@ -31,7 +31,6 @@ bool AstNode::width1() const {  // V3Const uses to know it can optimize
     return dtypep() && dtypep()->width() == 1;
 }
 int AstNode::widthInstrs() const {
-
     return (!dtypep() ? 1 :
             (dtypep()->isWide() ? dtypep()->widthWords() :
                 dtypep()->isQuad() && v3Global.opt.poplar() ? 2 : 1));

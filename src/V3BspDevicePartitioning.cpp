@@ -17,7 +17,7 @@
 #include "config_build.h"
 #include "verilatedos.h"
 
-#include "V3BspIpuDevicePartitioning.h"
+#include "V3BspDevicePartitioning.h"
 
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
@@ -37,7 +37,7 @@ namespace V3BspSched {
 namespace {
 
 static inline std::vector<kahypar_hypernode_weight_t>
-fiberCountPerDevice(const IpuDevModel& devModel, std::size_t numFibers) {
+fiberCountPerDevice(const DevModel& devModel, std::size_t numFibers) {
 
     UASSERT(numFibers <= static_cast<std::size_t>(
                 std::numeric_limits<kahypar_hypernode_weight_t>::max()),
@@ -66,7 +66,7 @@ fiberCountPerDevice(const IpuDevModel& devModel, std::size_t numFibers) {
 }
 class DevicePartitionPreFiberMerge final {
 private:
-    const IpuDevModel& m_devModel;
+    const DevModel& m_devModel;
 
     struct HyperEdgeMetaData {
         static constexpr kahypar_hypernode_id_t InvalidId
@@ -139,7 +139,7 @@ private:
         for (const auto w : nodeWeights) { *ofs << w << std::endl; }
         ofs->close();
     }
-    std::vector<V3BspIpuDevicePartitioning::PartitionResult>
+    std::vector<V3BspDevicePartitioning::PartitionResult>
     go(std::vector<std::unique_ptr<DepGraph>>& fibersp) {
 
         AstNode::user1ClearTree();
@@ -222,7 +222,7 @@ private:
         V3Stats::addStat("IPU partitioning, hyperedges ", numEdges);
         V3Stats::addStat("IPU partitioning, hypernodes ", numNodes);
 
-        std::vector<V3BspIpuDevicePartitioning::PartitionResult> resultsp;
+        std::vector<V3BspDevicePartitioning::PartitionResult> resultsp;
         auto usableTiles = m_devModel.usableTilesPerDevice();
         for (int i = 0; i < numDevices; i++) {
             UINFO(10, "IPU " << i << " usable tiles " << usableTiles[i] << endl);
@@ -242,11 +242,11 @@ private:
     }
 
 public:
-    inline std::vector<V3BspIpuDevicePartitioning::PartitionResult>
+    inline std::vector<V3BspDevicePartitioning::PartitionResult>
     operator()(std::vector<std::unique_ptr<DepGraph>>& fibersp) {
         return go(fibersp);
     }
-    explicit DevicePartitionPreFiberMerge(const IpuDevModel& devModel)
+    explicit DevicePartitionPreFiberMerge(const DevModel& devModel)
         : m_devModel{devModel} {}
 };
 
@@ -254,14 +254,15 @@ public:
 class IpuLinearPlacement final {
 private:
     // AstNetlist* const m_netlistp;
-    const IpuDevModel m_devModel;
+    const DevModel m_devModel;
     // std::vector<AstClass*> m_computeClassesp;
     // std::vector<AstClass*> m_controlOrInitClassesp;
+
     void setLocationLinearlySingleIpu(const std::vector<AstClass*> classesp) {
         uint32_t tileId = 0;
         uint32_t workerId = 0;
         for (AstClass* classp : classesp) {
-            if (tileId == std::min(m_devModel.numAvailTiles, m_devModel.numTilesPerIpu)) {
+            if (tileId == std::min(m_devModel.numAvailTiles(), m_devModel.numTilesPerIpu())) {
                 workerId++;
                 tileId = 0;
             }
@@ -270,20 +271,20 @@ private:
             tileId++;
         }
     }
-    void setLocationsLinearlyMultiIpu(const std::vector<AstClass*> classesp) {
 
+    void setLocationsLinearlyMultiIpu(const std::vector<AstClass*> classesp) {
         // get the number of tiles (vertices) per each device
         const std::vector<uint32_t> tilesInEachDevice = m_devModel.usableTilesPerDevice();
         UINFO(3, "Linearly mapping " << classesp.size() << " BSP classes to tiles and workers."
                                      << "(Target device)" << endl
-                                     << " # workers: " << m_devModel.numAvailWorkers
-                                     << " # tiles: " << m_devModel.numAvailTiles
-                                     << " # tiles per device: " << m_devModel.numTilesPerIpu
+                                     << " # workers: " << m_devModel.numAvailWorkers()
+                                     << " # tiles: " << m_devModel.numAvailTiles()
+                                     << " # tiles per device: " << m_devModel.numTilesPerIpu()
                                      << endl);
         std::vector<uint32_t> maxClassesInEachDevice;
         std::transform(tilesInEachDevice.begin(), tilesInEachDevice.end(),
                        std::back_inserter(maxClassesInEachDevice),
-                       [this](uint32_t s) { return s * m_devModel.numAvailWorkers; });
+                       [this](uint32_t s) { return s * m_devModel.numAvailWorkers(); });
         if (debug() >= 3) {
             for (int i = 0; i < tilesInEachDevice.size(); i++) {
                 UINFO(3, "Usable tiles/workers on device " << i << ": " << tilesInEachDevice[i]
@@ -293,13 +294,13 @@ private:
         }
         uint32_t totalCapacity
             = std::accumulate(maxClassesInEachDevice.begin(), maxClassesInEachDevice.end(), 0);
-        UASSERT(totalCapacity * m_devModel.numAvailWorkers >= classesp.size(),
+        UASSERT(totalCapacity * m_devModel.numAvailWorkers() >= classesp.size(),
                 "not enough device capacity!" << totalCapacity << " < " << classesp.size()
                                               << endl);
 
         auto assignIds = [&](const uint32_t beginIndex, const uint32_t endIndex,
                              const uint32_t deviceId) {
-            const uint32_t tileOffset = deviceId * m_devModel.numTilesPerIpu;
+            const uint32_t tileOffset = deviceId * m_devModel.numTilesPerIpu();
             const uint32_t minTileId = maxClassesInEachDevice.size() > 1 ? 1 : 0;
             const uint32_t maxTiles = tilesInEachDevice[deviceId] + minTileId;
             uint32_t tileId = minTileId;
@@ -336,9 +337,11 @@ private:
             beginIndex += maxClassesInEachDevice[deviceId];
         }
     }
+
     inline void promote(AstClass* classp) {
         classp->flag(classp->flag().append(VClassFlag::BSP_SUPERVISOR));
     }
+    
     void tryPromoteAll(const std::vector<AstClass*> classesp) {
         uint32_t maxWokerId = 0;
         for (const AstClass* classp : classesp) {
@@ -350,7 +353,7 @@ private:
     }
 
 public:
-    explicit IpuLinearPlacement(AstNetlist* netlistp, const IpuDevModel& devModel)
+    explicit IpuLinearPlacement(AstNetlist* netlistp, const DevModel& devModel)
         : m_devModel{devModel} {
 
         std::vector<AstClass*> unplaced;
@@ -377,22 +380,22 @@ public:
 };
 }  // namespace
 
-std::vector<V3BspIpuDevicePartitioning::PartitionResult>
-V3BspIpuDevicePartitioning::partitionFibers(std::vector<std::unique_ptr<DepGraph>>& fibersp,
-                                            const IpuDevModel& devModel) {
+std::vector<V3BspDevicePartitioning::PartitionResult>
+V3BspDevicePartitioning::partitionFibers(std::vector<std::unique_ptr<DepGraph>>& fibersp,
+                                            const DevModel& devModel) {
     UASSERT(fibersp.size() < std::numeric_limits<uint32_t>::max(),
             "Too many fibers " << fibersp.size() << " max supported is "
                                << std::numeric_limits<uint32_t>::max() << endl);
-    UINFO(3, "#fiber= " << fibersp.size() << " #tile=" << devModel.numAvailTiles
-                        << " #worker=" << devModel.numAvailWorkers
-                        << " #ipuTiles=" << devModel.numTilesPerIpu << endl);
+    UINFO(3, "#fiber= " << fibersp.size() << " #tile=" << devModel.numAvailTiles()
+                        << " #worker=" << devModel.numAvailWorkers()
+                        << " #ipuTiles=" << devModel.numTilesPerIpu() << endl);
     uint32_t numFibersPostMerge = std::min(static_cast<uint32_t>(fibersp.size()),
-                                           devModel.numAvailTiles * devModel.numAvailWorkers);
-    if (devModel.numTilesPerIpu * devModel.numAvailWorkers >= numFibersPostMerge) {
+                                           devModel.numAvailTiles() * devModel.numAvailWorkers());
+    if (devModel.numTilesPerIpu() * devModel.numAvailWorkers() >= numFibersPostMerge) {
         // a single IPU can hold all the fibers
         UINFO(3, "A single IPU is enough--skipping device partitioning" << endl);
         std::vector<PartitionResult> res;
-        res.emplace_back(devModel.numAvailTiles);
+        res.emplace_back(devModel.numAvailTiles());
         res.back().fibersp = std::move(fibersp);
         return res;
     }
@@ -400,7 +403,7 @@ V3BspIpuDevicePartitioning::partitionFibers(std::vector<std::unique_ptr<DepGraph
     V3Stats::statsStage("ipuPartitioning");
 }
 
-void V3BspIpuPlace::placeAll(AstNetlist* nodep, const IpuDevModel& devModel) {
+void V3BspIpuPlace::placeAll(AstNetlist* nodep, const DevModel& devModel) {
     IpuLinearPlacement{nodep, devModel};
 }
 }  // namespace V3BspSched

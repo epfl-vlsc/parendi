@@ -1,7 +1,7 @@
 
 // -*- mode: C++; c-file-style: "cc-mode" -*-
 //*************************************************************************
-// DESCRIPTION: Verilator: IPU cost model (generated)
+// DESCRIPTION: Verilator: CPU cost model (generated)
 //
 // Code available from: https://verilator.org
 //
@@ -15,8 +15,8 @@
 //
 //*************************************************************************
 //
-#ifndef VERILATOR_V3BSPIPUCOSTMODEL_H_
-#define VERILATOR_V3BSPIPUCOSTMODEL_H_
+#ifndef VERILATOR_V3BSPCPUCOSTMODEL_H_
+#define VERILATOR_V3BSPCPUCOSTMODEL_H_
 #include "config_build.h"
 #include "verilatedos.h"
 
@@ -30,12 +30,12 @@ public:
     }
 };
 namespace {
-class IpuCostModelGen final : public VNVisitor {
+class CpuCostModelGen final : public VNVisitor {
 public:
     int m_count = 0;
     bool m_found = true;
     const bool m_useMean;
-    explicit IpuCostModelGen(AstNode* nodep, bool useMean = false)
+    explicit CpuCostModelGen(AstNode* nodep, bool useMean = false)
         : m_useMean{useMean} {
         iterate(nodep);
     }
@@ -725,7 +725,7 @@ private:
 };
 }  // namespace
 std::pair<int, bool> IpuCostModelLinReg::tryEstimate(AstNode* nodep, bool useMean) {
-    IpuCostModelGen c{nodep, useMean};
+    CpuCostModelGen c{nodep, useMean};
     return {c.m_count, c.m_found};
 }
 #endif

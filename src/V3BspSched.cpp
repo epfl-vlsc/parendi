@@ -74,9 +74,9 @@
 
 // reuse some code from V3Sched
 #include "V3Ast.h"
+#include "V3BspDevicePartitioning.h"
 #include "V3BspGraph.h"
 #include "V3BspHyperMerger.h"
-#include "V3BspIpuDevicePartitioning.h"
 #include "V3BspMerger.h"
 #include "V3BspModules.h"
 #include "V3BspResync.h"
@@ -222,24 +222,23 @@ void schedule(AstNetlist* netlistp) {
 
     auto performPartitionMerge = [](std::vector<std::unique_ptr<DepGraph>>& graphsp,
                                     uint32_t numTiles, uint32_t numWorkers) {
-        if (v3Global.opt.ipuMergeStrategy().hypergraph()) {
-
+        if (v3Global.opt.BspMergeStrategy().hypergraph()) {
             V3BspHyperMerger::mergeAll(graphsp, numTiles, numWorkers);
         } else {
             V3BspMerger::mergeAll(graphsp, numTiles, numWorkers);
         }
         V3Stats::statsStage("bspMerge");
     };
-    auto deviceModel = IpuDevModel::instance();
+    DevModel& deviceModel
+        = v3Global.opt.poplar() ? IpuDevModel::instance() : CpuDevModel::instance();
     if (v3Global.opt.fInterIpuComm() && v3Global.opt.fPreMergeIpuPartition()) {
         // prepartition fibers into IPU devices
-        auto devPartitions
-            = V3BspIpuDevicePartitioning::partitionFibers(splitGraphsp, deviceModel);
+        auto devPartitions = V3BspDevicePartitioning::partitionFibers(splitGraphsp, deviceModel);
         // splitGraphs should be dead, modified by above
         UASSERT(splitGraphsp.size() == 0, "expected empty");
         for (auto& devPart : devPartitions) {
             performPartitionMerge(devPart.fibersp, devPart.usableTiles,
-                                  deviceModel.numAvailWorkers);
+                                  deviceModel.numAvailWorkers());
             // devPart.fibersp has been "shrunk"
             for (auto& fiberp : devPart.fibersp) { splitGraphsp.emplace_back(std::move(fiberp)); }
         }
@@ -249,15 +248,15 @@ void schedule(AstNetlist* netlistp) {
         const uint32_t numIpusUsed = deviceModel.numIpusUsed(splitGraphsp.size());
         // reserve 1 tile per IPU when there are multiple
         const uint32_t numReserved = numIpusUsed == 1 ? 0 : numIpusUsed;
-        performPartitionMerge(splitGraphsp, deviceModel.numAvailTiles - numReserved,
-                              deviceModel.numAvailWorkers);
+        performPartitionMerge(splitGraphsp, deviceModel.numAvailTiles() - numReserved,
+                              deviceModel.numAvailWorkers());
         if (v3Global.opt.fInterIpuComm() && !v3Global.opt.fPreMergeIpuPartition()) {
             // partition the fibers
             auto devPartitions
-                = V3BspIpuDevicePartitioning::partitionFibers(splitGraphsp, deviceModel);
+                = V3BspDevicePartitioning::partitionFibers(splitGraphsp, deviceModel);
             UASSERT(splitGraphsp.empty(), "Expected empty");
-            for (auto& devPart : devPartitions)  {
-                for(auto& fiberp : devPart.fibersp) {
+            for (auto& devPart : devPartitions) {
+                for (auto& fiberp : devPart.fibersp) {
                     splitGraphsp.emplace_back(std::move(fiberp));
                 }
             }

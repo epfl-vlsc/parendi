@@ -185,7 +185,7 @@ public:
 
 using V3HierBlockOptSet = std::map<const std::string, V3HierarchicalBlockOption>;
 
-class V3IpuMergeStrategyOption final {
+class V3BspMergeStrategyOption final {
 public:
     enum Strategy {
         BottomUp = 0,
@@ -303,6 +303,7 @@ private:
     bool m_lintOnly = false;        // main switch: --lint-only
     bool m_gmake = false;           // main switch: --make gmake
     bool m_main = false;            // main switch: --main
+    bool m_openmp = false;          // main switch: --openmp
     bool m_outFormatOk = false;     // main switch: --cc, --sc or --sp was specified
     bool m_pedantic = false;        // main switch: --Wpedantic
     bool m_pinsScUint = false;      // main switch: --pins-sc-uint
@@ -360,6 +361,7 @@ private:
     int         m_reloopLimit = 40; // main switch: --reloop-limit
     VOptionBool m_skipIdentical;  // main switch: --skip-identical
     int         m_threads = 1;      // main switch: --threads
+    int         m_openmp_threads = 1;  // main openmp switch: --openmp-threads
     int         m_tiles = 1472;     // main poplar switch: --tiles
     int         m_workers = 1;      // main poplar switch: --workers
     int         m_maxUnpackCopies = 4096;   // main poplar switch: --max-unpack-copies
@@ -403,7 +405,7 @@ private:
     string      m_xInitial;     // main switch: --x-initial
     string      m_xmlOutput;    // main switch: --xml-output
 
-    V3IpuMergeStrategyOption m_ipuMergeStrategy; // main switch: --ipu-merge-strategy and --ipu-merge-threshold
+    V3BspMergeStrategyOption m_BspMergeStrategy; // main switch: --bsp-merge-strategy and --bsp-merge-threshold
 
     // Language is now held in FileLine, on a per-node basis. However we still
     // have a concept of the default language at a global level.
@@ -494,6 +496,7 @@ public:
     bool available() const VL_MT_SAFE { return m_available; }
     void ccSet();
     void poplarSet();
+    void openmpSet();
     void notify();
 
     // ACCESSORS (options)
@@ -504,6 +507,7 @@ public:
     string flags() const { return m_flags; }
     bool systemC() const VL_MT_SAFE { return m_systemC; }
     bool poplar() const VL_MT_SAFE { return m_poplar; }
+    bool openmp() const VL_MT_SAFE { return m_openmp; }
     bool savable() const VL_MT_SAFE { return m_savable; }
     bool stats() const { return m_stats; }
     bool statsVars() const { return m_statsVars; }
@@ -592,6 +596,7 @@ public:
     VOptionBool makeDepend() const { return m_makeDepend; }
     int maxNumWidth() const { return m_maxNumWidth; }
     int moduleRecursionDepth() const { return m_moduleRecursion; }
+    int openmp_threads() const VL_MT_SAFE { return m_openmp_threads; }
     int outputSplit() const { return m_outputSplit; }
     int outputSplitCFuncs() const { return m_outputSplitCFuncs; }
     int outputSplitCTrace() const { return m_outputSplitCTrace; }
@@ -729,7 +734,7 @@ public:
         return m_traceFormat.sourceName() + (systemC() ? "_sc" : "_c");
     }
 
-    V3IpuMergeStrategyOption ipuMergeStrategy() const { return m_ipuMergeStrategy; }
+    V3BspMergeStrategyOption BspMergeStrategy() const { return m_BspMergeStrategy; }
 
     bool hierarchical() const { return m_hierarchical; }
     int hierChild() const { return m_hierChild; }

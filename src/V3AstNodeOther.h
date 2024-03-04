@@ -1604,7 +1604,7 @@ class AstVar final : public AstNode {
     VLifetime m_lifetime;  // Lifetime
     VVarAttrClocker m_attrClocker;
     MTaskIdSet m_mtaskIds;  // MTaskID's that read or write this var
-    VBspFlag m_bspFlags; // A set of flags for poplar code generation
+    VBspFlag m_bspFlags; // A set of flags for poplar/openmp code generation
     int m_pinNum = 0;  // For XML, if non-zero the connection pin number
     bool m_ansi : 1;  // ANSI port list variable (for dedup check)
     bool m_declTyped : 1;  // Declared as type (for dedup check)
@@ -2097,6 +2097,8 @@ public:
     bool support() const { return m_support; }
     void support(bool flag) VL_MT_SAFE { m_support = flag; }
     bool codelet() const { return m_codelet; }
+    // For OpenMP, we'll use the Poplar term "codelet" as the name for the
+    // function that runs on a thread.
     void codelet(bool flag) VL_MT_SAFE { m_codelet = flag; }
     void constPool(bool flag) VL_MT_SAFE { m_constPool = flag; }
     bool constPool() const { return m_constPool; }
