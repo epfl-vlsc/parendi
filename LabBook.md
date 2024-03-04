@@ -2,39 +2,42 @@
 ## James Larus, February 26, 2024
 
 ### 03-04-2024
-- Structure for memory:
-    class mem_contents {
-      int field0;
-      int field1;
-      int[7] __pad1__;
-    }
 
-    class base {
-      mem_contents memA;
-      mem_contents memB;
+- Does "VNUser1InUse m_user1Inuse;" have any uses? Eliminate?
+- Organizations of memories:
 
-      base() {
-        memclr(memA);
-        memclr(memB);
-      }
+    	class mem_contents {
+	      int field0;
+	      int field1;
+	      int[7] __pad1__;
+	    }
+	
+	    class base {
+	      mem_contents memA;
+	      mem_contents memB;
+	
+	      base() {
+	        memclr(memA);
+	        memclr(memB);
+	      }
+	
+	      run() {
+	        memIn = memA;
+	        memOut = memB;
+	        while (1) {
+	          compute(memIn, memOut);
+	    #pragma omp barrier
+	          memIn = (memIn == memA ? memB : memA);
+	          memOut = (memOut == memA ? memB : memA);
+	        }
+	      }
+	    }
 
-      run() {
-        memIn = memA;
-        memOut = memB;
-        while (1) {
-          compute(memIn, memOut);
-    #pragma omp barrier
-          memIn = (memIn == memA ? memB : memA);
-          memOut = (memOut == memA ? memB : memA);
-        }
-      }
-    }
-
-    class core1: base {
-      void compute(mem_contents& memIn, mem_contents& memOut) {
-        memOut.field0 = (int) ...;
-      }
-    }
+	    class core1: base {
+	      void compute(mem_contents& memIn, mem_contents& memOut) {
+	        memOut.field0 = (int) ...;
+	      }
+	    }
 
 
 ### 03-03-2024

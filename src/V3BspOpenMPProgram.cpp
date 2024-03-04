@@ -68,6 +68,8 @@ private:
     }
     // VISITORS
 
+    /// Add VL_ASSIGN_W, VL_VIEW, field name as comment
+
     void visit(AstVarRef* vrefp) override {
         if (!m_classp) { return; }
         if (!vrefp->varp()->user1()) { return; }
@@ -85,6 +87,8 @@ private:
         relinkHandle.relink(newp);
     }
 
+    /// Add VL_ASSIGN_W, VL_VIEW, field name as comment
+    
     void visit(AstClass* nodep) override {
         VL_RESTORER(m_classp);
         if (nodep->flag().isBsp()) {
@@ -111,6 +115,8 @@ public:
         iterate(nodep);
     }
 };
+
+/// Convert variable name to fieldNN
 
 class OpenMPLegalizeFieldNamesVisitor final {
 public:

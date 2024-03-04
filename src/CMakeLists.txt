@@ -263,7 +263,6 @@ set(COMMON_SOURCES
     V3EmitCSyms.cpp
     V3EmitOpenMPMake.cpp
     V3EmitOpenMPProgram.cpp
-    V3EmitOpenMPStructs.cpp
     V3EmitOpenMPVertex.cpp
     V3EmitPoplarMake.cpp
     V3EmitPoplarProgram.cpp

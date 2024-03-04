@@ -598,7 +598,6 @@ static void process() {
         reportStatsIfEnabled();
     } else if (v3Global.opt.openmp()) {
         V3EmitC::emitcConstPool();
-        V3EmitOpenMP::emitStructs();
         V3EmitOpenMP::emitProgram();
         V3EmitOpenMP::emitVertex();
         V3EmitOpenMP::emitMake();
