@@ -82,7 +82,7 @@ private:
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
         puts("#include <vlopenmp/verilated.h>\n");
-        puts("#include <openmp/Vertex.hpp>\n");
+        puts("#include <" + topClassName() + "__memory_contents.h>\n");
         // puts("using namespace openmp;");
     }
 
@@ -101,23 +101,23 @@ private:
         // emit the members
         // ofp()->puts("using Vec = openmp::InOut<openmp::Vector<IData, "
         //             "openmp::VectorLayout::COMPACT_PTR, alignof(QData)>>;\n\n");
-        for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
-            if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
-                UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
-                auto flag = vrefp->bspFlag();
-                puts("/* [" + flag.ascii() + "] */\n");
-                if (flag.isInputOnly()) {
-                    puts("VecIn ");
-                } else {
-                    puts("Vec ");
-                }
-                // puts(vrefp->dtypep()->cType("", false, false));
-                // puts("> ");
-                puts(vrefp->nameProtect());
-                puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
-                     + vrefp->fileline()->ascii() + " */\n");
-            }
-        }
+        // for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+        //     if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
+        //         UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
+        //         auto flag = vrefp->bspFlag();
+        //         puts("/* [" + flag.ascii() + "] */\n");
+        //         if (flag.isInputOnly()) {
+        //             puts("VecIn ");
+        //         } else {
+        //             puts("Vec ");
+        //         }
+        //         // puts(vrefp->dtypep()->cType("", false, false));
+        //         // puts("> ");
+        //         puts(vrefp->nameProtect());
+        //         puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
+        //              + vrefp->fileline()->ascii() + " */\n");
+        //     }
+        // }
 
         // emit method decls
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
@@ -128,28 +128,69 @@ private:
         }
         ensureNewLine();
         puts("};\n\n");
-
         // emit method defs
-
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) { EmitCFunc::visit(funcp); }
         }
     }
 
-    explicit EmitOpenMPVertex(AstNetlist* netlistp)
-        : m_multiThreaded(true) {  // OpenMP is multithreaded
-        std::vector<const AstClass*> toEmitp;
-        for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
-            if (const AstClass* classp = VN_CAST(nodep, Class)) {
-                if (classp->flag().isBsp()) { toEmitp.push_back(classp); }
+    void emitMemory(std::vector<std::vector<const AstClass*>>& toEmitp) {
+        UASSERT(!m_ofp, "file not closed");
+        string filename = v3Global.opt.makeDir() + "/" + topClassName();
+        filename += "__memory_contents.h";
+        m_ofp = new V3OutCFile{filename};
+        ofp()->putsHeader();
+        puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
+        puts("// OpenMP implementation\n");
+        puts("#ifndef VERILATED_MEM_CONTENTS_H_\n");
+        puts("#define VERILATED_MEM_CONTENTS_H_  // guard\n");
+        puts("#include <vlopenmp/verilated.h>\n");
+
+        puts("\n");
+        puts("class memory_contents {\n");
+
+        for (int tid = 0; tid < toEmitp.size(); tid++) {
+            for (const AstClass* classp : toEmitp[tid]) {
+                for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+                    if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
+                        UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
+                        auto flag = vrefp->bspFlag();
+                        if (flag.isInputOnly()) {
+                            // Skip input-only fields since they must be output somewhere
+                        } else {
+                            // Should only be output once?
+                            puts("/* [" + flag.ascii() + "] */\n");
+                            puts(vrefp->dtypep()->cType(" ", false, false));
+                            puts(vrefp->nameProtect());
+                            puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
+                                 + vrefp->fileline()->ascii() + " */\n");
+                        }
+                    }
+                }
             }
         }
-        for (const AstClass* classp : toEmitp) {
-            UINFO(3, "Emitting " << classp->nameProtect() << endl);
-            emitClass(classp);
-        }
+        puts("}\n");
+        puts("#endif  // guard\n");
+        m_ofp->putsEndGuard();
+        VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+    }
 
-        if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
+    /// Unused
+    explicit EmitOpenMPVertex(AstNetlist* netlistp)
+        : m_multiThreaded(true) {  // OpenMP is multithreaded
+        if (netlistp) {
+            std::vector<const AstClass*> toEmitp;
+            for (const AstNode* nodep = netlistp->modulesp(); nodep; nodep = nodep->nextp()) {
+                if (const AstClass* classp = VN_CAST(nodep, Class)) {
+                    if (classp->flag().isBsp()) { toEmitp.push_back(classp); }
+                }
+            }
+            for (const AstClass* classp : toEmitp) {
+                UINFO(3, "Emitting " << classp->nameProtect() << endl);
+                emitClass(classp);
+            }
+            if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
+        }
     }
 
     // thread-safe emitter
@@ -162,6 +203,7 @@ private:
     }
 
 public:
+    /// Unused
     static inline void emitAll(AstNetlist* netlistp) {
         EmitOpenMPVertex impl{netlistp};
         for (AstCFile* cfilep : impl.m_newFilesp) { netlistp->addFilesp(cfilep); }
@@ -205,6 +247,8 @@ public:
             UINFO(3, "Emitted " << filesEmitted << " files " << endl);
             for (AstCFile* cfilep : res) { netlistp->addFilesp(cfilep); }
         }
+        EmitOpenMPVertex impl{nullptr}; // Need (empty) object for method
+        impl.emitMemory(toEmitp);
     }
 };
 

@@ -67,12 +67,8 @@ public:
 };
 class HybridDfsBfsScheduler final {
 public:
-    static int numWays() {
-        return 4;
-    }
-    static bool splitFibers() {
-        return true;
-    }
+    static int numWays() { return 4; }
+    static bool splitFibers() { return true; }
 
     static std::unique_ptr<V3Graph> makeSchedGraphColored(DepGraph* const graphp, uint32_t color) {
         std::unique_ptr<V3Graph> schedGraphp{new V3Graph};
@@ -917,11 +913,11 @@ private:
     /// @param graphp
     /// @return
     AstClass* makeClass(const std::unique_ptr<DepGraph>& graphp) {
-
         m_memberNames.reset();
         UASSERT(m_packagep, "need bsp package!");
         FileLine* fl = nullptr;
-        // get a better fileline
+
+        // Get a better fileline
         for (V3GraphVertex* itp = graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
             if (CompVertex* vtxp = dynamic_cast<CompVertex*>(itp)) {
                 if (VN_IS(vtxp->nodep(), AlwaysPost) || VN_IS(vtxp->nodep(), AssignPost)) {
@@ -931,80 +927,102 @@ private:
                 }
             }
         }
-        // create a class for the the graph partition
+
+        // Create a class for the the graph partition
+        // This class will represent the code that runs on one core
         auto classAndTypep = newClass(fl, m_modNames.get("vtxCls"), m_modNames.get("vtxClsPkg"));
         AstClass* classp = classAndTypep.first;
         AstClassRefDType* classTypep = classAndTypep.second;
-
         AstVar* classInstp = new AstVar{fl, VVarType::VAR, m_modNames.get("vtxInst"), classTypep};
         classInstp->lifetime(VLifetime::STATIC);
-        // add the instance to the scope of the top module
+
+        // Add the instance to the scope of the top module
         AstVarScope* instVscp = new AstVarScope{classInstp->fileline(), m_topScopep, classInstp};
         m_topScopep->addVarsp(instVscp);
         m_topModp->addStmtsp(classInstp);
-        // this class will represent the code that runs on one core
         classp->level(4);  // lives under the BspPkg
         classp->flag(VClassFlag{}.append(VClassFlag::BSP_BUILTIN));
-        // create a scope for the class
+        // Create a scope for the class
         AstScope* scopep = new AstScope{fl, classp, m_scopePrefix + classp->name(),
                                         m_packageScopep, m_packageCellp};
-        // create member variables for the class
+
+        // Create member variables for the class
         // STATE
         // VarScope::user2   -> true if already processed
         // AstSenTree::user2 -> true if processesed
         // VarScope::user3p  -> new var scope inside the class
-
         VNUser2InUse user2InUse;
         VNUser3InUse user3InUse;
         AstNode::user2ClearTree();
         AstNode::user3ClearTree();
 
+        // Create nbaTop function:
+        // void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0)  or
+        // void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0, const MemoryContents &mem)
         AstCFunc* nbaTopp = new AstCFunc{fl, "nbaTop", scopep, "void"};
         nbaTopp->isMethod(true);
         nbaTopp->isInline(true);
         nbaTopp->dontCombine(true);
-        // add the function arg
 
+        // Add trigArg arg
         AstVar* const trigArgp
             = new AstVar{fl, VVarType::MEMBER, freshName("trigArg"), m_triggering.trigDTypep};
         trigArgp->funcLocal(true);
         trigArgp->direction(VDirection::CONSTREF);
         nbaTopp->addArgsp(trigArgp);
-        AstVarScope* const thisTrigVscp = new AstVarScope{classp->fileline(), scopep, trigArgp};
+        AstVarScope* const thisTrigVscp = new AstVarScope{fl, scopep, trigArgp};
         scopep->addVarsp(thisTrigVscp);
+
+        auto newType = [this](VBasicDTypeKwd kwd) {
+            AstBasicDType* const typep
+                = new AstBasicDType{m_netlistp->fileline(), kwd, VSigning::UNSIGNED};
+            m_netlistp->typeTablep()->addTypesp(typep);
+            return typep;
+        };
+        
+        if (v3Global.opt.openmp()) {
+            // Add the mem arg
+            auto memType = newType(VBasicDTypeKwd::OPENMP_MEM);
+            AstVar* memArgp = new AstVar{fl, VVarType::MEMBER, "mem", memType};
+            memArgp->funcLocal(true);
+            memArgp->direction(VDirection::CONSTREF);
+            nbaTopp->addArgsp(memArgp);
+            AstVarScope* thisMemVscp = new AstVarScope{fl, scopep, memArgp};
+            scopep->addVarsp(thisMemVscp);
+        }
 
         scopep->addBlocksp(nbaTopp);
 
-        // create class member or function local variable for every variable neeeded
+        // Create class member or function local variable for every variable neeeded
         // by the graphp computations
         makeClassMemberVars(graphp, scopep, classp, instVscp, nbaTopp, fl);
 
-        // create the trigger evaluation function
+        // Create the trigger evaluation function
         auto triggerFunctions = makeTriggerEvalFunc(graphp, classp, scopep, instVscp);
-        auto& triggerCheckGen = triggerFunctions.first;
         // triggerCheckGen can be used to create trigger.at(i) expression for each AstSenTree
+        auto& triggerCheckGen = triggerFunctions.first;
 
-        // add the computation
+        // Add the computation
         UINFO(5, "Ordering computation" << endl);
         // graphp->order();  // order the computation
 
-        std::vector<CompVertex*> orderedVtxps = HybridDfsBfsScheduler::schedule(graphp.get());
         // Go through the compute vertices in order and append them to nbaTopp.
-        // Each compute vertex has a domainp (nullptr if combinatiol) that
+        // Each compute vertex has a domainp (nullptr if combinatorial) that
         // determines whether the statement should fire or not. We keep track
         // of the active domains to avoid emitting unnecessary AstIf statements.
         // Alternatively, another pass could try to coalesce the AtsIfs.
+        std::vector<CompVertex*> orderedVtxps = HybridDfsBfsScheduler::schedule(graphp.get());
 
         struct {
             AstNode* firstp = nullptr;
             AstIf* lastp = nullptr;
             AstSenTree* domainp = nullptr;
         } currentActive;
-        // just add a comment to as firstp to make sure its not null
+
+        // Comment as firstp to make sure its not null
         currentActive.firstp = new AstComment{fl, "begin nba computation"};
 
         for (CompVertex* vtxp : orderedVtxps) {
-
             auto vtxDomp = vtxp->domainp();
             auto nodep = vtxp->nodep();
             UASSERT(nodep, "nullptr vertex");
@@ -1059,23 +1077,48 @@ private:
             }
             currentActive.domainp = vtxDomp;
         }
-
+        // Add statements
         nbaTopp->addStmtsp(currentActive.firstp);
-
         { ReplaceOldVarRefsVisitor{nbaTopp}; }
 
+        // Create compute function:
+        // void compute() or compute(const MemoryContents &mem)
         AstCFunc* cfuncp = new AstCFunc{fl, "compute", scopep, "void"};
         cfuncp->dontCombine(true);
         cfuncp->isMethod(true);
         cfuncp->isInline(true);
         scopep->addBlocksp(cfuncp);
 
-        // AstCMethodCall* const callp = new AstCMethodCall{}
-        AstCCall* const callTrigp = new AstCCall{fl, triggerFunctions.second};
-        callTrigp->dtypeFrom(thisTrigVscp);
-        AstCCall* const callNbap = new AstCCall{fl, nbaTopp, callTrigp};
+        AstCCall* callNbap = nullptr;
+        if (v3Global.opt.openmp()) {
+            // Add the mem arg
+            auto memType2 = newType(VBasicDTypeKwd::OPENMP_MEM);
+            AstVar* memArg2p = new AstVar{fl, VVarType::VAR, "mem", memType2};
+            memArg2p->funcLocal(true);
+            memArg2p->direction(VDirection::CONSTREF);
+            cfuncp->addArgsp(memArg2p);
+            AstVarScope* const thisMemVscp2 = new AstVarScope{fl, scopep, memArg2p};
+            scopep->addVarsp(thisMemVscp2);
+
+            // Body is call:
+            //     this->nbaTop(this->triggerEval(), mem);
+            AstCCall* firstVal = new AstCCall{fl, triggerFunctions.second};
+            firstVal->dtypeFrom(thisTrigVscp);
+            AstVarRef* const secondVal = new AstVarRef{fl, memArg2p, VAccess::READ};
+            secondVal->varScopep(thisMemVscp2);
+            AstNodeExpr* arglist = firstVal;
+            arglist->addNext(secondVal);
+            callNbap = new AstCCall{fl, nbaTopp, arglist};
+        } else {
+            // Body is call:
+            //     this->nbaTop(this->triggerEval());
+            AstCCall* const callTrigp = new AstCCall{fl, triggerFunctions.second};
+            callTrigp->dtypeFrom(thisTrigVscp);
+            callNbap = new AstCCall{fl, nbaTopp, callTrigp};
+        }
         callNbap->dtypeSetVoid();
         cfuncp->addStmtsp(callNbap->makeStmt());
+
         classp->addStmtsp(scopep);
         return classp;
     }

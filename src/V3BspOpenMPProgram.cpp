@@ -71,6 +71,7 @@ private:
     /// Add VL_ASSIGN_W, VL_VIEW, field name as comment
 
     void visit(AstVarRef* vrefp) override {
+        return;
         if (!m_classp) { return; }
         if (!vrefp->varp()->user1()) { return; }
         if (vrefp->user1()) { return; /*processed*/ }
@@ -121,6 +122,7 @@ public:
 class OpenMPLegalizeFieldNamesVisitor final {
 public:
     explicit OpenMPLegalizeFieldNamesVisitor(AstNetlist* netlistp) {
+        return;
         netlistp->foreach([](AstClass* classp) {
             if (classp->flag().isBsp()) {
                 int nameId = 0;
@@ -534,6 +536,7 @@ public:
         : m_newNames{"__VOpenMP"} {
         m_netlistp = nodep;
 
+        return;
         // open up a file to dump the exchange information
         m_exchangeDump = std::unique_ptr<std::ofstream>(
             V3File::new_ofstream(v3Global.opt.makeDir() + "/" + "exchangeDump.txt"));

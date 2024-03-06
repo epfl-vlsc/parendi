@@ -1,7 +1,15 @@
 # Lab Notes for Parendi
 ## James Larus, February 26, 2024
 
-### 03-04-2024
+### 04-03-2024
+
+- Strip out the Poplar-specific stuff and generate plain code. Can go back later to make it faster.
+  - V3BspOpenMPProgram.cpp::OpenMPViewsVisitor changes variable references to VL_ASSIGN_W and adds cast with VL_VIEW.
+  - V3BspOpenMPProgram.cpp::OpenMPLegalizeFieldNamesVisitor changes variable name to fieldN.
+  - Added V3EmitOpenMPVertex.cpp::emitMemory to produce include file of memory definition (mem_contents).
+
+
+### 04-04-2024
 
 - Does "VNUser1InUse m_user1Inuse;" have any uses? Eliminate?
 - Organizations of memories:
