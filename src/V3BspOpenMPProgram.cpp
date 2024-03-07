@@ -103,8 +103,6 @@ private:
                     // varp->dtypep(vectorTypep(varp->dtypep()));
                 }
             }
-            // change all member dtypes to POPLAR_VECTOR_UINT32
-
             iterateChildren(nodep);
         }
     }
@@ -239,94 +237,30 @@ private:
     }
 
     AstCFunc* createVertexCons(AstClass* classp, uint32_t tileId) {
+        // OpenMP does not need code generated for constructors, but the other
+        // metadata updating is necessary or the system fails.
         FileLine* fl = classp->fileline();
         AstCFunc* ctorp = new AstCFunc{classp->fileline(), "ctor_" + classp->name(),
                                        m_netlistp->topScopep()->scopep(), "void"};
         ctorp->isInline(false);
-        AstVarScope* vtxVscp = createFuncVar(fl, ctorp, m_newNames.get("instance"), m_vtxRefTypep);
         auto className = EmitCBaseVisitor::prefixNameProtect(classp);
-        AstAssign* mkVtx
-            = new AstAssign{fl, new AstVarRef{fl, vtxVscp, VAccess::WRITE},
-                            mkCall(fl, "getOrAddVertex",
-                                   {new AstConst{fl, AstConst::String{}, className},
-                                    new AstConst{fl, AstConst::String{},
-                                                 classp->flag().isBspInit()   ? "init"
-                                                 : classp->flag().isBspCond() ? "condeval"
-                                                                              : "compute"}},
-                                   m_vtxRefTypep)};
-        ctorp->addStmtsp(mkVtx);
-        auto setTileMapping = [this, &fl, &ctorp](AstVarScope* vscp, uint32_t tid) {
-            AstStmtExpr* tileMapp = new AstStmtExpr{
-                fl, mkCall(fl, "setTileMapping",
-                           {new AstVarRef{fl, vscp, VAccess::READWRITE}, mkConst(tid)})};
-            ctorp->addStmtsp(tileMapp);
-        };
-
-        setTileMapping(vtxVscp, tileId);
-
-        AstStmtExpr* perfEstp = new AstStmtExpr{
-            fl, mkCall(fl, "setPerfEstimate",
-                       {new AstVarRef{fl, vtxVscp, VAccess::READWRITE}, mkConst(0)})};
-        ctorp->addStmtsp(perfEstp);
-        // iterate through the class members and create tensors
         for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
             AstVar* varp = VN_CAST(nodep, Var);
             if (!varp) continue;
-            // AstVectorDType* dtp = VN_CAST(varp->dtypep(), VectorDType);
-            // UASSERT_OBJ(dtp, varp, "expected VectorDType, need to create AstVarRefViews
-            // first!"); UASSERT_OBJ(dtp->basicp()->keyword() == VBasicDTypeKwd::UINT32, dtp,
-            // "expeced UINT32");
             UASSERT_OBJ(varp->isClassMember(), varp, "Expected class member");
             // create a tensor for this variable
-            AstVarScope* tensorVscp
-                = createFuncVar(fl, ctorp, m_newNames.get("tensor"), m_tensorTypep);
             std::string tensorDeviceHandle = className + "." + varp->nameProtect();
             m_handles(varp).tensor
                 = tensorDeviceHandle;  // need this to be able to later look up the tensor
             m_handles(varp).id = m_nextTensorId++;
-            const uint32_t vectorSize = getVectorSize(varp->dtypep());
-
-            AstAssign* mkTensorp = new AstAssign{
-                fl, new AstVarRef{fl, tensorVscp, VAccess::WRITE},
-                mkCall(fl, "getOrAddTensor", {mkConst(vectorSize), mkConst(m_handles(varp).id)})};
-            ctorp->addStmtsp(mkTensorp);
-            setTileMapping(tensorVscp, tileId);
-            // connect the tensor to the vertex
-            ctorp->addStmtsp(new AstStmtExpr{
-                fl, mkCall(fl, "connect",
-                           {new AstVarRef{fl, vtxVscp, VAccess::READWRITE},
-                            new AstConst{fl, AstConst::String{}, varp->nameProtect()},
-                            new AstVarRef{fl, tensorVscp, VAccess::READWRITE}})});
-            // check whether we need to create host read/write handles
             if (varp->bspFlag().hasHostRead()) {
                 const std::string hrHandle
                     = varp->bspFlag().hasAnyHostReq() ? "interrupt" : ("hr." + tensorDeviceHandle);
                 m_handles(varp).hostRead = hrHandle;
-                ctorp->addStmtsp(
-                    new AstStmtExpr{fl, mkCall(fl, "createHostRead",
-                                               {new AstConst{fl, AstConst::String{}, hrHandle},
-                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                                mkConst(vectorSize)},
-                                               nullptr)});
-
-                if (varp->bspFlag().hasAnyHostReq()) {
-                    ctorp->addStmtsp(
-                        new AstStmtExpr{fl, mkCall(fl, "isHostRequest",
-                                                   {new AstVarRef{fl, tensorVscp, VAccess::READ},
-                                                    new AstConst{fl, AstConst::BitTrue{},
-                                                                 varp->bspFlag().hasHostReq()}},
-                                                   nullptr)});
-                }
             }
             if (varp->bspFlag().hasHostWrite()) {
                 const std::string hwHandle = "hw." + tensorDeviceHandle;
                 m_handles(varp).hostWrite = hwHandle;
-                ctorp->addStmtsp(
-                    new AstStmtExpr{fl, mkCall(fl, "createHostWrite",
-                                               {new AstConst{fl, AstConst::String{}, hwHandle},
-                                                new AstVarRef{fl, tensorVscp, VAccess::READWRITE},
-                                                mkConst(vectorSize)},
-                                               nullptr)});
             }
         }
 
@@ -344,56 +278,7 @@ private:
     }
 
     void addNextCurrentPairs(AstCFunc* exchangep) {
-        std::vector<AstNode*> stmtsp;
-        for (AstNode* nodep = exchangep->stmtsp(); nodep;) {
-            UASSERT(VN_IS(nodep, Assign), "expected AstAssign");
-            AstAssign* const assignp = VN_AS(nodep, Assign);
-            AstVar* const top = VN_AS(assignp->lhsp(), MemberSel)->varp();
-            AstVar* const fromp = VN_AS(assignp->rhsp(), MemberSel)->varp();
-            const string nextHandle = m_handles(fromp).tensor;
-            UASSERT(!nextHandle.empty(), "handle not set!");
-            const string currentHandle = m_handles(top).tensor;
-            UASSERT(!currentHandle.empty(), "handle not set!");
-            const auto totalWords
-                = top->dtypep()->skipRefp()->widthWords() * top->dtypep()->arrayUnpackedElements();
-
-            stmtsp.push_back(new AstComment{nodep->fileline(),
-                                            "next: " + nextHandle + " current: " + currentHandle});
-            AstNode* newp = new AstStmtExpr{nodep->fileline(),
-                                            mkCall(assignp->fileline(), "addNextCurrentPair",
-                                                   {mkConst(m_handles(fromp).id) /*source*/,
-                                                    mkConst(m_handles(top).id) /*target*/,
-                                                    mkConst(totalWords) /*number of words*/})};
-            AstNode* const nextp = nodep->nextp();
-            stmtsp.push_back(newp);
-            // newp->addHereThisAsNext(newCommentp);
-            nodep = nextp;
-        }
-        AstCFunc* splitFuncp = nullptr;
-        const uint32_t maxFuncStmts = static_cast<uint32_t>(v3Global.opt.outputSplit());
-        uint32_t funcSize = 0;
-        AstCFunc* const cfuncp = new AstCFunc{exchangep->fileline(), "constructStatePairs",
-                                              exchangep->scopep(), "void"};
-        exchangep->scopep()->addBlocksp(cfuncp);
-        cfuncp->isInline(false);
-        cfuncp->isMethod(true);
-        cfuncp->dontCombine(true);
-        for (AstNode* const nodep : stmtsp) {
-            if (!splitFuncp || (funcSize >= maxFuncStmts)) {
-                funcSize = 0;
-                splitFuncp = new AstCFunc{cfuncp->fileline(), m_newNames.get("statepairsplit"),
-                                          cfuncp->scopep(), "void"};
-                splitFuncp->isInline(false);
-                splitFuncp->isMethod(true);
-                splitFuncp->dontCombine(true);
-                cfuncp->scopep()->addBlocksp(splitFuncp);
-                AstCCall* const callp = new AstCCall{cfuncp->fileline(), splitFuncp};
-                callp->dtypeSetVoid();
-                cfuncp->addStmtsp(callp->makeStmt());
-            }
-            funcSize++;
-            splitFuncp->addStmtsp(nodep);
-        }
+        // This is unnecessary in OpenMP with shared memory.
     }
 
     AstClass* getClass(AstNode* nodep) {
@@ -444,21 +329,8 @@ private:
             UASSERT(!toHandle.empty(), "handle not set!");
             auto fromHandle = m_handles(fromp).tensor;
             UASSERT(!fromHandle.empty(), "handle not set!");
-            // AstComment* newCommentp
-            //     = new AstComment{assignp->fileline(), cvtToStr(totalWords) + " words"};
-
-            nodesp.push_back(
-                new AstComment{nodep->fileline(), "Copy " + fromHandle + " -> " + toHandle});
-            AstNode* newp = new AstStmtExpr{
-                nodep->fileline(), mkCall(assignp->fileline(), "addCopy",
-                                          {mkConst(m_handles(fromp).id) /*source*/,
-                                           mkConst(m_handles(top).id) /*target*/,
-                                           mkConst(totalWords) /*number of words*/,
-                                           new AstConst{nodep->fileline(), AstConst::String{},
-                                                        kind} /*is it part of init*/})};
+            // OpenMP does not need code generated. But metadata needs to be set.
             AstNode* const nextp = nodep->nextp();
-            nodesp.push_back(newp);
-            // newp->addHereThisAsNext(newCommentp);
             VL_DO_DANGLING(nodep->unlinkFrBack()->deleteTree(), nodep);
             nodep = nextp;
         }
@@ -504,29 +376,6 @@ private:
         }
     }
 
-    void patchHostHandle() {
-        // find any other reachable function from hostp;
-        std::set<AstCFunc*> reachablep;
-        std::queue<AstCFunc*> toVisitp;
-        toVisitp.push(getFunc(m_netlistp->topModulep(), "hostHandle"));
-        int depth = 0;
-        while (!toVisitp.empty()) {
-            UASSERT(depth++ < 100000, "something is up");
-            AstCFunc* toCheckp = toVisitp.front();
-            toVisitp.pop();
-            if (reachablep.find(toCheckp) != reachablep.end()) continue;
-            toCheckp->foreach([&toVisitp, &reachablep](AstCCall* callp) {
-                auto foundIt = reachablep.find(callp->funcp());
-                if (foundIt == reachablep.end()) { toVisitp.push(callp->funcp()); }
-            });
-            reachablep.insert(toCheckp);
-        }
-
-        for (AstCFunc* nodep : reachablep) { patchHostFuncCall(nodep); }
-    }
-
-    void patchHostFuncCall(AstCFunc* cfuncp);
-
     // create a vertex that ORs all the needInteraction signals. Ideally this
     // vertex should be a multivertex for better performance, but I'll leave that
     // for later.
@@ -536,7 +385,6 @@ public:
         : m_newNames{"__VOpenMP"} {
         m_netlistp = nodep;
 
-        return;
         // open up a file to dump the exchange information
         m_exchangeDump = std::unique_ptr<std::ofstream>(
             V3File::new_ofstream(v3Global.opt.makeDir() + "/" + "exchangeDump.txt"));
@@ -598,116 +446,12 @@ public:
                 addCopies(cfuncp, cfuncp->name());
             }
         });
-        patchHostHandle();
-        // remove the computeSet funciton, not used
+        // remove the function that are not used
+        getFunc(m_netlistp->topModulep(), "hostHandle")->unlinkFrBack()->deleteTree();
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
         getFunc(m_netlistp->topModulep(), "initComputeSet")->unlinkFrBack()->deleteTree();
     }
-
-    friend class OpenMPHostHandleHardenVisitor;
 };
-
-/// @brief Goes through a function and hardens all the MemberSel references
-/// This is a special visitor that used by the OpenMPComputeGraphBuilder.
-/// It replaces all the MemberSel references with hardened "getHostData" and
-/// "setHostData" calls to the OpenMP context:
-///     if (vtx1.dpiPoint == C) dpi_call(vtx1.rv1, vtx1.rv2, vtx1.lv/*by ref*/);
-/// becomes:
-///     tmp0 = ctx.getHostData("vtx1.dpiPoint");
-///     if (tmp0 == C) {
-///         tmp1 = ctx.getHostData("vtx1.rv1");
-///         tmp2 = ctx.getHostData("vtx1.rv2");
-///         tmp3;
-///         dpi_call(tmp1, tmp2, tmp3);
-///         ctx.setHostData(tmp3);
-///     }
-class OpenMPHostHandleHardenVisitor : public VNVisitor {
-    friend class OpenMPComputeGraphBuilder;
-
-private:
-    AstCFunc* m_cfuncp = nullptr;  // enclosing function
-    AstNodeStmt* m_stmtp = nullptr;  // enclosing statement
-    OpenMPComputeGraphBuilder& m_parent;  // the parent class that uses this visitor
-
-    void visit(AstMemberSel* memselp) override {
-        UASSERT_OBJ(m_stmtp, memselp, "expected to be in a statement");
-        UASSERT_OBJ(VN_IS(memselp->fromp(), VarRef), memselp,
-                    "Expected simple VarRef but got \"" << memselp->fromp()->prettyTypeName()
-                                                        << "\"" << endl);
-        AstVarRef* const vrefp = VN_AS(memselp->fromp(), VarRef);
-
-        // create a local variable
-        AstVar* const varp = new AstVar{
-            vrefp->fileline(), VVarType::BLOCKTEMP, m_parent.m_newNames.get("tmphost"),
-            memselp->dtypep() /* do not get it from vrefp because it is of VectorDType*/};
-        AstVarScope* const vscp = new AstVarScope{varp->fileline(), m_cfuncp->scopep(), varp};
-        m_cfuncp->scopep()->addVarsp(vscp);
-        m_stmtp->addHereThisAsNext(varp);
-        {
-            const auto handle = m_parent.m_handles(memselp->varp()).hostRead;
-            UASSERT_OBJ(!handle.empty(), vrefp, "empty read handle");
-            // MEMBERSEL cls.var becomes ctx.getHostData<dtype>(var, dtype{})
-            // memselp->dtypep() still has the "old" host side datatype
-            // not the vector type that OpenMPViewsVisitor creates in BSP
-            // classes. Consider it a bug (since type information is broken) or a feature
-            // (since things become easier here!)
-            AstCMethodHard* const hostDatap = m_parent.mkCall(
-                memselp->fileline(),
-                "getHostData<" + memselp->dtypep()->cType("", false, false) + ">",
-                {new AstConst{memselp->fileline(), AstConst::String{}, handle}},
-                memselp->dtypep());
-
-            m_stmtp->addHereThisAsNext(
-                new AstAssign{vrefp->fileline(),
-                              new AstVarRef{vrefp->fileline(), vscp, VAccess::WRITE}, hostDatap});
-        }
-        if (vrefp->access().isWriteOrRW()) {
-            const auto handle = m_parent.m_handles(memselp->varp()).hostWrite;
-            UASSERT_OBJ(!handle.empty(), vrefp, "empty write handle");
-            AstCMethodHard* const hostSetp = m_parent.mkCall(
-                memselp->fileline(), "setHostData",
-                {
-                    new AstConst{memselp->fileline(), AstConst::String{}, handle},
-                    new AstVarRef{vrefp->fileline(), vscp, VAccess::READ},
-                });
-            m_stmtp->addNextHere(hostSetp->makeStmt());
-            // postp.push_back(hostSetp->makeStmt());
-        }
-        memselp->replaceWith(new AstVarRef{memselp->fileline(), vscp, vrefp->access()});
-        VL_DO_DANGLING(pushDeletep(memselp), memselp);
-    }
-    void visit(AstNodeStmt* nodep) override {
-        m_stmtp = nodep;
-        iterateChildren(nodep);
-    }
-    void visit(AstNode* nodep) override { iterateChildren(nodep); }
-
-private:
-    explicit OpenMPHostHandleHardenVisitor(AstCFunc* cfuncp, OpenMPComputeGraphBuilder& parent)
-        : m_parent(parent) {
-        m_cfuncp = cfuncp;
-        iterate(cfuncp);
-    }
-
-public:
-    friend class OpenMPComputeGraphBuilder;
-};
-
-void OpenMPComputeGraphBuilder::patchHostFuncCall(AstCFunc* cfuncp) {
-    // go through all the statements within this function and replace MemberSel
-    // nodes:
-    // CFunc:
-    //    ...
-    //    Stmt(MemberSel LV, MemberSel RV) ==>
-    // becomes:
-    // CFunc:
-    //    ...
-    //    var arv = getHostData(...)
-    //    var blv = getHostData(...)
-    //    Stmt(blv, arv)
-    //    setHostData(blv)
-    OpenMPHostHandleHardenVisitor{cfuncp, *this};
-}
 
 void V3BspOpenMPProgram::createProgram(AstNetlist* nodep) {
     // reoder passes only if you know what you are doing

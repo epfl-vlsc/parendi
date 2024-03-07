@@ -62,10 +62,8 @@ private:
         puts("// OpenMP implementation\n");
         if (header) ofp()->putsGuard();
         puts("#include <verilated.h>\n");
-        puts("#include \"" + topClassName() + "__structs.h\"\n");
         // puts("using namespace openmp;");
         if (!header) {
-            puts("#include <vlpoplar/verilated_poplar_context.h>\n");
             for (const auto& hdr : m_headers) { puts("#include \"" + hdr + "\"\n"); }
         }
         if (!header) {
