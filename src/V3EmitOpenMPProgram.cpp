@@ -118,7 +118,7 @@ private:
         openNextOutputFile(prefixNameProtect(modp), true);
         // emit any typedef structure that may live under the modp
         
-        puts("class VlPoplarContext;\n");
+        puts("class VlOpenMPContext;\n");
         puts("class ");
         puts(prefixNameProtect(modp));
         puts(" final {\n");
@@ -147,7 +147,7 @@ private:
             }
         }
         puts(prefixNameProtect(modp));
-        puts("(VlPoplarContext& ctx) : " + ctxName + " (ctx) {}\n");  // hacky
+        puts("(VlOpenMPContext& _ctx) : " + ctxName + " ctx(_ctx) {}\n");  // hacky
         ensureNewLine();
         puts("};\n");
         puts("\n");

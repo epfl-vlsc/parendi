@@ -120,29 +120,7 @@ public:
 class OpenMPLegalizeFieldNamesVisitor final {
 public:
     explicit OpenMPLegalizeFieldNamesVisitor(AstNetlist* netlistp) {
-        return;
-        netlistp->foreach([](AstClass* classp) {
-            if (classp->flag().isBsp()) {
-                int nameId = 0;
-                const VNUser1InUse user1Inuse;
-                AstNode::user1ClearTree();
-                for (AstNode* nodep = classp->stmtsp(); nodep; nodep = nodep->nextp()) {
-                    if (AstVar* const varp = VN_CAST(nodep, Var)) { varp->user1(true); }
-                }
-                classp->foreach([&nameId](AstVarScope* vscp) {
-                    if (vscp->varp()->user1()) {
-                        // AstNode::dedotName()
-                        // const std::string newName
-                        //     = vscp->scopep()->nameDotless() + "__ARROW__" +
-                        //     vscp->varp()->name();
-                        if (vscp->varp()->origName().empty()) {
-                            vscp->varp()->origName(vscp->varp()->name());
-                        }
-                        vscp->varp()->name("field_" + cvtToStr(nameId++));
-                    }
-                });
-            }
-        });
+        // Do not do this for OpenMP.
     }
 };
 
@@ -188,7 +166,7 @@ private:
             m_netlistp->typeTablep()->addTypesp(typep);
             return typep;
         };
-        m_ctxTypep = newType(VBasicDTypeKwd::POPLAR_CONTEXT);
+        m_ctxTypep = newType(VBasicDTypeKwd::OPENMP_CONTEXT);
         m_tensorTypep = newType(VBasicDTypeKwd::POPLAR_TENSOR);
         m_vtxRefTypep = newType(VBasicDTypeKwd::POPLAR_VERTEXREF);
     }
@@ -224,6 +202,7 @@ private:
         }
         return callp;
     };
+
     uint32_t getVectorSize(AstNodeDType* const dtypep) {
         const AstBasicDType* const basicp = VN_CAST(dtypep->skipRefp(), BasicDType);
         if (basicp && basicp->isTriggerVec()) {
@@ -396,7 +375,7 @@ public:
         // AstClass*
         initBuiltinTypes();
 
-        m_ctxVarp = new AstVar{m_netlistp->fileline(), VVarType::VAR, "ctx", m_ctxTypep};
+        m_ctxVarp = new AstVar{m_netlistp->fileline(), VVarType::MEMBER, "ctx", m_ctxTypep};
         m_netlistp->topModulep()->stmtsp()->addHereThisAsNext(m_ctxVarp);
         m_ctxVscp = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(),
                                     m_ctxVarp};

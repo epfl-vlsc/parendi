@@ -764,6 +764,8 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const {
             info.m_type = "VlIpuProfileTraceVec";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::OPENMP_MEM) {
             info.m_type = "MemoryContents";
+        } else if (bdtypep->keyword() == VBasicDTypeKwd::OPENMP_CONTEXT) {
+            info.m_type = "VlOpenMPContext&";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::CHARPTR) {
             info.m_type = "const char*";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::SCOPEPTR) {

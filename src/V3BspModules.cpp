@@ -1142,7 +1142,7 @@ private:
         });
         m_netlistp->foreach([this](AstClassPackage* classp) {
             if (classp->name() == V3BspModules::builtinBaseClassPkg) {
-                classp->v3fatalSrc("name classh with builtin base classpacakge "
+                classp->v3fatalSrc("name clash with builtin base classpacakge "
                                    << V3BspModules::builtinBaseClassPkg << endl);
             }
         });
