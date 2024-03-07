@@ -71,11 +71,11 @@ private:
     /// Add VL_ASSIGN_W, VL_VIEW, field name as comment
 
     void visit(AstVarRef* vrefp) override {
-        return;
         if (!m_classp) { return; }
         if (!vrefp->varp()->user1()) { return; }
         if (vrefp->user1()) { return; /*processed*/ }
         vrefp->user1(true);
+
         // wrap the reference in an AstVarView, this is essential for OpenMP since
         // the member variables are Vectors of contiguous data and we wish to
         // view them as Verilator data types, like VlWide and VlUnpackArray
