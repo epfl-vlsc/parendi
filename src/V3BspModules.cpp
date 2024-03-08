@@ -981,14 +981,21 @@ private:
         };
         
         if (v3Global.opt.openmp()) {
-            // Add the mem arg
+            // Add the mem args
             auto memType = newType(VBasicDTypeKwd::OPENMP_MEM);
-            AstVar* memArgp = new AstVar{fl, VVarType::MEMBER, "mem", memType};
-            memArgp->funcLocal(true);
-            memArgp->direction(VDirection::CONSTREF);
-            nbaTopp->addArgsp(memArgp);
-            AstVarScope* thisMemVscp = new AstVarScope{fl, scopep, memArgp};
-            scopep->addVarsp(thisMemVscp);
+            AstVar* memInArgp = new AstVar{fl, VVarType::MEMBER, "memIn", memType};
+            memInArgp->funcLocal(true);
+            memInArgp->direction(VDirection::CONSTREF);
+            nbaTopp->addArgsp(memInArgp);
+            AstVarScope* memInVscp = new AstVarScope{fl, scopep, memInArgp};
+            scopep->addVarsp(memInVscp);
+
+            AstVar* memOutArgp = new AstVar{fl, VVarType::MEMBER, "memOut", memType};
+            memOutArgp->funcLocal(true);
+            memOutArgp->direction(VDirection::REF);
+            nbaTopp->addArgsp(memOutArgp);
+            AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
+            scopep->addVarsp(memOutVscp);
         }
 
         scopep->addBlocksp(nbaTopp);
@@ -1091,23 +1098,33 @@ private:
 
         AstCCall* callNbap = nullptr;
         if (v3Global.opt.openmp()) {
-            // Add the mem arg
-            auto memType2 = newType(VBasicDTypeKwd::OPENMP_MEM);
-            AstVar* memArg2p = new AstVar{fl, VVarType::VAR, "mem", memType2};
-            memArg2p->funcLocal(true);
-            memArg2p->direction(VDirection::CONSTREF);
-            cfuncp->addArgsp(memArg2p);
-            AstVarScope* const thisMemVscp2 = new AstVarScope{fl, scopep, memArg2p};
-            scopep->addVarsp(thisMemVscp2);
+            // Add the mem args
+            auto memType = newType(VBasicDTypeKwd::OPENMP_MEM);
+            AstVar* memInArgp = new AstVar{fl, VVarType::VAR, "memIn", memType};
+            memInArgp->funcLocal(true);
+            memInArgp->direction(VDirection::CONSTREF);
+            cfuncp->addArgsp(memInArgp);
+            AstVarScope* const memInVscp = new AstVarScope{fl, scopep, memInArgp};
+            scopep->addVarsp(memInVscp);
+
+            AstVar* memOutArgp = new AstVar{fl, VVarType::VAR, "memOut", memType};
+            memOutArgp->funcLocal(true);
+            memOutArgp->direction(VDirection::REF);
+            cfuncp->addArgsp(memOutArgp);
+            AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
+            scopep->addVarsp(memOutVscp);
 
             // Body is call:
-            //     this->nbaTop(this->triggerEval(), mem);
+            //     this->nbaTop(this->triggerEval(), memIn, memOut);
             AstCCall* firstVal = new AstCCall{fl, triggerFunctions.second};
             firstVal->dtypeFrom(thisTrigVscp);
-            AstVarRef* const secondVal = new AstVarRef{fl, memArg2p, VAccess::READ};
-            secondVal->varScopep(thisMemVscp2);
+            AstVarRef* const secondVal = new AstVarRef{fl, memInArgp, VAccess::READ};
+            secondVal->varScopep(memInVscp);
+            AstVarRef* const thirdVal = new AstVarRef{fl, memOutArgp, VAccess::READWRITE};
+            thirdVal->varScopep(memOutVscp);
             AstNodeExpr* arglist = firstVal;
             arglist->addNext(secondVal);
+            arglist->addNext(thirdVal);
             callNbap = new AstCCall{fl, nbaTopp, arglist};
         } else {
             // Body is call:

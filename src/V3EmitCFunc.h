@@ -1227,7 +1227,11 @@ public:
     }
     void visit(AstVarRefView* nodep) override {
         if (v3Global.opt.openmp()) {
-            puts("mem.");
+            if (nodep->vrefp()->access() == VAccess::READ) {
+                puts("memIn.");
+            } else {
+                puts("memOut.");
+            }
             puts(nodep->vrefp()->name());
         } else {
             // VN_IS won't work, need dynamic_cast to check.
