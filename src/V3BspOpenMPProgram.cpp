@@ -21,9 +21,7 @@
 
 #include "V3Ast.h"
 #include "V3AstUserAllocator.h"
-#include "V3BspDpi.h"
 #include "V3BspModules.h"
-#include "V3BspPlusArgs.h"
 #include "V3EmitCBase.h"
 #include "V3Global.h"
 #include "V3Stats.h"
@@ -294,7 +292,6 @@ private:
                     string{"OpenMP, Total off-tile word copies "} + " (" + kind + ")", totalWords);
             }
             if (m_exchangeDump && kind == "exchange") {
-
                 AstClass* const sourceClassp = getClass(assignp->rhsp());
                 AstClass* const targetClassp = getClass(assignp->lhsp());
 
@@ -405,28 +402,20 @@ public:
             callp->dtypeSetVoid();
             constructAllp->addStmtsp(new AstStmtExpr{ctorp->fileline(), callp});
         });
-        // add the plusArgs function right after construction, this will set a bunch
-        // of host variables later needed to be copied to the user vertcies
-        // copy the cache values of args to the tensors on startup
-        AstCFunc* plusArgsCopyp = getFunc(m_netlistp->topModulep(), "plusArgsCopy");
-        addInitConstCopies(plusArgsCopyp);
-        // AstCCall* plusArgsCopyCallp = new AstCCall{plusArgsCopyp->fileline(), plusArgsCopyp};
-        // plusArgsCopyCallp->dtypeSetVoid();
-        // constructAllp->addStmtsp(
-        //     new AstStmtExpr{plusArgsCopyCallp->fileline(), plusArgsCopyCallp});
+
+        // Do not create PlusArgsCopy function for OpenMP.
+
         // Step 2.
         // create an OpenMP program with the following structure:
         // Add the copy operations
         m_netlistp->foreach([this](AstCFunc* cfuncp) {
             if (cfuncp->name() == "exchange") { addNextCurrentPairs(cfuncp); }
-            if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize"
-                || cfuncp->name() == "dpiExchange" || cfuncp->name() == "dpiBroadcast") {
+            if (cfuncp->name() == "exchange" || cfuncp->name() == "initialize") {
                 // create copy operations
                 addCopies(cfuncp, cfuncp->name());
             }
         });
         // remove the function that are not used
-        getFunc(m_netlistp->topModulep(), "hostHandle")->unlinkFrBack()->deleteTree();
         getFunc(m_netlistp->topModulep(), "computeSet")->unlinkFrBack()->deleteTree();
         getFunc(m_netlistp->topModulep(), "initComputeSet")->unlinkFrBack()->deleteTree();
     }
@@ -436,10 +425,9 @@ void V3BspOpenMPProgram::createProgram(AstNetlist* nodep) {
     // reoder passes only if you know what you are doing
     UINFO(3, "Creating OpenMP program" << endl);
 
-    V3BspPlusArgs::makeCache(nodep);
+    // Do not create PlusArgs functions for OpenMP with V3BspPlusArgs::makeCache
 
-    // delegate all dpi calls to the host
-    V3BspDpi::delegateAll(nodep);
+    // Do not create Dpi functions for OpenMP with V3BspDpi::delegateAll
 
     { OpenMPLegalizeFieldNamesVisitor{nodep}; }
     V3Global::dumpCheckGlobalTree("bspLegal", 0, dumpTree() >= 1);
