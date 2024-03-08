@@ -117,7 +117,7 @@ private:
     std::vector<AstCFunc*> emitModule(AstNodeModule* modp) {
         openNextOutputFile(prefixNameProtect(modp), true);
         // emit any typedef structure that may live under the modp
-        
+
         puts("class VlOpenMPContext;\n");
         puts("class ");
         puts(prefixNameProtect(modp));
@@ -130,12 +130,17 @@ private:
         for (AstNode* nodep = modp->stmtsp(); nodep; nodep = nodep->nextp()) {
             if (AstVar* varp = VN_CAST(nodep, Var)) {
                 if (varp->dtypep()->basicp()
-                    && varp->dtypep()->basicp()->keyword() == VBasicDTypeKwd::OPENMP_CONTEXT)
+                    && varp->dtypep()->basicp()->keyword() == VBasicDTypeKwd::OPENMP_CONTEXT) {
                     ctxName = varp->name();  // hacky
-                puts(varp->dtypep()->cType("", false, false));
-                puts(" ");
-                puts(varp->nameProtect());
-                puts(";\n");
+                }
+                if (varp->name() == "NUM_CORES") {
+                    puts("const int NUM_CORES = " + cvtToStr(v3Global.opt.openmp_threads()) + ";\n");
+                } else {
+                    puts(varp->dtypep()->cType("", false, false));
+                    puts(" ");
+                    puts(varp->nameProtect());
+                    puts(";\n");
+                }
 
             } else if (AstCFunc* cfuncp = VN_CAST(nodep, CFunc)) {
                 if (cfuncp->dpiImportPrototype()) {
