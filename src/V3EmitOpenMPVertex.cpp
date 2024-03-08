@@ -81,6 +81,7 @@ private:
         ofp()->putsHeader();
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
+        puts("// Codelet implementations\n\n");
         puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated_openmp.h>\n");
         puts("#include <" + topClassName() + "__memory_contents.h>\n");
@@ -99,27 +100,6 @@ private:
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);  // public
 
-        // emit the members
-        // ofp()->puts("using Vec = openmp::InOut<openmp::Vector<IData, "
-        //             "openmp::VectorLayout::COMPACT_PTR, alignof(QData)>>;\n\n");
-        // for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
-        //     if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
-        //         UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
-        //         auto flag = vrefp->bspFlag();
-        //         puts("/* [" + flag.ascii() + "] */\n");
-        //         if (flag.isInputOnly()) {
-        //             puts("VecIn ");
-        //         } else {
-        //             puts("Vec ");
-        //         }
-        //         // puts(vrefp->dtypep()->cType("", false, false));
-        //         // puts("> ");
-        //         puts(vrefp->nameProtect());
-        //         puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
-        //              + vrefp->fileline()->ascii() + " */\n");
-        //     }
-        // }
-
         // emit method decls
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) {
@@ -135,6 +115,33 @@ private:
         }
     }
 
+    void emitHeaderFile(std::vector<std::vector<const AstClass*>>& toEmitp) {
+        UASSERT(!m_ofp, "file not closed");
+        for (int tid = 0; tid < toEmitp.size(); tid++) {
+            string filename = v3Global.opt.makeDir() + "/" + topClassName();
+            filename += "__codelet_" + cvtToStr(tid);
+            filename = m_uniqueNames.get(filename);
+            filename += ".h";
+            m_ofp = new V3OutCFile{filename};
+
+            ofp()->putsHeader();
+            puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
+            puts("// OpenMP implementation\n");
+            puts("// Codelet classes\n\n");
+            puts("#ifndef VERILATED_CODELETS_H_\n");
+            puts("#define VERILATED_CODELETS_H_  // guard\n");
+
+            for (const AstClass* classp : toEmitp[tid]) {
+                puts("\nclass ");
+                puts(prefixNameProtect(classp));
+                puts(";\n");
+            }
+            puts("\n#endif  // guard\n");
+            m_ofp->putsEndGuard();
+            VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
+        }
+    }
+
     void emitMemory(std::vector<std::vector<const AstClass*>>& toEmitp) {
         UASSERT(!m_ofp, "file not closed");
         string filename = v3Global.opt.makeDir() + "/" + topClassName();
@@ -143,6 +150,7 @@ private:
         ofp()->putsHeader();
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
+        puts("// Shared memory structure\n\n");
         puts("#ifndef VERILATED_MEM_CONTENTS_H_\n");
         puts("#define VERILATED_MEM_CONTENTS_H_  // guard\n");
         puts("#include <vlopenmp/verilated.h>\n");
@@ -249,7 +257,8 @@ public:
             UINFO(3, "Emitted " << filesEmitted << " files " << endl);
             for (AstCFile* cfilep : res) { netlistp->addFilesp(cfilep); }
         }
-        EmitOpenMPVertex impl{nullptr}; // Need (empty) object for method
+        EmitOpenMPVertex impl{nullptr};  // Need (empty) object for method
+        impl.emitHeaderFile(toEmitp);
         impl.emitMemory(toEmitp);
     }
 };
