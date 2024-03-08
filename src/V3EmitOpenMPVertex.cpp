@@ -67,6 +67,7 @@ private:
             filename += "__" + subFileName;
             filename = m_uniqueNames.get(filename);
         }
+        string filenameBase = filename;
         filename += ".cpp";
 
         AstCFile* const cfilep = new AstCFile{v3Global.rootp()->fileline(), filename};
@@ -74,7 +75,6 @@ private:
         cfilep->source(true);
         cfilep->codelet(true);
 
-        // v3Global.rootp()->addFilesp(cfilep);
         m_newFilesp.push_back(cfilep);
 
         m_ofp = new V3OutCFile{filename};
@@ -85,7 +85,8 @@ private:
         puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated_openmp.h>\n");
         puts("#include <" + topClassName() + "__memory_contents.h>\n");
-        // puts("using namespace openmp;");
+        string includeFilename = filenameBase + ".h";
+        puts("#include \"" + includeFilename + "\"\n\n");
     }
 
     void emitClass(const AstClass* classp) {
@@ -109,19 +110,38 @@ private:
         }
         ensureNewLine();
         puts("};\n\n");
+
         // emit method defs
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) { EmitCFunc::visit(funcp); }
         }
     }
 
+    void emitClassList(const std::vector<const AstClass*>& toEmitp) {
+        puts("\nCodeletBase* CodeletInstances[] = {\n");
+        for (const AstClass* classp : toEmitp) {
+            if (!classp->flag().isBspInit()) { puts("  new " + classp->name() + "(),\n"); }
+        }
+        puts("nullptr};\n");
+        puts("\nCodeletBase* CodeletInitInstances[] = {\n");
+        for (const AstClass* classp : toEmitp) {
+            if (classp->flag().isBspInit()) { puts("  new " + classp->name() + "(),\n"); }
+        }
+        puts("nullptr};\n");
+        
+    }
+
     void emitHeaderFile(std::vector<std::vector<const AstClass*>>& toEmitp) {
         UASSERT(!m_ofp, "file not closed");
         for (int tid = 0; tid < toEmitp.size(); tid++) {
             string filename = v3Global.opt.makeDir() + "/" + topClassName();
-            filename += "__codelet_" + cvtToStr(tid);
-            filename = m_uniqueNames.get(filename);
-            filename += ".h";
+            filename += "__codelet.h";
+            // Really should follow implementation name, but it is hard to find
+            // names in other files's includes, and we only use one file for all
+            // codelets since one only have one IPU.
+            //
+            // filename += "__codelet_" + cvtToStr(tid); filename =
+            // m_uniqueNames.get(filename); filename += ".h";
             m_ofp = new V3OutCFile{filename};
 
             ofp()->putsHeader();
@@ -130,12 +150,18 @@ private:
             puts("// Codelet classes\n\n");
             puts("#ifndef VERILATED_CODELETS_H_\n");
             puts("#define VERILATED_CODELETS_H_  // guard\n");
+            puts("#include <vlopenmp/verilated_openmp_types.h>\n\n");
 
             for (const AstClass* classp : toEmitp[tid]) {
                 puts("\nclass ");
                 puts(prefixNameProtect(classp));
                 puts(";\n");
             }
+
+            // Null terminated lists
+            puts("\nextern CodeletBase** CodeletInstances;\n");
+            puts("extern CodeletBase** CodeletInitInstances;\n");
+
             puts("\n#endif  // guard\n");
             m_ofp->putsEndGuard();
             VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
@@ -199,6 +225,7 @@ private:
                 UINFO(3, "Emitting " << classp->nameProtect() << endl);
                 emitClass(classp);
             }
+            emitClassList(toEmitp);
             if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
         }
     }
@@ -209,6 +236,7 @@ private:
         : m_multiThreaded(true) {
         openNextOutputFile("codelet_" + cvtToStr(threadIndex));
         for (const AstClass* classp : toEmitp) { emitClass(classp); }
+        emitClassList(toEmitp);
         if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
     }
 
@@ -234,11 +262,10 @@ private:
         return toEmitp;
     }
 
-    public:
-
+public:
     static inline void emitAllThreaded(AstNetlist* netlistp) {
         std::vector<std::vector<const AstClass*>> toEmitp = findClassesToEmit(netlistp);
-        
+
         UINFO(3, "Emitting " << toEmitp.size() << " codelet files " << endl);
         using EmitResult = std::vector<AstCFile*>;
         std::vector<std::future<EmitResult>> results;

@@ -60,9 +60,11 @@ private:
         ofp()->putsHeader();
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
+        puts("// Root of computation\n\n");
         if (header) ofp()->putsGuard();
         puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated_openmp.h>\n");
+        puts("#include \"" + v3Global.opt.modPrefix() + "__codelet.h\"\n");
         
         // puts("using namespace openmp;");
         if (!header) {
