@@ -383,7 +383,7 @@ public:
 
         // Step 1.
         // go through each class and create constructors. All that happens here
-        // depends on a hard coded PoplarContext that provides a few methods
+        // depends on a hard coded OpenMPContext that provides a few methods
         // for constructing graphs from codelets and connecting tensors to vertices
         AstNode::user1ClearTree();
         AstCFunc* constructAllp = new AstCFunc{m_netlistp->fileline(), "constructAll",

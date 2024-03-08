@@ -130,7 +130,7 @@ private:
         for (AstNode* nodep = modp->stmtsp(); nodep; nodep = nodep->nextp()) {
             if (AstVar* varp = VN_CAST(nodep, Var)) {
                 if (varp->dtypep()->basicp()
-                    && varp->dtypep()->basicp()->keyword() == VBasicDTypeKwd::POPLAR_CONTEXT)
+                    && varp->dtypep()->basicp()->keyword() == VBasicDTypeKwd::OPENMP_CONTEXT)
                     ctxName = varp->name();  // hacky
                 puts(varp->dtypep()->cType("", false, false));
                 puts(" ");
@@ -147,7 +147,7 @@ private:
             }
         }
         puts(prefixNameProtect(modp));
-        puts("(VlOpenMPContext& _ctx) : " + ctxName + " ctx(_ctx) {}\n");  // hacky
+        puts("(VlOpenMPContext& _ctx) : " + ctxName + "(_ctx) {}\n");  // hacky
         ensureNewLine();
         puts("};\n");
         puts("\n");
