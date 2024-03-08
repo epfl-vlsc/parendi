@@ -82,7 +82,7 @@ private:
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
         puts("#include <verilated.h>\n");
-        puts("#include <vlopenmp/verilated.h>\n");
+        puts("#include <vlopenmp/verilated_openmp.h>\n");
         puts("#include <" + topClassName() + "__memory_contents.h>\n");
         // puts("using namespace openmp;");
     }
@@ -146,6 +146,7 @@ private:
         puts("#ifndef VERILATED_MEM_CONTENTS_H_\n");
         puts("#define VERILATED_MEM_CONTENTS_H_  // guard\n");
         puts("#include <vlopenmp/verilated.h>\n");
+        puts("#include <vlopenmp/verilated_openmp.h>\n");
 
         puts("\n");
         puts("class memory_contents {\n");

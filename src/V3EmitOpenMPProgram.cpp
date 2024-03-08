@@ -62,6 +62,8 @@ private:
         puts("// OpenMP implementation\n");
         if (header) ofp()->putsGuard();
         puts("#include <verilated.h>\n");
+        puts("#include <vlopenmp/verilated_openmp.h>\n");
+        
         // puts("using namespace openmp;");
         if (!header) {
             for (const auto& hdr : m_headers) { puts("#include \"" + hdr + "\"\n"); }
@@ -119,7 +121,7 @@ private:
         // emit any typedef structure that may live under the modp
 
         puts("#include <vlopenmp/verilated_openmp_context.h>\n");
-        puts("#include <vlopenmp/verilated_types.h>\n\n");
+        puts("#include <vlopenmp/verilated_openmp.h>\n\n");
 
         puts("class ");
         puts(prefixNameProtect(modp));

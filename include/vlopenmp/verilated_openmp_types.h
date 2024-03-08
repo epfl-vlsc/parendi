@@ -12,18 +12,17 @@
 //*************************************************************************
 ///
 /// \file
-/// \brief Verilated common data type containers
+/// \brief Verilated OpenMP common data type containers
 ///
-/// verilated.h should be included instead of this file.
+/// verilated_openmp.h should be included instead of this file.
 ///
 /// Those macro/function/variable starting or ending in _ are internal,
 /// however many of the other function/macros here are also internal.
 ///
 //*************************************************************************
 
-#ifndef OPENMP_VERILATED_TYPES_H_
-#define OPENMP_VERILATED_TYPES_H_
-
+#ifndef VERILATED_OPENMP_TYPES_H_
+#define VERILATED_OPENMP_TYPES_H_
 
 class MemoryContents;
 class CodeletBase {

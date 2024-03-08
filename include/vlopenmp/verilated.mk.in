@@ -120,9 +120,6 @@ endif
 
 all: $(VMAIN)$(BIN_SUFFIX) $(GRAPH_BINARY_DEP)
 
-VlTimeStamp.gp: $(PARENDI_ROOT)/include/vlopenmp/verilated_timestamp.cpp
-	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
-
 $(OBJS_GP):%.gp: %.cpp
 	$(POPC) $^ $(IPU_FLAGS) --target ipu2 -o $@
 $(OBJS_S):%.s: %.cpp
@@ -136,7 +133,7 @@ $(OBJS_HOST):%.o: %.cpp
 
 $(VMAIN)_objects: $(OBJS_HOST) $(OBJS_GP)
 
-$(VMAIN)_graph_compiler$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP) VlTimeStamp.gp
+$(VMAIN)_graph_compiler$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_COMPILE_FLAGS) -o $@
 $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX): $(VMAIN)_graph_compiler$(BIN_SUFFIX)
 	./$< $(GRAPH_FLAGS)
@@ -144,6 +141,6 @@ $(VMAIN)$(BIN_SUFFIX): $(OBJS_HOST) $(OBJS_GP) $(VERILATOR_CPP)
 	$(CXX) $(HOST_FLAGS) $(OBJS_HOST) $(VERILATOR_CPP) $(LIBS) $(GRAPH_RUN_FLAGS) -o $@
 
 clean_main:
-	rm -f $(VMAIN)$(BIN_SUFFIX) $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX) $(VMAIN)_graph_compiler$(BIN_SUFFIX) VlTimeStamp.gp
+	rm -f $(VMAIN)$(BIN_SUFFIX) $(VMAIN_ROOT).graph.bin$(BIN_SUFFIX) $(VMAIN)_graph_compiler$(BIN_SUFFIX)
 clean:
 	rm -rf *.o *.gp *.s report *.graph.bin VMain VMain_graph_compiler
