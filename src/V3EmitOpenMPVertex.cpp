@@ -185,7 +185,7 @@ private:
         VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
     }
 
-    /// Unused
+    /// Only used to produce a class instance.
     explicit EmitOpenMPVertex(AstNetlist* netlistp)
         : m_multiThreaded(true) {  // OpenMP is multithreaded
         if (netlistp) {
@@ -212,14 +212,7 @@ private:
         if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }
     }
 
-public:
-    /// Unused
-    static inline void emitAll(AstNetlist* netlistp) {
-        EmitOpenMPVertex impl{netlistp};
-        for (AstCFile* cfilep : impl.m_newFilesp) { netlistp->addFilesp(cfilep); }
-    }
-
-    static inline void emitAllThreaded(AstNetlist* netlistp) {
+    static std::vector<std::vector<const AstClass*>> findClassesToEmit(AstNetlist* netlistp) {
         std::vector<std::vector<const AstClass*>> toEmitp;
         toEmitp.push_back({});
         int nodeCount = 0;
@@ -238,6 +231,14 @@ public:
                 }
             }
         }
+        return toEmitp;
+    }
+
+    public:
+
+    static inline void emitAllThreaded(AstNetlist* netlistp) {
+        std::vector<std::vector<const AstClass*>> toEmitp = findClassesToEmit(netlistp);
+        
         UINFO(3, "Emitting " << toEmitp.size() << " codelet files " << endl);
         using EmitResult = std::vector<AstCFile*>;
         std::vector<std::future<EmitResult>> results;
