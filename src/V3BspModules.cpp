@@ -1179,7 +1179,6 @@ private:
         AstCFunc* const initFuncp = new AstCFunc{m_netlistp->topModulep()->fileline(),
                                                  "initialize", m_topScopep, "void"};
 
-        initFuncp->slow(true);
         initFuncp->dontCombine(true);
         // go through all of the old variables and find their new producer and consumers
         // then create a assignments for updating them safely in an "exchange" function.

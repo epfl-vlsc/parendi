@@ -81,6 +81,7 @@ private:
         ofp()->putsHeader();
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
+        puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated.h>\n");
         puts("#include <" + topClassName() + "__memory_contents.h>\n");
         // puts("using namespace openmp;");

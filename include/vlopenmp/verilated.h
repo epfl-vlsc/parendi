@@ -32,9 +32,6 @@
 #define VERILATOR_VERILATED_H_INTERNAL_
 
 
-#include "verilatedos.h"
-#include "verilated_config.h"
-#include <print.h> // openmp print
 #include <cmath>
 
 //=========================================================================
@@ -102,7 +99,6 @@ enum VerilatedVarFlags {
 //=========================================================================
 // Functions
 
-#include "vlopenmp/verilated_funcs.h"
 
 #undef VERILATOR_VERILATED_H_INTERNAL_
 #endif  // Guard

@@ -118,7 +118,9 @@ private:
         openNextOutputFile(prefixNameProtect(modp), true);
         // emit any typedef structure that may live under the modp
 
-        puts("class VlOpenMPContext;\n");
+        puts("#include <vlopenmp/verilated_openmp_context.h>\n");
+        puts("#include <vlopenmp/verilated_types.h>\n\n");
+
         puts("class ");
         puts(prefixNameProtect(modp));
         puts(" final {\n");
@@ -134,7 +136,8 @@ private:
                     ctxName = varp->name();  // hacky
                 }
                 if (varp->name() == "NUM_CORES") {
-                    puts("const int NUM_CORES = " + cvtToStr(v3Global.opt.openmp_threads()) + ";\n");
+                    puts("static const int NUM_CORES = " + cvtToStr(v3Global.opt.openmp_threads()) + ";\n");
+                    puts("CodeletBase* codelets[NUM_CORES];\n");
                 } else {
                     puts(varp->dtypep()->cType("", false, false));
                     puts(" ");
