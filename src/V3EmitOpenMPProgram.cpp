@@ -127,7 +127,7 @@ private:
 
         puts("class ");
         puts(prefixNameProtect(modp));
-        puts(" final {\n");
+        puts(" : OpenMPRoot {\n");
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);
         // hardcoded constructor
@@ -140,8 +140,8 @@ private:
                     ctxName = varp->name();  // hacky
                 }
                 if (varp->name() == "NUM_CORES") {
-                    puts("static const int NUM_CORES = " + cvtToStr(v3Global.opt.openmp_threads()) + ";\n");
-                    puts("CodeletBase* codelets[NUM_CORES];\n");
+                    // puts("static const int NUM_CORES = " + cvtToStr(v3Global.opt.openmp_threads()) + ";\n");
+                    // puts("CodeletBase* codelets[NUM_CORES];\n");
                 } else {
                     puts(varp->dtypep()->cType("", false, false));
                     puts(" ");
@@ -159,11 +159,9 @@ private:
             }
         }
         puts(prefixNameProtect(modp));
-        puts("(VlOpenMPContext& _ctx) : " + ctxName + "(_ctx) {}\n");  // hacky
-        ensureNewLine();
-        puts("};\n");
-        puts("\n");
-        puts("\n");
+        puts("() {}\n");  // hacky
+        puts("};\n\n");
+        puts("extern " + prefixNameProtect(modp) + " RootObject;\n");
         closeFile(true);
         return dpisp;
     }
@@ -191,6 +189,9 @@ private:
     void emitModuleImpl(AstNodeModule* modp) {
         m_modp = modp;
         modp->foreach([this](AstCFunc* cfuncp) { emitCFuncImpl(cfuncp); });
+
+        puts("\n");
+        puts(prefixNameProtect(m_modp) + " RootObject;\n");
         m_modp = nullptr;
     }
 

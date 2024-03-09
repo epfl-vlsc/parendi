@@ -24,11 +24,40 @@
 #ifndef VERILATED_OPENMP_TYPES_H_
 #define VERILATED_OPENMP_TYPES_H_
 
+#include <vlopenmp/verilated_openmp_context.h>
+
 class MemoryContents;
 class CodeletBase {
     void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0, const MemoryContents &memIn, MemoryContents &memOut);
     VlTriggerVec<1> triggerEval();
     void compute(const MemoryContents &memIn, MemoryContents &memOut);
+};
+class OpenMPRoot {
+    public:
+    VlOpenMPContext* m_ctx;
+    int m_numCores = -1;
+    CodeletBase** m_codelets = nullptr;
+    CodeletBase** m_initCodelets = nullptr;
+
+    void setCtx(VlOpenMPContext* ctx) {m_ctx = ctx;}
+    VlOpenMPContext* ctx() { return m_ctx; }
+
+    void setNumCores(int nc) {
+        m_numCores = nc;
+        if (m_codelets) { delete(m_codelets); }
+        m_codelets = new CodeletBase*[nc];
+        if (m_initCodelets) { delete(m_initCodelets); }
+        m_initCodelets = new CodeletBase*[nc];
+    }
+    int numCores() { return m_numCores; }
+    CodeletBase** codetlets() { return m_codelets; }
+    CodeletBase** initCodetlets() { return m_initCodelets; }
+
+    void exchange();
+    void initialize();
+    void constructAll();
+
+    OpenMPRoot() {}
 };
 
 #endif  // Guard

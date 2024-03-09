@@ -374,22 +374,6 @@ public:
         // AstClass*
         initBuiltinTypes();
 
-        // VlOpenMPContext is in ctx member variable
-        m_ctxVarp = new AstVar{m_netlistp->fileline(), VVarType::MEMBER, "ctx", m_ctxTypep};
-        m_netlistp->topModulep()->stmtsp()->addHereThisAsNext(m_ctxVarp);
-        m_ctxVscp = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(),
-                                    m_ctxVarp};
-        m_netlistp->topScopep()->scopep()->addVarsp(m_ctxVscp);
-
-        // Number of processes is in NUM_CORES member variable (literal).
-        m_numCoresVarp = new AstVar{m_netlistp->fileline(), VVarType::MEMBER, "NUM_CORES",
-                                    nodep->findSigned32DType()};
-        m_numCoresVarp->direction(VDirection::CONSTREF);
-        m_netlistp->topModulep()->stmtsp()->addHereThisAsNext(m_numCoresVarp);
-        m_numCoresVscp = new AstVarScope{m_netlistp->fileline(), m_netlistp->topScopep()->scopep(),
-                                         m_numCoresVarp};
-        m_netlistp->topScopep()->scopep()->addVarsp(m_numCoresVscp);
-
         // Step 1.
         // go through each class and create constructors. All that happens here
         // depends on a hard coded OpenMPContext that provides a few methods
