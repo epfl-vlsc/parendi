@@ -636,6 +636,26 @@ private:
         return std::pair<AstNodeExpr*, AstAssign*>{condExprp, updatep};
     }
 
+    void optionallyAddMemArgs(AstCFunc* const funcp, AstClass* classp, AstScope* scopep) {
+        // OpenMP passes In/Out memory to pretty much everything
+        if (v3Global.opt.openmp()) {
+            // Add the mem args
+            AstVar* memInArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memIn", m_computeMemType};
+            memInArgp->funcLocal(true);
+            memInArgp->direction(VDirection::CONSTREF);
+            funcp->addArgsp(memInArgp);
+            AstVarScope* memInVscp = new AstVarScope{classp->fileline(), scopep, memInArgp};
+            scopep->addVarsp(memInVscp);
+
+            AstVar* memOutArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memOut", m_computeMemType};
+            memOutArgp->funcLocal(true);
+            memOutArgp->direction(VDirection::REF);
+            funcp->addArgsp(memOutArgp);
+            AstVarScope* memOutVscp = new AstVarScope{classp->fileline(), scopep, memOutArgp};
+            scopep->addVarsp(memOutVscp);
+        }
+    }
+
     // make the triggering function
     using TrigAtGen = std::function<AstNodeExpr*(AstVarScope*)>;
     std::pair<std::map<AstSenTree*, TrigAtGen>, AstCFunc*>
@@ -672,25 +692,7 @@ private:
         trigEvalFuncp->addStmtsp(thisTrigp);
         AstVarScope* const thisTrigVscp = new AstVarScope{classp->fileline(), scopep, thisTrigp};
         scopep->addVarsp(thisTrigVscp);
-
-        if (v3Global.opt.openmp()) {
-            // Add the mem args
-            AstVar* memInArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memIn", m_computeMemType};
-            memInArgp->funcLocal(true);
-            memInArgp->direction(VDirection::CONSTREF);
-            trigEvalFuncp->addArgsp(memInArgp);
-            AstVarScope* memInVscp = new AstVarScope{classp->fileline(), scopep, memInArgp};
-            scopep->addVarsp(memInVscp);
-
-            AstVar* memOutArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memOut", m_computeMemType};
-            memOutArgp->funcLocal(true);
-            memOutArgp->direction(VDirection::REF);
-            trigEvalFuncp->addArgsp(memOutArgp);
-            AstVarScope* memOutVscp = new AstVarScope{classp->fileline(), scopep, memOutArgp};
-            scopep->addVarsp(memOutVscp);
-        }
-
-        // scopep->addBlocksp(nbaTopp);
+        optionallyAddMemArgs(trigEvalFuncp, classp, scopep);
 
         AstCMethodHard* const trigClearp = new AstCMethodHard{
             classp->fileline(), new AstVarRef{classp->fileline(), thisTrigVscp, VAccess::WRITE},
@@ -998,23 +1000,7 @@ private:
         nbaTopp->addArgsp(trigArgp);
         AstVarScope* const thisTrigVscp = new AstVarScope{fl, scopep, trigArgp};
         scopep->addVarsp(thisTrigVscp);
-
-        if (v3Global.opt.openmp()) {
-            // Add the mem args
-            AstVar* memInArgp = new AstVar{fl, VVarType::MEMBER, "memIn", m_computeMemType};
-            memInArgp->funcLocal(true);
-            memInArgp->direction(VDirection::CONSTREF);
-            nbaTopp->addArgsp(memInArgp);
-            AstVarScope* memInVscp = new AstVarScope{fl, scopep, memInArgp};
-            scopep->addVarsp(memInVscp);
-
-            AstVar* memOutArgp = new AstVar{fl, VVarType::MEMBER, "memOut", m_computeMemType};
-            memOutArgp->funcLocal(true);
-            memOutArgp->direction(VDirection::REF);
-            nbaTopp->addArgsp(memOutArgp);
-            AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
-            scopep->addVarsp(memOutVscp);
-        }
+        optionallyAddMemArgs(nbaTopp, classp, scopep);
 
         scopep->addBlocksp(nbaTopp);
 
@@ -1392,6 +1378,44 @@ private:
             cfuncp->addArgsp(memOutArgp);
             AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
             scopep->addVarsp(memOutVscp);
+
+            // Create other methods (empty) to override abstract virtual methods.
+            AstCFunc* nbaTopp = new AstCFunc{fl, "nbaTop", scopep, "void"};
+            nbaTopp->isMethod(true);
+            nbaTopp->isInline(true);
+            nbaTopp->dontCombine(true);
+    
+            // Add trigArg arg
+            AstVar* const trigArgp
+                = new AstVar{fl, VVarType::MEMBER, freshName("trigArg"), m_triggering.trigDTypep};
+            trigArgp->funcLocal(true);
+            trigArgp->direction(VDirection::CONSTREF);
+            nbaTopp->addArgsp(trigArgp);
+            AstVarScope* const thisTrigVscp = new AstVarScope{fl, scopep, trigArgp};
+            scopep->addVarsp(thisTrigVscp);
+            optionallyAddMemArgs(nbaTopp, classp, scopep);
+            scopep->addBlocksp(nbaTopp);
+
+            AstCFunc* const trigEvalFuncp = new AstCFunc{classp->fileline(), "triggerEval", scopep};
+            trigEvalFuncp->isMethod(true);
+            trigEvalFuncp->isInline(true);
+            trigEvalFuncp->dontCombine(true);
+            scopep->addBlocksp(trigEvalFuncp);
+    
+            AstVar* const thisTrigp = new AstVar{classp->fileline(), VVarType::MEMBER,
+                                                    freshName("actTrig"), m_triggering.trigDTypep};
+            trigEvalFuncp->rtnType(thisTrigp->dtypep()->cType("", false, false));
+            thisTrigp->funcLocal(true);
+            thisTrigp->funcReturn(true);
+            thisTrigp->lifetime(VLifetime::AUTOMATIC);
+            trigEvalFuncp->addStmtsp(thisTrigp);
+            AstVarScope* const thisTrigVscp2 = new AstVarScope{classp->fileline(), scopep, thisTrigp};
+            scopep->addVarsp(thisTrigVscp2);
+            optionallyAddMemArgs(trigEvalFuncp, classp, scopep);
+
+            // Return
+            trigEvalFuncp->addStmtsp(new AstCReturn{
+                        classp->fileline(), new AstVarRef{classp->fileline(), thisTrigVscp2, VAccess::READ}});
         }
 
         // STATE

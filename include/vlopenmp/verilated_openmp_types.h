@@ -60,13 +60,14 @@ public:
 
     void set(uint32_t index, bool value) { m_flags[index] = value; }
 };
+class MemoryContents;
 
-class MemoryContents;  // Defined in application
 class CodeletBase {
-    void nbaTop(const VlTriggerVec<1>& __VBspMember_trigArg__0, const MemoryContents& memIn,
-                MemoryContents& memOut);
-    VlTriggerVec<1> triggerEval();
-    void compute(const MemoryContents& memIn, MemoryContents& memOut);
+    public:
+    virtual void nbaTop(const VlTriggerVec<1>& __VBspMember_trigArg__0, const MemoryContents& memIn,
+                MemoryContents& memOut) = 0;
+    virtual VlTriggerVec<1> triggerEval(const MemoryContents &memIn, MemoryContents &memOut) = 0;
+    virtual void compute(const MemoryContents& memIn, MemoryContents& memOut) = 0;
 };
 class OpenMPRoot {
 public:

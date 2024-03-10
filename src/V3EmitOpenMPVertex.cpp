@@ -148,6 +148,7 @@ private:
             puts("#ifndef VERILATED_CODELETS_H_\n");
             puts("#define VERILATED_CODELETS_H_  // guard\n");
             puts("#include <vlopenmp/verilated_openmp.h>\n\n");
+            puts("#include <" + topClassName() + "__memory_contents.h>\n");
 
             for (const AstClass* classp : toEmitp[tid]) {
                 puts("\nclass ");
@@ -158,6 +159,9 @@ private:
             // Null terminated lists
             puts("\nextern CodeletBase* CodeletInstances[];\n");
             puts("extern CodeletBase* CodeletInitInstances[];\n");
+
+            puts("static MemoryContents MemIn;\n");
+            puts("static MemoryContents MemOut;\n");
 
             puts("\n#endif  // guard\n");
             m_ofp->putsEndGuard();

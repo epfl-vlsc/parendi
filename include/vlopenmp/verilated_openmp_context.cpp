@@ -4,14 +4,24 @@
 
 #include <vlopenmp/verilated_openmp.h>
 
+
 #include <omp.h>
 
 
 int main(int argc, char* argv[]) {
     VlOpenMPContext ctx;
+
     OpenMPRoot* root = &RootObject;
     root->setCtx(&ctx);
     root->setNumCores(root->NUM_CORES);
     root->setCodelets(CodeletInstances);
     root->setinitCodelets(CodeletInitInstances);
+
+    MemoryContents& memIn = MemIn;
+    MemoryContents& memOut = MemOut;
+
+    // Initialize the world.
+    for (int i = 0; CodeletInitInstances[i] == nullptr; i++) {
+        CodeletInitInstances[i]->compute(memIn, memOut);
+    }
 }
