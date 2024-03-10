@@ -17,11 +17,23 @@ int main(int argc, char* argv[]) {
     root->setCodelets(CodeletInstances);
     root->setinitCodelets(CodeletInitInstances);
 
-    MemoryContents& memIn = MemIn;
-    MemoryContents& memOut = MemOut;
+    MemoryContents& memA = MemIn;
+    MemoryContents& memB = MemOut;
 
     // Initialize the world.
-    for (int i = 0; CodeletInitInstances[i] == nullptr; i++) {
-        CodeletInitInstances[i]->compute(memIn, memOut);
+    for (int i = 0; CodeletInitInstances[i] != nullptr; i++) {
+        CodeletInitInstances[i]->compute(memA, memB);
+    }
+
+    // Run the computation.
+#pragma omp parallel for
+    for (int i = 0; CodeletInstances[i] != nullptr; i++) {
+        auto codeletForThread = CodeletInstances[i];
+        while (true) {
+            codeletForThread->compute(memA, memB);
+#pragma barrier
+            codeletForThread->compute(memB, memA);
+#pragma barrier
+        }
     }
 }
