@@ -62,7 +62,7 @@ private:
         puts("// OpenMP implementation\n");
         puts("// Root of computation\n\n");
         if (header) ofp()->putsGuard();
-        puts("#include <verilated.h>\n");
+        // puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated_openmp.h>\n");
         puts("#include \"" + v3Global.opt.modPrefix() + "__codelet.h\"\n");
         
@@ -127,7 +127,7 @@ private:
 
         puts("class ");
         puts(prefixNameProtect(modp));
-        puts(" : OpenMPRoot {\n");
+        puts(" :public OpenMPRoot {\n");
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);
         // hardcoded constructor
@@ -140,7 +140,7 @@ private:
                     ctxName = varp->name();  // hacky
                 }
                 if (varp->name() == "NUM_CORES") {
-                    // puts("static const int NUM_CORES = " + cvtToStr(v3Global.opt.openmp_threads()) + ";\n");
+                    puts("const int NUM_CORES;\n");
                     // puts("CodeletBase* codelets[NUM_CORES];\n");
                 } else {
                     puts(varp->dtypep()->cType("", false, false));
@@ -159,7 +159,7 @@ private:
             }
         }
         puts(prefixNameProtect(modp));
-        puts("() {}\n");  // hacky
+        puts("() : NUM_CORES(" +  cvtToStr(v3Global.opt.openmp_threads()) + ") {}\n");  // hacky
         puts("};\n\n");
         puts("extern " + prefixNameProtect(modp) + " RootObject;\n");
         closeFile(true);

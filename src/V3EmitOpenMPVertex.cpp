@@ -82,11 +82,10 @@ private:
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
         puts("// Codelet implementations\n\n");
-        puts("#include <verilated.h>\n");
+        // puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated_openmp.h>\n");
         puts("#include <" + topClassName() + "__memory_contents.h>\n");
-        string includeFilename = filenameBase + ".h";
-        puts("#include \"" + includeFilename + "\"\n\n");
+        puts("#include <" + topClassName() + "__codelet.h>\n");
     }
 
     void emitClass(const AstClass* classp) {
@@ -96,8 +95,7 @@ private:
         puts("// at WORKER = " + cvtToStr(classp->flag().workerId()) + "\n");
         puts("\nclass ");
         puts(prefixNameProtect(classp));
-        string baseClass = "Vertex";
-        puts(" : public openmp::" + baseClass + " {\n");
+        puts(" : public CodeletBase {\n");
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);  // public
 
@@ -120,15 +118,14 @@ private:
     void emitClassList(const std::vector<const AstClass*>& toEmitp) {
         puts("\nCodeletBase* CodeletInstances[] = {\n");
         for (const AstClass* classp : toEmitp) {
-            if (!classp->flag().isBspInit()) { puts("  new " + classp->name() + "(),\n"); }
+            if (!classp->flag().isBspInit()) { puts("  new " + prefixNameProtect(classp) + "(),\n"); }
         }
         puts("nullptr};\n");
         puts("\nCodeletBase* CodeletInitInstances[] = {\n");
         for (const AstClass* classp : toEmitp) {
-            if (classp->flag().isBspInit()) { puts("  new " + classp->name() + "(),\n"); }
+            if (classp->flag().isBspInit()) { puts("  new " + prefixNameProtect(classp) + "(),\n"); }
         }
         puts("nullptr};\n");
-        
     }
 
     void emitHeaderFile(std::vector<std::vector<const AstClass*>>& toEmitp) {
@@ -150,7 +147,7 @@ private:
             puts("// Codelet classes\n\n");
             puts("#ifndef VERILATED_CODELETS_H_\n");
             puts("#define VERILATED_CODELETS_H_  // guard\n");
-            puts("#include <vlopenmp/verilated_openmp_types.h>\n\n");
+            puts("#include <vlopenmp/verilated_openmp.h>\n\n");
 
             for (const AstClass* classp : toEmitp[tid]) {
                 puts("\nclass ");
@@ -159,8 +156,8 @@ private:
             }
 
             // Null terminated lists
-            puts("\nextern CodeletBase** CodeletInstances;\n");
-            puts("extern CodeletBase** CodeletInitInstances;\n");
+            puts("\nextern CodeletBase* CodeletInstances[];\n");
+            puts("extern CodeletBase* CodeletInitInstances[];\n");
 
             puts("\n#endif  // guard\n");
             m_ofp->putsEndGuard();
@@ -179,12 +176,14 @@ private:
         puts("// Shared memory structure\n\n");
         puts("#ifndef VERILATED_MEM_CONTENTS_H_\n");
         puts("#define VERILATED_MEM_CONTENTS_H_  // guard\n");
-        puts("#include <vlopenmp/verilated.h>\n");
+        // puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated_openmp.h>\n");
 
         puts("\n");
-        puts("class memory_contents {\n");
+        puts("class MemoryContents {\n");
+        puts("  public: \n");
 
+        vl_unordered_map<string, bool> varNames;
         for (int tid = 0; tid < toEmitp.size(); tid++) {
             for (const AstClass* classp : toEmitp[tid]) {
                 for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
@@ -193,19 +192,22 @@ private:
                         auto flag = vrefp->bspFlag();
                         if (flag.isInputOnly()) {
                             // Skip input-only fields since they must be output somewhere
-                        } else {
-                            // Should only be output once?
+                            continue;
+                        }
+                        string varName = vrefp->nameProtect();
+                        if (!varNames.count(varName)) {  // Output only once
                             puts("/* [" + flag.ascii() + "] */\n");
                             puts(vrefp->dtypep()->cType(" ", false, false));
-                            puts(vrefp->nameProtect());
+                            puts(varName);
                             puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
                                  + vrefp->fileline()->ascii() + " */\n");
+                            varNames[varName] = true;
                         }
                     }
                 }
             }
         }
-        puts("}\n");
+        puts("};\n");
         puts("#endif  // guard\n");
         m_ofp->putsEndGuard();
         VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);

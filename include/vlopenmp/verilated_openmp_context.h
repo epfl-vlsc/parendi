@@ -19,8 +19,7 @@
 #ifndef VERILATOR_POPLARCONTEXT_H_
 #define VERILATOR_POPLARCONTEXT_H_
 
-// #include "VProgram.h"
-#include "verilated.h"
+#include <vlopenmp/verilated_openmp.h>
 
 ///
 /// VlPoplarContext is responsbile for create a poplar CDFG, currently we treat

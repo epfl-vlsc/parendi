@@ -98,7 +98,7 @@ public:
     void clear() { m_flags.fill(false); }
 
     // Reference to element at 'index'
-    bool& at(size_t index) { return m_flags.at(index); }
+    bool& at(size_t index) const { return m_flags.at(index); }
 
     // Return true iff at least one element is set
     bool any() const {
