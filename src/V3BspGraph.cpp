@@ -1,6 +1,6 @@
 // -*- mode: C++; c-file-style: "cc-mode" -*-
 //*************************************************************************
-// DESCRIPTION: Verilator: BSP fine-grained dependence grpah
+// DESCRIPTION: Verilator: BSP fine-grained dependence graph
 //
 // Code available from: https://verilator.org
 //
@@ -93,7 +93,7 @@ private:
     CompVertex* m_logicVtx = nullptr;  // enclosing logic vertex
     DepGraph* m_graphp = nullptr;
 
-    // create a Compertex for logic node and iterate children to connect the
+    // create a CompVertex for logic node and iterate children to connect the
     // to the corresponding ConstrVertex objects.
     void iterateLogic(AstNode* nodep) {
         UASSERT_OBJ(!m_logicVtx, nodep, "Nesting logic?");
@@ -210,7 +210,7 @@ private:
         if (!m_inClocked && alreadyDefined) { firstUse = false; }
 
         if (firstUse) {
-            // notify next iterations that edgs have been created
+            // notify next iterations that edges have been created
             vscp->user2(vscp->user2() | VR_USE);
             if (!m_inClocked) {
                 // combinational logic, all uses should be before INIT, i.e., before

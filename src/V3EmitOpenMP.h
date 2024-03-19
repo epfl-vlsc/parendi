@@ -30,6 +30,7 @@ public:
     static void emitProgram();
     static void emitMake();
     static void emitStructs();
+    static void addCopyIn(AstCFunc* cfuncp);    
 };
 
 #endif

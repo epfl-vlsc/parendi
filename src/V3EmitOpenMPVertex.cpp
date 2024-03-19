@@ -111,19 +111,26 @@ private:
 
         // emit method defs
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
-            if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) { EmitCFunc::visit(funcp); }
+            if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) {
+                V3EmitOpenMP::addCopyIn(funcp);
+                EmitCFunc::visit(funcp);
+            }
         }
     }
 
     void emitClassList(const std::vector<const AstClass*>& toEmitp) {
         puts("\nCodeletBase* CodeletInstances[] = {\n");
         for (const AstClass* classp : toEmitp) {
-            if (!classp->flag().isBspInit()) { puts("  new " + prefixNameProtect(classp) + "(),\n"); }
+            if (!classp->flag().isBspInit()) {
+                puts("  new " + prefixNameProtect(classp) + "(),\n");
+            }
         }
         puts("nullptr};\n");
         puts("\nCodeletBase* CodeletInitInstances[] = {\n");
         for (const AstClass* classp : toEmitp) {
-            if (classp->flag().isBspInit()) { puts("  new " + prefixNameProtect(classp) + "(),\n"); }
+            if (classp->flag().isBspInit()) {
+                puts("  new " + prefixNameProtect(classp) + "(),\n");
+            }
         }
         puts("nullptr};\n");
     }
@@ -304,4 +311,53 @@ void V3EmitOpenMP::emitVertex() {
 
     EmitOpenMPVertex::emitAllThreaded(netlistp);
     V3Stats::statsStage("emitVertex");
+}
+
+// Under the BSP model for OpenMP, a thread reads values from MemIn and writes
+// results to MemOut. The use of two memories causes problems when a thread
+// writes intermediate values to a location, since reading MemIn will see the
+// unmodified value. The easiest solution (implemented below) is to copy from
+// MemIn to MemOut on function entry and just operate on MemOut. This assumes
+// that each function uses a distinct subset of MemOut so there are no data
+// races. A more optimized solution is allow all reads before the first write to
+// access MemIn and thereafter access MemOut. However, this requires analysis
+// similar to producing SSA since multiple definitions can reach a single use,
+// e.g.:
+//
+// if (p) { x = x + 1 } y = x
+//
+void V3EmitOpenMP::addCopyIn(AstCFunc* cfuncp) {
+    struct Visitor : public VNVisitor {
+        std::unordered_set<AstVar*> m_varsRead;
+        std::unordered_set<AstVar*> m_varsWritten;
+        void visit(AstNode* nodep) override { iterateChildren(nodep); }
+        void visit(AstVarRefView* nodep) override {
+            if (nodep->vrefp()->access() == VAccess::READ) {
+                m_varsRead.insert(nodep->vrefp()->varp());
+                // Set to RW so access will go to MemOut
+                nodep->vrefp()->access(VAccess::READWRITE);
+            } else {
+                m_varsWritten.insert(nodep->vrefp()->varp());
+            }
+        }
+        explicit Visitor(AstCFunc* cfuncp) {}
+    } v(cfuncp);
+
+    v.iterate(cfuncp);
+    std::unordered_set<AstVar*> varsReadOnly;
+    for (auto varp = v.m_varsRead.begin(); varp != v.m_varsRead.end(); varp++) {
+        if (v.m_varsWritten.count(*varp) == 0) { varsReadOnly.insert(*varp); }
+    }
+
+    for (auto varp = v.m_varsWritten.begin(); varp != v.m_varsWritten.end(); varp++) {
+        FileLine* fl = cfuncp->fileline();
+        (*varp)->funcLocal(true);
+        AstVarScope* vscp = new AstVarScope{fl, cfuncp->scopep(), *varp};
+        cfuncp->scopep()->addVarsp(vscp);
+        // Copy from MemIn to MemOut
+        AstAssign* copy
+            = new AstAssign{fl, new AstVarRefView(fl, new AstVarRef{fl, vscp, VAccess::WRITE}),
+                            new AstVarRefView(fl, new AstVarRef{fl, vscp, VAccess::READ})};
+        cfuncp->addInitsp(copy);
+    }
 }

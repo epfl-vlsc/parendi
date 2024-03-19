@@ -65,7 +65,7 @@ private:
         // puts("#include <verilated.h>\n");
         puts("#include <vlopenmp/verilated_openmp.h>\n");
         puts("#include \"" + v3Global.opt.modPrefix() + "__codelet.h\"\n");
-        
+
         // puts("using namespace openmp;");
         if (!header) {
             for (const auto& hdr : m_headers) { puts("#include \"" + hdr + "\"\n"); }
@@ -159,7 +159,7 @@ private:
             }
         }
         puts(prefixNameProtect(modp));
-        puts("() : NUM_CORES(" +  cvtToStr(v3Global.opt.openmp_threads()) + ") {}\n");  // hacky
+        puts("() : NUM_CORES(" + cvtToStr(v3Global.opt.openmp_threads()) + ") {}\n");  // hacky
         puts("};\n\n");
         puts("extern " + prefixNameProtect(modp) + " RootObject;\n");
         closeFile(true);
@@ -183,6 +183,7 @@ private:
             if (m_ofp) VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr);
             openNextOutputFile(prefixNameProtect(m_modp), false);
         }
+        V3EmitOpenMP::addCopyIn(cfuncp);
         EmitCFunc::visit(cfuncp);
     }
 

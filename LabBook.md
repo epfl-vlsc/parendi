@@ -1,8 +1,45 @@
 # Lab Notes for Parendi
 ## James Larus, February 26, 2024
 
-### 04-03-2024
+### 10-03-2024
+Big problem: the codelets update MemOut but read values from MemIn, so they
+don't see their local changes. For example:
 
+      x = x + 1;
+      y = x
+
+will set y to the initial value of x. Would work with SSA:
+
+      x' = x + 1
+      y = x'
+
+Need to avoid writes to MemIn, since it is shared. Writes to MemOut are OK since
+they are presumed to be distinct (no races).
+
+So, codelet can't start by copying MemIn to MemOut and computing on MemOut since
+using only one memory means that writes might conflict with other codelets' reads
+of the original values.
+
+The "right" answer is to compute the SSA of a codelet and only write the final
+(downward exposed) variable to MemOut. The intermediate variables are local to
+avoid conflicts with other codelets. But, under the assumption that codelet
+writes are distinct, all intermediate values could be kept in the variable's
+location in MemOut. So, the upwardly exposed reads go to MemIn and other
+reads/writes go to MemOut? What about merges (phi-functions):
+
+      if (p) {
+        x = x + 1
+      } else {
+        ...
+      }
+      y = x   // x'' = \phi(x', x); y = x''
+
+In this case, \phi would have to balance by inserting a nop: x = x, which gets
+translated to a copy to MemOut. Fortunately, this is only necessary for the
+input variable (x), not the subsequent variable versions.
+
+
+### 04-03-2024
 - Strip out the Poplar-specific stuff and generate plain code. Can go back later to make it faster.
   - V3BspOpenMPProgram.cpp::OpenMPViewsVisitor changes variable references to VL_ASSIGN_W and adds cast with VL_VIEW.
   - V3BspOpenMPProgram.cpp::OpenMPLegalizeFieldNamesVisitor changes variable name to fieldN.
@@ -10,7 +47,6 @@
 
 
 ### 04-04-2024
-
 - Does "VNUser1InUse m_user1Inuse;" have any uses? Eliminate?
 - Organizations of memories:
 
