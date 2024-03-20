@@ -344,10 +344,6 @@ void V3EmitOpenMP::addCopyIn(AstCFunc* cfuncp) {
     } v(cfuncp);
 
     v.iterate(cfuncp);
-    std::unordered_set<AstVar*> varsReadOnly;
-    for (auto varp = v.m_varsRead.begin(); varp != v.m_varsRead.end(); varp++) {
-        if (v.m_varsWritten.count(*varp) == 0) { varsReadOnly.insert(*varp); }
-    }
 
     for (auto varp = v.m_varsWritten.begin(); varp != v.m_varsWritten.end(); varp++) {
         FileLine* fl = cfuncp->fileline();
