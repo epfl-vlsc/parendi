@@ -2,7 +2,7 @@
 
 #include VPROGRAM_HEADER /*defined by the Makefile*/
 
-#include <vlopenmp/verilated_openmp.h>
+#include "verilated.h"
 
 
 #include <omp.h>

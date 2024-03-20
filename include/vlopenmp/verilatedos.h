@@ -402,4 +402,13 @@ T exchange(T& obj, U&& new_value) {
 
 //=========================================================================
 
+//=========================================================================
+// String/time related OS-specific functions
+
+#ifdef _MSC_VER
+# define VL_STRCASECMP _stricmp
+#else
+# define VL_STRCASECMP strcasecmp
+#endif
+
 #endif  // Guard

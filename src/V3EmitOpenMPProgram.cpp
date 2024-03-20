@@ -62,8 +62,7 @@ private:
         puts("// OpenMP implementation\n");
         puts("// Root of computation\n\n");
         if (header) ofp()->putsGuard();
-        // puts("#include <verilated.h>\n");
-        puts("#include <vlopenmp/verilated_openmp.h>\n");
+        puts("#include <vlopenmp/verilated.h>\n");
         puts("#include \"" + v3Global.opt.modPrefix() + "__codelet.h\"\n");
 
         // puts("using namespace openmp;");
@@ -122,8 +121,8 @@ private:
         openNextOutputFile(prefixNameProtect(modp), true);
         // emit any typedef structure that may live under the modp
 
-        puts("#include <vlopenmp/verilated_openmp_context.h>\n");
-        puts("#include <vlopenmp/verilated_openmp.h>\n\n");
+        puts("#include <vlopenmp/verilated.h>\n");
+        puts("#include <vlopenmp/verilated_openmp_context.h>\n\n");
 
         puts("class ");
         puts(prefixNameProtect(modp));

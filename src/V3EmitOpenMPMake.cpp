@@ -59,7 +59,7 @@ public:
 
         ofp->puts("\n");
         ofp->puts("HOST_SOURCES =  \\\n");
-        iterateCFiles([](AstCFile* cfilep) { return !cfilep->codelet() || cfilep->constPool(); },
+        iterateCFiles([](AstCFile* cfilep) { return !cfilep->codelet() && !cfilep->constPool(); },
                       [&](AstCFile* cfilep) {
                           ofp->puts("\t" + V3Os::filenameNonDir(cfilep->name()) + " \\\n");
                       });
