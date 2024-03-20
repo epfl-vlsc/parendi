@@ -24,19 +24,17 @@
 #ifndef VERILATED_OPENMP_TYPES_H_
 #define VERILATED_OPENMP_TYPES_H_
 
-#include <vlopenmp/verilated_openmp_context.h>
-
 #include <array>
+
+#include <vlopenmp/verilated_openmp_context.h>
 
 //===================================================================
 // Activity trigger vector
 
-template <std::size_t T_size>  //
+template <std::size_t T_size>
 class VlTriggerVec final {
-    // TODO: static assert T_size > 0, and don't generate when empty
 private:
-    // MEMBERS
-    std::array<uint32_t, T_size> m_flags;  // State of the assoc array
+    std::array<uint8_t, T_size> m_flags;  // State of the assoc array
 
 public:
     // CONSTRUCTOR
@@ -46,27 +44,30 @@ public:
     // METHODS
 
     // Set all elements to false
-    void clear() { m_flags.fill(false); }
+    inline void clear() { m_flags.fill(false); }
 
-    bool at(size_t index) const { return m_flags.at(index); }
+    inline bool at(size_t index) const { return m_flags.at(index); }
 
     // Return true iff at least one element is set
-    bool any() const {
-        for (size_t i = 0; i < m_flags.size(); ++i)
+    inline bool any() const {
+        for (size_t i = 0; i < m_flags.size(); i++)
             if (m_flags[i]) return true;
         return false;
     }
-    bool empty() const { return !any(); }
 
-    void set(uint32_t index, bool value) { m_flags[index] = value; }
+    inline bool empty() const { return !any(); }
+
+    inline void set(size_t index, bool value) { m_flags[index] = value; }
 };
+
 class MemoryContents;
 
 class CodeletBase {
-    public:
-    virtual void nbaTop(const VlTriggerVec<1>& __VBspMember_trigArg__0, const MemoryContents& memIn,
-                MemoryContents& memOut) = 0;
-    virtual VlTriggerVec<1> triggerEval(const MemoryContents &memIn, MemoryContents &memOut) = 0;
+public:
+    virtual void nbaTop(const VlTriggerVec<1>& __VBspMember_trigArg__0,
+                        const MemoryContents& memIn, MemoryContents& memOut)
+        = 0;
+    virtual VlTriggerVec<1> triggerEval(const MemoryContents& memIn, MemoryContents& memOut) = 0;
     virtual void compute(const MemoryContents& memIn, MemoryContents& memOut) = 0;
 };
 class OpenMPRoot {
