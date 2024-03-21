@@ -82,7 +82,7 @@ private:
         puts("// DESCRIPTION: Verilator output: Design implementation internals\n");
         puts("// OpenMP implementation\n");
         puts("// Codelet implementations\n\n");
-        puts("#include <vlopenmp/verilated.h>\n");
+        puts("#include \"verilated.h\"\n");
         puts("#include <" + topClassName() + "__memory_contents.h>\n");
         puts("#include <" + topClassName() + "__codelet.h>\n");
     }
@@ -153,7 +153,7 @@ private:
             puts("// Codelet classes headers\n\n");
             puts("#ifndef VERILATED_CODELETS_H_\n");
             puts("#define VERILATED_CODELETS_H_  // guard\n");
-            puts("#include <vlopenmp/verilated.h>\n\n");
+            puts("#include \"verilated.h\"\n");
             puts("#include <" + topClassName() + "__memory_contents.h>\n");
 
             for (const AstClass* classp : toEmitp[tid]) {
@@ -186,7 +186,7 @@ private:
         puts("// Shared memory structure\n\n");
         puts("#ifndef VERILATED_MEM_CONTENTS_H_\n");
         puts("#define VERILATED_MEM_CONTENTS_H_  // guard\n");
-        puts("#include <vlopenmp/verilated.h>\n");
+        puts("#include \"verilated.h\"\n");
 
         puts("\n");
         puts("class MemoryContents {\n");

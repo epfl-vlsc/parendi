@@ -19,8 +19,6 @@
 #ifndef VERILATOR_POPLARCONTEXT_H_
 #define VERILATOR_POPLARCONTEXT_H_
 
-#include <vlopenmp/verilated.h>
-
 class VlOpenMPContext final {
 
 };

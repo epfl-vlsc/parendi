@@ -2036,6 +2036,7 @@ static inline WDataOutP VL_COND_WIWW(int obits, WDataOutP owp, int cond, WDataIn
     for (int i = (wordsSet); i < VL_WORDS_I(obits); ++i) o[i] = 0; \
     return o
 
+#ifdef IPU
 // clang-format off
 template<int ALLOC_SIZE>
 static inline VlIpuProfileTrace<ALLOC_SIZE>& VL_CONST_W_1X(int obits,
@@ -2043,6 +2044,8 @@ static inline VlIpuProfileTrace<ALLOC_SIZE>& VL_CONST_W_1X(int obits,
     VL_CONST_W_1X(obits, o, d0);
     return o;
 };
+#endif
+
 static inline WDataOutP VL_CONST_W_1X(int obits, WDataOutP o, EData d0) VL_MT_SAFE {
     o[0] = d0;
     VL_C_END_(obits, 1);

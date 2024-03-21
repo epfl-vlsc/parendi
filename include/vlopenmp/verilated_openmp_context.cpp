@@ -6,13 +6,13 @@
 
 
 #include <omp.h>
-
+#include "verilated.h"
 
 int main(int argc, char* argv[]) {
-    VlOpenMPContext ctx;
+    VerilatedContext contextp;
+    contextp.commandArgs(argc, argv);
 
     OpenMPRoot* root = &RootObject;
-    root->setCtx(&ctx);
     root->setNumCores(root->NUM_CORES);
     root->setCodelets(CodeletInstances);
     root->setinitCodelets(CodeletInitInstances);

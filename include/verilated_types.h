@@ -72,10 +72,13 @@ extern std::string VL_TO_STRING_W(int words, const WDataInP obj);
 #define VL_OUT64(name, msb, lsb) QData name  ///< Declare output signal, 33-64bits
 #define VL_OUT(name, msb, lsb) IData name  ///< Declare output signal, 17-32 bits
 #define VL_OUTW(name, msb, lsb, words) VlWide<words> name  ///< Declare output signal, 65+ bits
+
 //========================================================================
 // IPU specific
 
+#ifdef IPU
 #include "vlpoplar/verilated_ipu_types.h"
+#endif
 
 //===================================================================
 // Activity trigger vector
@@ -98,7 +101,7 @@ public:
     void clear() { m_flags.fill(false); }
 
     // Reference to element at 'index'
-    bool& at(size_t index) const { return m_flags.at(index); }
+    const bool& at(size_t index) const { return m_flags.at(index); }
 
     // Return true iff at least one element is set
     bool any() const {
@@ -107,16 +110,29 @@ public:
         return false;
     }
 
+    // Added for IPU/OPENMP
+    bool empty() const { return !any(); }
+    
     // Set all elements true in 'this' that are set in 'other'
     void set(const VlTriggerVec<T_size>& other) {
         for (size_t i = 0; i < m_flags.size(); ++i) m_flags[i] |= other.m_flags[i];
     }
 
+    // Added for IPU/OPENMP
+    void set(uint32_t index, bool value) { m_flags[index] = value; }
+    
     // Set elements of 'this' to 'a & !b' element-wise
     void andNot(const VlTriggerVec<T_size>& a, const VlTriggerVec<T_size>& b) {
         for (size_t i = 0; i < m_flags.size(); ++i) m_flags[i] = a.m_flags[i] && !b.m_flags[i];
     }
 };
+
+//========================================================================
+// OpenMP specific
+
+#ifdef OPENMP
+#include "vlopenmp/verilated_openmp_types.h"
+#endif
 
 //===================================================================
 // SystemVerilog event type

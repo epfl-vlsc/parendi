@@ -59,7 +59,7 @@ class EmitCConstPool final : public EmitCConstInit {
             ofp->puts("#endif\n");
         } else if (v3Global.opt.openmp()) {
             ofp->puts("#ifdef _OPENMP\n");
-            ofp->puts("#include \"vlopenmp/verilated.h\"\n");
+            ofp->puts("#include \"verilated.h\"\n");
             ofp->puts("#else\n");
             ofp->puts("#include \"verilated.h\"\n");
             ofp->puts("#endif\n");
