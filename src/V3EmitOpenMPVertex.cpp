@@ -193,16 +193,27 @@ private:
         puts("  public: \n");
 
         vl_unordered_map<string, bool> varNames;
+        int bytesUsed = 0;
+        int classId = 0;
         for (int tid = 0; tid < toEmitp.size(); tid++) {
             for (const AstClass* classp : toEmitp[tid]) {
+                if (bytesUsed % VL_CACHE_LINE_BYTES) {
+                    puts("/* Padding */\n");
+                    int padSize = VL_CACHE_LINE_BYTES - (bytesUsed % VL_CACHE_LINE_BYTES);
+                    puts("char pad_" + cvtToStr(classId) + "[" + cvtToStr(padSize) + "];\n");
+                }
+                puts("/* Class " + cvtToStr(classId) + " */\n");
+
+                bytesUsed = 0;
                 for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
                     if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
                         UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
                         auto flag = vrefp->bspFlag();
                         if (flag.isInputOnly()) {
-                            // Skip input-only fields since they must be output somewhere
+                            // Skip input-only fields since they are output by another class
                             continue;
                         }
+
                         string varName = vrefp->nameProtect();
                         if (!varNames.count(varName)) {  // Output only once
                             puts("/* [" + flag.ascii() + "] */\n");
@@ -211,9 +222,11 @@ private:
                             puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
                                  + vrefp->fileline()->ascii() + " */\n");
                             varNames[varName] = true;
+                            bytesUsed += vrefp->dtypep()->widthTotalBytes();
                         }
                     }
                 }
+                classId += 1;
             }
         }
         puts("};\n");
