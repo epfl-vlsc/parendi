@@ -712,7 +712,7 @@ private:
         graphp = nullptr;
     }
 
-    void visit(AstNodeVarRef* vrefp) {
+    void visit(AstNodeVarRef* vrefp) override {
         // rename variables if there is an entry in m_replacements
         AstVarScope* const oldVscp = vrefp->varScopep();
         AstVarScope* const newVscp = VN_CAST(oldVscp->user2p(), VarScope);

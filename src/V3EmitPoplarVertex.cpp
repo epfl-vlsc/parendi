@@ -168,7 +168,7 @@ private:
     explicit EmitPoplarVertex(AstNetlist* netlistp, const std::vector<const AstClass*>& toEmitp,
                               bool useSupervisor, int threadIndex)
         : m_usesSupervisor(useSupervisor)
-        , m_multiThreaded(true) VL_MT_SAFE {
+        , m_multiThreaded(true) {
         openNextOutputFile("codelet_" + cvtToStr(threadIndex));
         for (const AstClass* classp : toEmitp) { emitClass(classp); }
         if (m_ofp) { VL_DO_CLEAR(delete m_ofp, m_ofp = nullptr); }

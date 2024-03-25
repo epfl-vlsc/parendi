@@ -151,7 +151,7 @@ private:
 private:
     inline void append(DpiSemantics s) { m_record.append(m_classp, s); }
 
-    void visit(AstCCall* callp) {
+    void visit(AstCCall* callp) override {
         if (!m_classp) { return; }
         if (callp->funcp()->dpiContext() || callp->funcp()->dpiExportDispatcher()
             || callp->funcp()->dpiImportPrototype() || callp->funcp()->dpiExportImpl()
@@ -166,7 +166,7 @@ private:
     void visit(AstStop* nodep) override { append(DpiSemantics::BUFFERED); }
     void visit(AstNodeReadWriteMem* nodep) override { append(DpiSemantics::STRICT); }
     // void visit(AstNodeReadWriteMem* nodep) override { append(DPI_STRICT); }
-    void visit(AstVarScope* vscp) {
+    void visit(AstVarScope* vscp) override {
         auto const dtypep = VN_CAST(vscp->dtypep(), ClassRefDType);
         if (dtypep && dtypep->classp()->flag().isBsp()) {
             m_record.setInst(dtypep->classp(), vscp);
@@ -239,7 +239,7 @@ private:
             replaceFuncLocal(varp);
         }
     }
-    void visit(AstVarScope* vscp) { vscp->varp()->user2p(vscp); }
+    void visit(AstVarScope* vscp) override { vscp->varp()->user2p(vscp); }
     void visit(AstCFunc* cfuncp) override {
         if (!m_classp) { return; }
         if (m_records.getInfo(m_classp).semantics != DpiSemantics::STRICT) {

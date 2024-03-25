@@ -193,7 +193,7 @@ private:
     // RETURN STATE
     bool m_isCheap = true;
     // Driving logic
-    GateLogicVertex* const m_logicVertexp;
+    GateLogicVertex* const m_logicVertexp = nullptr;
     // Variable produced by logic
     GateVarVertex* const m_vvertexp;
 
@@ -221,7 +221,7 @@ private:
 
 public:
     explicit GateCheapVisitor(GateLogicVertex* const logicVertexp, GateVarVertex* const vvertexp)
-        : m_logicVertexp{m_logicVertexp}
+        : m_logicVertexp{nullptr}
         , m_vvertexp{vvertexp} {
 
 
