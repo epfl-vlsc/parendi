@@ -19,20 +19,26 @@
 //
 //
 
-module t(input wire clk);
-	Main dut(.clock(clk));
+module t(
+	input wire clk
+);
+	Main dut(
+`ifndef DO_TOGGLE
+		.clock(clk)
+`endif
+	);
 endmodule
 
 module Main #(parameter LOOP_LOG2 = 0, DIFFICULTY = 15,
 	EXPECTED_NONCE = 32'h5386, EXPECTED_GOLDEN_NONCE = 32'h5302)(
-// `ifndef DO_TOGGLE
+`ifndef DO_TOGGLE
 	input wire clock
-// `endif
+`endif
 );
-// `ifdef DO_TOGGLE
-//    reg clock = 0;
-//    always #1 clock = !clock;
-// `endif
+`ifdef DO_TOGGLE
+   reg clock = 0;
+   always #1 clock = !clock;
+`endif
    wire [31:0] golden_nonce;
    wire [31:0] nonce;
    reg [31:0] counter = 0;
