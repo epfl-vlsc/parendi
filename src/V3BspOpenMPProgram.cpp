@@ -113,15 +113,6 @@ public:
     }
 };
 
-/// Convert variable name to fieldNN
-
-class OpenMPLegalizeFieldNamesVisitor final {
-public:
-    explicit OpenMPLegalizeFieldNamesVisitor(AstNetlist* netlistp) {
-        // Do not do this for OpenMP.
-    }
-};
-
 namespace {
 
 struct TensorHandle {
@@ -431,11 +422,8 @@ void V3BspOpenMPProgram::createProgram(AstNetlist* nodep) {
     UINFO(3, "Creating OpenMP program" << endl);
 
     // Do not create PlusArgs functions for OpenMP with V3BspPlusArgs::makeCache
-
     // Do not create Dpi functions for OpenMP with V3BspDpi::delegateAll
 
-    { OpenMPLegalizeFieldNamesVisitor{nodep}; }
-    V3Global::dumpCheckGlobalTree("bspLegal", 0, dumpTree() >= 1);
     { OpenMPViewsVisitor{nodep}; }  // destroy before checking
     V3Global::dumpCheckGlobalTree("bspOpenMPView", 0, dumpTree() >= 1);
     { OpenMPComputeGraphBuilder{nodep}; }  // destroy before checking
