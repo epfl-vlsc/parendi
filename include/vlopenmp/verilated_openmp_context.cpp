@@ -39,3 +39,12 @@ int main(int argc, char* argv[]) {
         }
     }
 }
+
+void vl_finish(const char* filename, int linenum, const char* hier) VL_MT_UNSAFE {
+    if (false && hier) {}
+    VL_PRINTF(  // Not VL_PRINTF_MT, already on main thread
+        "- %s:%d: Verilog $finish\n", filename, linenum);
+    Verilated::runFlushCallbacks();
+    Verilated::runExitCallbacks();
+    std::exit(0);
+}

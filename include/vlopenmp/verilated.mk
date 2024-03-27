@@ -1,6 +1,6 @@
 # The Apple compilers do not implement OMP!
 CXX = /opt/homebrew/bin/g++-13
-INCLUDES := -I$(PARENDI_ROOT)/include -I$(PARENDI_ROOT)/include/vltstd -I/opt/homebrew/include/ -I.
+INCLUDES := -I$(PARENDI_ROOT)/include/vlopenmp -I$(PARENDI_ROOT)/include -I$(PARENDI_ROOT)/include/vltstd -I/opt/homebrew/include/ -I.
 LIBS :=
 
 HOST_DEFINES =  \
