@@ -1504,7 +1504,7 @@ public:
                                const V3Sched::LogicByScope& statics,
                                const V3Sched::LogicByScope& actives)
         : m_modNames{"__VBspCls"}
-        , m_memberNames{"__VBspMember"}  // reset on partition
+        , m_memberNames{""}  // reset on partition
         , m_netlistp{netlistp}
         , m_partitionsp{partitionsp}
         , m_initials{initials}
