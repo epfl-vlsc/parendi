@@ -192,41 +192,57 @@ private:
         puts("class MemoryContents {\n");
         puts("  public: \n");
 
-        vl_unordered_map<string, bool> varNames;
-        int bytesUsed = 0;
-        int classId = 0;
-        for (int tid = 0; tid < toEmitp.size(); tid++) {
-            for (const AstClass* classp : toEmitp[tid]) {
-                if (bytesUsed % VL_CACHE_LINE_BYTES) {
-                    puts("/* Padding */\n");
-                    int padSize = VL_CACHE_LINE_BYTES - (bytesUsed % VL_CACHE_LINE_BYTES);
-                    puts("char pad_" + cvtToStr(classId) + "[" + cvtToStr(padSize) + "];\n");
-                }
-                puts("/* Class " + cvtToStr(classId) + " */\n");
+        class findClassMembers final : public VNVisitor {
+        public:
+            EmitOpenMPVertex* m_parent;
+            vl_unordered_map<string, int> m_varNames;
+            int m_bytesUsed = 0;
+            int m_classID = 0;
+            const AstClass* m_classp;
 
-                bytesUsed = 0;
-                for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
-                    if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
-                        UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
-                        auto flag = vrefp->bspFlag();
-                        if (flag.isInputOnly()) {
-                            // Skip input-only fields since they are output by another class
-                            continue;
-                        }
-
-                        string varName = vrefp->nameProtect();
-                        if (!varNames.count(varName)) {  // Output only once
-                            puts("/* [" + flag.ascii() + "] */\n");
-                            puts(vrefp->dtypep()->cType(" ", false, false));
-                            puts(varName);
-                            puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
-                                 + vrefp->fileline()->ascii() + " */\n");
-                            varNames[varName] = true;
-                            bytesUsed += vrefp->dtypep()->widthTotalBytes();
+            void visit(AstVarRef* vrefp) override {
+                AstVar* varp = vrefp->varp();
+                auto flag = varp->bspFlag();
+                if (!varp->isFuncLocal() && !varp->isParam() && !flag.isInputOnly()
+                    && vrefp->access() != VAccess::READ) {
+                    // Skip input-only and read-only fields since they are
+                    // declared by the class that writes them.
+                    string varName = varp->nameProtect();
+                    if (!m_varNames.count(varName)) {  // Output only once
+                        m_parent->puts("/* [" + flag.ascii() + "] */\n");
+                        m_parent->puts(varp->dtypep()->cType(" ", false, false));
+                        m_parent->puts(varName);
+                        m_parent->puts("; /* " + AstNode::dedotName(varp->origName()) + " : "
+                                       + varp->fileline()->ascii() + " */\n");
+                        m_varNames[varName] = m_classID;
+                        m_bytesUsed += varp->dtypep()->widthTotalBytes();
+                    } else {
+                        if (m_varNames[varName] != m_classID && !m_classp->flag().isBspInit()) {
+                            v3warn(V3ErrorCode::EC_INFO, "Multiple classes write to MemOut." + varName);
                         }
                     }
                 }
-                classId += 1;
+            }
+            void visit(AstNode* nodep) override { iterateChildren(nodep); }
+
+            explicit findClassMembers(EmitOpenMPVertex* parent) { m_parent = parent; }
+        } fcm(this);
+
+        for (int tid = 0; tid < toEmitp.size(); tid++) {
+            for (const AstClass* classp : toEmitp[tid]) {
+                if (fcm.m_bytesUsed % VL_CACHE_LINE_BYTES) {
+                    puts("/* Padding */\n");
+                    int padSize = VL_CACHE_LINE_BYTES - (fcm.m_bytesUsed % VL_CACHE_LINE_BYTES);
+                    puts("char pad_" + cvtToStr(fcm.m_classID) + "[" + cvtToStr(padSize) + "];\n");
+                }
+                puts("/* Class " + cvtToStr(fcm.m_classID) + " */\n");
+
+                fcm.m_bytesUsed = 0;
+                fcm.m_classp = classp;
+                for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
+                    fcm.iterate(stmtp);
+                }
+                fcm.m_classID += 1;
             }
         }
         puts("};\n");
