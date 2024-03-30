@@ -338,33 +338,56 @@ void V3EmitOpenMP::emitVertex() {
 // if (p) { x = x + 1 } y = x
 //
 void V3EmitOpenMP::addCopyIn(AstCFunc* cfuncp) {
-    struct Visitor : public VNVisitor {
+    // Find BSP RO and RW variables
+    struct CatVisitor : public VNVisitor {
         std::unordered_set<AstVar*> m_varsRead;
         std::unordered_set<AstVar*> m_varsWritten;
+
         void visit(AstNode* nodep) override { iterateChildren(nodep); }
         void visit(AstVarRefView* nodep) override {
             if (nodep->vrefp()->access() == VAccess::READ) {
                 m_varsRead.insert(nodep->vrefp()->varp());
                 // Set to RW so access will go to MemOut
-                nodep->vrefp()->access(VAccess::READWRITE);
+                // nodep->vrefp()->access(VAccess::READWRITE);
             } else {
                 m_varsWritten.insert(nodep->vrefp()->varp());
             }
         }
-        explicit Visitor(AstCFunc* cfuncp) {}
-    } v(cfuncp);
+        explicit CatVisitor(AstCFunc* cfuncp) {}
+    } categorizeVRV(cfuncp);
+    categorizeVRV.iterate(cfuncp);
 
-    v.iterate(cfuncp);
+    // Update RO references of RW variables so they access MemOut.
+    struct FixVisitor : public VNVisitor {
+        std::unordered_set<AstVar*> m_varsWritten;
 
-    for (auto varp = v.m_varsWritten.begin(); varp != v.m_varsWritten.end(); varp++) {
-        FileLine* fl = cfuncp->fileline();
-        (*varp)->funcLocal(true);
-        AstVarScope* vscp = new AstVarScope{fl, cfuncp->scopep(), *varp};
-        cfuncp->scopep()->addVarsp(vscp);
-        // Copy from MemIn to MemOut
-        AstAssign* copy
-            = new AstAssign{fl, new AstVarRefView(fl, new AstVarRef{fl, vscp, VAccess::WRITE}),
-                            new AstVarRefView(fl, new AstVarRef{fl, vscp, VAccess::READ})};
-        cfuncp->addInitsp(copy);
+        void visit(AstNode* nodep) override { iterateChildren(nodep); }
+        void visit(AstVarRefView* nodep) override {
+            if (nodep->vrefp()->access() == VAccess::READ
+                && m_varsWritten.count(nodep->vrefp()->varp()) != 0) {
+                // Set to RW so access will go to MemOut
+                nodep->vrefp()->access(VAccess::READWRITE);
+            }
+        }
+        explicit FixVisitor(AstCFunc* cfuncp) {}
+    } updateVRV(cfuncp);
+    updateVRV.m_varsWritten = categorizeVRV.m_varsWritten;
+    updateVRV.iterate(cfuncp);
+
+    // If a variable is read, add a copy from MemIn to MemOut so the read sees
+    // the current (MemIn) value. May introduce unnecessary copies when value is
+    // written before read, but avoids reaching def analysis.
+    for (auto varp = categorizeVRV.m_varsWritten.begin();
+         varp != categorizeVRV.m_varsWritten.end(); varp++) {
+        if (categorizeVRV.m_varsRead.count(*varp) != 0) {
+            FileLine* fl = cfuncp->fileline();
+            AstVarScope* vscp = new AstVarScope{fl, cfuncp->scopep(), *varp};
+            cfuncp->scopep()->addVarsp(vscp);
+            // Copy from MemIn to MemOut
+            AstAssign* copy
+                = new AstAssign{fl, new AstVarRefView(fl, new AstVarRef{fl, vscp, VAccess::WRITE}),
+                                new AstVarRefView(fl, new AstVarRef{fl, vscp, VAccess::READ})};
+            cfuncp->addInitsp(copy);
+        }
     }
 }
