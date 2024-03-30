@@ -18,7 +18,7 @@ int main(int argc, char* argv[]) {
     MemoryContents& memA = MemIn;
     MemoryContents& memB = MemOut;
 
-    // Initialize the world.
+    // Initialize the world. MemOut (==memB) is written.
     for (int i = 0; CodeletInitInstances[i] != nullptr; i++) {
         CodeletInitInstances[i]->compute(memA, memB);
     }
@@ -27,14 +27,14 @@ int main(int argc, char* argv[]) {
     int num_codelets = 0;
     for (int i = 0; CodeletInstances[i] != nullptr; i++) { num_codelets += 1; }
 
-    // Run the computation.
+    // Run the computation. Start with initialized memory (MemB).
 #pragma omp parallel for num_threads(root->NUM_CORES)
     for (int i = 0; i < num_codelets; i++) {
         auto codeletForThread = CodeletInstances[i];
         while (true) {
-            codeletForThread->compute(memA, memB);
+            codeletForThread->compute(memB, memA);  // f(memB) -> memA
 #pragma barrier
-            codeletForThread->compute(memB, memA);
+            codeletForThread->compute(memA, memB);  // f(memA) -> memB
 #pragma barrier
         }
     }
