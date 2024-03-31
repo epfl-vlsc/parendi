@@ -98,11 +98,20 @@ private:
         ofp()->resetPrivate();
         ofp()->putsPrivate(false);  // public
 
-        // emit method decls
+        // emit method and member decls
         for (AstNode* stmtp = classp->stmtsp(); stmtp; stmtp = stmtp->nextp()) {
             if (AstCFunc* funcp = VN_CAST(stmtp, CFunc)) {
                 emitCFuncHeader(funcp, classp, false);
                 puts(";\n");
+            } else if (AstVar* vrefp = VN_CAST(stmtp, Var)) {
+                UASSERT_OBJ(vrefp->isClassMember(), vrefp, "expected class member");
+                if (vrefp->bspFlag().hasLocal()) {
+                    puts(vrefp->dtypep()->cType("", false, false));
+                    puts(" ");
+                    puts(vrefp->nameProtect());
+                    puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
+                         + vrefp->fileline()->ascii() + " */\n");
+                }
             }
         }
         ensureNewLine();
@@ -203,10 +212,11 @@ private:
             void visit(AstVarRef* vrefp) override {
                 AstVar* varp = vrefp->varp();
                 auto flag = varp->bspFlag();
-                if (!varp->isFuncLocal() && !varp->isParam() && !flag.isInputOnly()
-                    && vrefp->access() != VAccess::READ) {
-                    // Skip input-only and read-only fields since they are
-                    // declared by the class that writes them.
+                if (!flag.hasLocal() && !flag.isInputOnly() && !varp->isFuncLocal()
+                    && !varp->isParam() && vrefp->access() != VAccess::READ) {
+                    // Skip class variables since they are class members. Skip
+                    // input-only and read-only fields since they are declared
+                    // by the codelet that writes them.
                     string varName = varp->nameProtect();
                     if (!m_varNames.count(varName)) {  // Output only once
                         m_parent->puts("/* [" + flag.ascii() + "] */\n");
@@ -218,7 +228,8 @@ private:
                         m_bytesUsed += varp->dtypep()->widthTotalBytes();
                     } else {
                         if (m_varNames[varName] != m_classID && !m_classp->flag().isBspInit()) {
-                            v3warn(V3ErrorCode::EC_INFO, "Multiple classes write to MemOut." + varName);
+                            v3warn(V3ErrorCode::EC_INFO,
+                                   "Multiple codelets write to MemOut." + varName);
                         }
                     }
                 }
@@ -390,12 +401,13 @@ void V3EmitOpenMP::addCopyIn(AstCFunc* cfuncp) {
     updateVRV.m_varsWritten = categorizeVRV.m_varsWritten;
     updateVRV.iterate(cfuncp);
 
-    // If a variable is read, add a copy from MemIn to MemOut so the read sees
-    // the current (MemIn) value. May introduce unnecessary copies when value is
-    // written before read, but avoids reaching def analysis.
+    // If a variable in shared memory is read, add a copy from MemIn to MemOut
+    // so the read sees the current (MemIn) value. May introduce unnecessary
+    // copies when value is written before read, but avoids reaching def
+    // analysis.
     for (auto varp = categorizeVRV.m_varsWritten.begin();
          varp != categorizeVRV.m_varsWritten.end(); varp++) {
-        if (categorizeVRV.m_varsRead.count(*varp) != 0) {
+        if (categorizeVRV.m_varsRead.count(*varp) != 0 && !(*varp)->bspFlag().hasLocal()) {
             FileLine* fl = cfuncp->fileline();
             AstVarScope* vscp = new AstVarScope{fl, cfuncp->scopep(), *varp};
             cfuncp->scopep()->addVarsp(vscp);

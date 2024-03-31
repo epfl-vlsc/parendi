@@ -279,12 +279,14 @@ public:
         UASSERT(nodep.first && nodep.second, "expected non-null");
         m_sourcep = nodep;
     }
+
     void initp(const std::pair<AstVarScope*, AstVar*>& nodep) {
         UASSERT(!m_initp.first && !m_initp.second, "already init!");
         UASSERT(nodep.first && nodep.second, "should not be null");
         m_initp = nodep;
     }
     std::pair<AstVarScope*, AstVar*> initp() const { return m_initp; }
+    bool hasNoInitp() const { return m_initp.first == nullptr && m_initp.second == nullptr; }
 
     std::pair<AstVarScope*, AstVar*> sourcep() const { return m_sourcep; }
 
@@ -559,7 +561,7 @@ private:
 
         if (m_vscpRefs(oldVscp).isClocked() && consumer) {
             newVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
-        } else {
+        } else if (m_vscpRefs(oldVscp).hasNoInitp()) {
             newVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
         }
 
@@ -805,7 +807,7 @@ private:
                         UASSERT_OBJ(!refInfo.isOwned(graphp), vscp,
                                     "Expected to be produced by another");
                         if (refInfo.isClocked() || refInfo.initp().first) {
-                            if (refInfo.isOwned(graphp)) {
+                            if (refInfo.isOwned(graphp) && refInfo.hasNoInitp()) {
                                 varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
                                 V3Stats::addStatSum("BspModules, local variable", 1);
                             } else {
@@ -876,7 +878,7 @@ private:
         vscp->user3p(newVscp);
         if (supportedDType(vscp->dtypep())) {
 
-            if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
+            if (refInfo.isOwned(graphp) && refInfo.isLocal() && refInfo.hasNoInitp()) {
                 // the variable is produced here and does not need
                 // to be sent out, however we should create a
                 // persistent class member for it to keep it alive
@@ -910,7 +912,7 @@ private:
                 // need to recieve it
                 refInfo.addTargetp(std::make_pair(instVscp, varp));
                 V3Stats::addStatSum("BspModules, input variable", 1);
-            } else if (refInfo.isActive()) {
+            } else if (refInfo.isActive() && refInfo.hasNoInitp()) {
                 // variable produced by the trigger function, but local otherwise
                 classp->addStmtsp(varp);
                 varp->bspFlag({VBspFlag::MEMBER_LOCAL});
@@ -1329,6 +1331,17 @@ private:
         }
         m_topScopep->addBlocksp(computeSetp);
     }
+
+    // NB This is not a good way to initialize for OpenMP. We keep using it to
+    // avoid redoing this complex function.
+    //
+    // The proper way to initialize is to add an "init" function to each codelet
+    // class and have it initialize both the class members as well as the shared
+    // variables owned by the class.
+    //
+    // This work-around continuing to use a separate initialization class and
+    // put all initialized variables in shared memory (hence the use of
+    // hasNoInitp to avoid making fields MEMBER_LOCAL).
 
     AstClass* makeInitial() {
         FileLine* fl = nullptr;

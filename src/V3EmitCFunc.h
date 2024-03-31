@@ -1227,7 +1227,9 @@ public:
     }
     void visit(AstVarRefView* nodep) override {
         if (v3Global.opt.openmp()) {
-            if (nodep->vrefp()->access() == VAccess::READ) {
+            if (nodep->vrefp()->varp()->bspFlag().hasLocal()) {
+                puts("this->");
+            } else if (nodep->vrefp()->access() == VAccess::READ) {
                 puts("memIn.");
             } else {
                 puts("memOut.");
