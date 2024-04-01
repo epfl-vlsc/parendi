@@ -6,6 +6,22 @@
 
 #include <omp.h>
 
+void runCodelet(CodeletBase* codeletInstance, int iam, MemoryContents* memA, MemoryContents* memB) {
+    while (true) {
+        codeletInstance->compute(memA, memB);  // f(memA) -> memB
+#pragma omp barrier
+        MemoryContents* tmp = memA;
+        memA = memB;
+        memB = tmp;
+    }
+}
+
+void dispatchWorkerThread(int numCodelets, MemoryContents* memA, MemoryContents* memB) {
+    int iam = omp_get_thread_num();
+    if (iam < 0 || iam >= numCodelets) { perror("Bad thread number"); }
+    runCodelet(CodeletInstances[iam], iam, memA, memB);
+}
+
 int main(int argc, char* argv[]) {
     VerilatedContext contextp;
     contextp.commandArgs(argc, argv);
@@ -15,8 +31,8 @@ int main(int argc, char* argv[]) {
     root->setCodelets(CodeletInstances);
     root->setinitCodelets(CodeletInitInstances);
 
-    MemoryContents& memA = MemIn;
-    MemoryContents& memB = MemOut;
+    MemoryContents* memA = &MemIn;
+    MemoryContents* memB = &MemOut;
 
     // Initialize the world. MemOut (==memB) is written.
     for (int i = 0; CodeletInitInstances[i] != nullptr; i++) {
@@ -24,21 +40,17 @@ int main(int argc, char* argv[]) {
     }
 
     // Count the codelets
-    int num_codelets = 0;
-    for (int i = 0; CodeletInstances[i] != nullptr; i++) { num_codelets += 1; }
+    int numCodelets = 0;
+    for (int i = 0; CodeletInstances[i] != nullptr; i++) { numCodelets += 1; }
 
     // Run the computation. Start with initialized memory (MemB).
-#pragma omp parallel for num_threads(root->NUM_CORES)
-    for (int i = 0; i < num_codelets; i++) {
-        auto codeletForThread = CodeletInstances[i];
-        while (true) {
-            codeletForThread->compute(memB, memA);  // f(memB) -> memA
-#pragma barrier
-            codeletForThread->compute(memA, memB);  // f(memA) -> memB
-#pragma barrier
-        }
-    }
+#pragma omp parallel num_threads(numCodelets)
+    dispatchWorkerThread(numCodelets, memB, memA);
+
+    return 0;
 }
+
+
 
 void vl_finish(const char* filename, int linenum, const char* hier) VL_MT_UNSAFE {
     if (false && hier) {}

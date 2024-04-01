@@ -475,7 +475,7 @@ public:
         IPU_PROFILE_TRACE,
         IPU_PROFILE_TRACE_VEC,
         // OpenMP types
-        OPENMP_MEM,
+        OPENMP_MEMPTR,
         OPENMP_CONTEXT,
         // Unsigned and two state; fundamental types
         UINT32,
@@ -521,7 +521,7 @@ public:
                                             "VlIpuCycle",
                                             "VlIpuProfileTrace",
                                             "VlIpuProfileTraceVec",
-                                            "MemoryContents",
+                                            "MemoryContents*",
                                             "OpenMPContext",
                                             "IData",
                                             "QData",
@@ -564,7 +564,7 @@ public:
                                             "%E-VlIpuCycle",
                                             "%E-VlIpuProfileTrace",
                                             "%E-VlIpuProfileTraceVec",
-                                            "%E-MemoryContents",
+                                            "%E-MemoryContents* ",
                                             "%E-OpenMPContext",
                                             "IData",
                                             "QData",

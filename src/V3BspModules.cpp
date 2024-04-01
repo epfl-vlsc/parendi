@@ -644,14 +644,14 @@ private:
             // Add the mem args
             AstVar* memInArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memIn", m_computeMemType};
             memInArgp->funcLocal(true);
-            memInArgp->direction(VDirection::CONSTREF);
+            memInArgp->direction(VDirection::INPUT);
             funcp->addArgsp(memInArgp);
             AstVarScope* memInVscp = new AstVarScope{classp->fileline(), scopep, memInArgp};
             scopep->addVarsp(memInVscp);
 
             AstVar* memOutArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memOut", m_computeMemType};
             memOutArgp->funcLocal(true);
-            memOutArgp->direction(VDirection::REF);
+            memOutArgp->direction(VDirection::INPUT);
             funcp->addArgsp(memOutArgp);
             AstVarScope* memOutVscp = new AstVarScope{classp->fileline(), scopep, memOutArgp};
             scopep->addVarsp(memOutVscp);
@@ -988,7 +988,7 @@ private:
 
         // Create nbaTop function:
         // void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0)  or
-        // void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0, const MemoryContents &mem)
+        // void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0, const MemoryContents* memIn, MemoryContents* memOut)
         AstCFunc* nbaTopp = new AstCFunc{fl, "nbaTop", scopep, "void"};
         nbaTopp->isMethod(true);
         nbaTopp->isInline(true);
@@ -1095,7 +1095,7 @@ private:
         { ReplaceOldVarRefsVisitor{nbaTopp}; }
 
         // Create compute function:
-        // void compute() or compute(const MemoryContents &mem)
+        // void compute() or compute(const MemoryContents* memIn, MemoryContents* memOut)
         AstCFunc* cfuncp = new AstCFunc{fl, "compute", scopep, "void"};
         cfuncp->dontCombine(true);
         cfuncp->isMethod(true);
@@ -1107,14 +1107,14 @@ private:
             // Add the mem args
             AstVar* memInArgp = new AstVar{fl, VVarType::VAR, "memIn", m_computeMemType};
             memInArgp->funcLocal(true);
-            memInArgp->direction(VDirection::CONSTREF);
+            memInArgp->direction(VDirection::INPUT);
             cfuncp->addArgsp(memInArgp);
             AstVarScope* const memInVscp = new AstVarScope{fl, scopep, memInArgp};
             scopep->addVarsp(memInVscp);
 
             AstVar* memOutArgp = new AstVar{fl, VVarType::VAR, "memOut", m_computeMemType};
             memOutArgp->funcLocal(true);
-            memOutArgp->direction(VDirection::REF);
+            memOutArgp->direction(VDirection::INPUT);
             cfuncp->addArgsp(memOutArgp);
             AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
             scopep->addVarsp(memOutVscp);
@@ -1380,14 +1380,14 @@ private:
             // Add the mem args
             AstVar* memInArgp = new AstVar{fl, VVarType::VAR, "memIn", m_computeMemType};
             memInArgp->funcLocal(true);
-            memInArgp->direction(VDirection::CONSTREF);
+            memInArgp->direction(VDirection::INPUT);
             cfuncp->addArgsp(memInArgp);
             AstVarScope* const memInVscp = new AstVarScope{fl, scopep, memInArgp};
             scopep->addVarsp(memInVscp);
 
             AstVar* memOutArgp = new AstVar{fl, VVarType::VAR, "memOut", m_computeMemType};
             memOutArgp->funcLocal(true);
-            memOutArgp->direction(VDirection::REF);
+            memOutArgp->direction(VDirection::INPUT);
             cfuncp->addArgsp(memOutArgp);
             AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
             scopep->addVarsp(memOutVscp);
@@ -1523,7 +1523,7 @@ public:
         , m_initials{initials}
         , m_initialStatics{statics}
         , m_actives{actives} {
-            m_computeMemType = kwdToBasicDType(VBasicDTypeKwd::OPENMP_MEM);
+            m_computeMemType = kwdToBasicDType(VBasicDTypeKwd::OPENMP_MEMPTR);
         }
 
     void go() {

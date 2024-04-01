@@ -1230,9 +1230,9 @@ public:
             if (nodep->vrefp()->varp()->bspFlag().hasLocal()) {
                 puts("this->");
             } else if (nodep->vrefp()->access() == VAccess::READ) {
-                puts("memIn.");
+                puts("memIn->");
             } else {
-                puts("memOut.");
+                puts("memOut->");
             }
             puts(nodep->vrefp()->name());
         } else {

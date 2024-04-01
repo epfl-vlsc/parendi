@@ -27,11 +27,11 @@ class MemoryContents;
 
 class CodeletBase {
 public:
-    virtual void nbaTop(const VlTriggerVec<1>& __VBspMember_trigArg__0,
-                        const MemoryContents& memIn, MemoryContents& memOut)
+    virtual void nbaTop(const VlTriggerVec<1>& trigArg__0, MemoryContents* memIn,
+                        MemoryContents* memOut)
         = 0;
-    virtual VlTriggerVec<1> triggerEval(const MemoryContents& memIn, MemoryContents& memOut) = 0;
-    virtual void compute(const MemoryContents& memIn, MemoryContents& memOut) = 0;
+    virtual VlTriggerVec<1> triggerEval(MemoryContents* memIn, MemoryContents* memOut) = 0;
+    virtual void compute(MemoryContents* memIn, MemoryContents* memOut) = 0;
 };
 
 #include "verilated_openmp_context.h"

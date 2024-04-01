@@ -762,8 +762,8 @@ AstNodeDType::CTypeRecursed AstNodeDType::cTypeRecurse(bool compound) const {
             info.m_type = "VlIpuProfileTrace<" + cvtToStr(dtypep->width() / VL_EDATASIZE) + ">";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::IPU_PROFILE_TRACE_VEC) {
             info.m_type = "VlIpuProfileTraceVec";
-        } else if (bdtypep->keyword() == VBasicDTypeKwd::OPENMP_MEM) {
-            info.m_type = "MemoryContents";
+        } else if (bdtypep->keyword() == VBasicDTypeKwd::OPENMP_MEMPTR) {
+            info.m_type = "MemoryContents*";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::OPENMP_CONTEXT) {
             info.m_type = "VlOpenMPContext&";
         } else if (bdtypep->keyword() == VBasicDTypeKwd::CHARPTR) {
