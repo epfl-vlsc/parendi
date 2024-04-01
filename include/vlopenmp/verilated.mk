@@ -12,7 +12,7 @@ HOST_DEFINES =  \
 	-DOBJ_DIR="\"$(OBJ_DIR)\"" \
 	-DVL_VERILATED_INCLUDE="\"vlopenmp/verilated_openmp.h\""
 
-HOST_FLAGS = --std=c++17 -g -fopenmp $(INCLUDES) $(HOST_DEFINES) -Wno-parentheses-equality
+HOST_FLAGS = --std=c++17 -O3 -fopenmp $(INCLUDES) $(HOST_DEFINES) -Wno-parentheses-equality
 
 VERILATOR_CPP =  \
 	$(PARENDI_ROOT)/include/verilated.cpp \
