@@ -1214,8 +1214,8 @@ public:
     bool isCompound() const override { return true; }
 };
 
+// A poplar Vector type
 class AstVectorDType final : public AstNodeDType {
-    // A poplar Vector type
 private:
     // size of the vector
     const uint32_t m_size;

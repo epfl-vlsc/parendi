@@ -23,6 +23,7 @@
 #include "V3Branch.h"
 #include "V3Broken.h"
 #include "V3BspDifferential.h"
+#include "V3BspOpenMPProgram.h"
 #include "V3BspPoplarProgram.h"
 #include "V3BspSched.h"
 #include "V3BspStraggler.h"
@@ -49,6 +50,7 @@
 #include "V3EmitCMain.h"
 #include "V3EmitCMake.h"
 #include "V3EmitMk.h"
+#include "V3EmitOpenMP.h"
 #include "V3EmitPoplar.h"
 #include "V3EmitV.h"
 #include "V3EmitXml.h"
@@ -372,7 +374,8 @@ static void process() {
 
         // Make more delayed assignment to enable more parallelization oppurtunities with BSP
         // for poplar. This pass may have performance implications for single-thread mode
-        // so should be optionally enabled for BSP only
+        // so should be optionally enabled for BSP only.
+        // Also for OpenMP? Does not seem to do anything?
 
         // Create tracing sample points, before we start eliminating signals
         if (v3Global.opt.trace()) V3TraceDecl::traceDeclAll(v3Global.rootp());
@@ -428,7 +431,7 @@ static void process() {
         if (v3Global.opt.stats()) V3Stats::statsStageAll(v3Global.rootp(), "PreOrder");
 
         // Schedule the logic
-        if (v3Global.opt.poplar()) {
+        if (v3Global.opt.poplar() || v3Global.opt.openmp()) {
 
             // create classes represeting parallel computation
             V3BspSched::schedule(v3Global.rootp());
@@ -462,17 +465,20 @@ static void process() {
         if (v3Global.opt.stats()) V3Stats::statsStageAll(v3Global.rootp(), "Scoped");
     }
 
+    // requires scopes
     if (v3Global.opt.poplar()) {
-        // requires scopes
         if (v3Global.opt.fIpuDiffExchnage()) {
             // optimize the exchange of unpack variables by only sending the diffs
             // use --diff-exchange-threshold to tune
             V3BspDifferential::differentialUnpack(v3Global.rootp());
         }
-
         // create a poplar program
         V3BspPoplarProgram::createProgram(v3Global.rootp());
+    } else if (v3Global.opt.openmp()) {
+        // create an OpenMP program
+        V3BspOpenMPProgram::createProgram(v3Global.rootp());
     }
+
     // --MODULE OPTIMIZATIONS--------------
     if (!v3Global.opt.xmlOnly()) {
         // Split deep blocks to appease MSVC++.  Must be before Localize.
@@ -556,7 +562,8 @@ static void process() {
     }
 
     V3Error::abortIfErrors();
-    if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.poplar()) {  //
+    if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.poplar()
+        && !v3Global.opt.openmp()) {  //
         V3CCtors::cctorsAll();
     }
 
@@ -570,7 +577,7 @@ static void process() {
 
     if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
         // Add common methods/etc to modules
-        if (!v3Global.opt.poplar()) { V3Common::commonAll(); }
+        if (!v3Global.opt.poplar() && !v3Global.opt.openmp()) { V3Common::commonAll(); }
 
         // Order variables
         V3VariableOrder::orderAll();
@@ -586,6 +593,14 @@ static void process() {
         V3EmitPoplar::emitProgram();
         V3EmitPoplar::emitVertex();
         V3EmitPoplar::emitMake();
+        // Statistics
+        V3BspStraggler::report();
+        reportStatsIfEnabled();
+    } else if (v3Global.opt.openmp()) {
+        V3EmitC::emitcConstPool();
+        V3EmitOpenMP::emitProgram();
+        V3EmitOpenMP::emitVertex();
+        V3EmitOpenMP::emitMake();
         // Statistics
         V3BspStraggler::report();
         reportStatsIfEnabled();
@@ -713,7 +728,7 @@ static void verilate(const string& argString) {
             V3EmitCMake::emit();
         }
     }
-    if (v3Global.opt.makeDepend().isTrue() && !v3Global.opt.poplar()) {
+    if (v3Global.opt.makeDepend().isTrue() && !v3Global.opt.poplar() && !v3Global.opt.openmp()) {
         string filename = v3Global.opt.makeDir() + "/" + v3Global.opt.prefix();
         filename += v3Global.opt.hierTop() ? "__hierVer.d" : "__ver.d";
         V3File::writeDepend(filename);
@@ -778,7 +793,7 @@ static void execHierVerilation() {
     }
 }
 
-//######################################################################
+// ######################################################################
 
 int main(int argc, char** argv) {
     // General initialization

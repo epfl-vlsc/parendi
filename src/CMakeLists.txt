@@ -39,6 +39,7 @@ set(HEADERS
     V3AstInlines.h
     V3AstNodeDType.h
     V3AstNodeExpr.h
+    V3AstNodeOpenMP.h
     V3AstNodeOther.h
     V3AstNodePoplar.h
     V3AstUserAllocator.h
@@ -50,10 +51,11 @@ set(HEADERS
     V3BspGraph.h
     V3BspHyperMerger.h
     V3BspIpuCostModelLinReg.h
-    V3BspIpuDevicePartitioning.h
+    V3BspDevicePartitioning.h
     V3BspMerger.h
     V3BspModules.h
     V3BspNetlistGraph.h
+    V3BspOpenMPProgram.h
     V3BspPliCheck.h
     V3BspPlusArgs.h
     V3BspPoplarProgram.h
@@ -94,6 +96,7 @@ set(HEADERS
     V3EmitCMain.h
     V3EmitCMake.h
     V3EmitMk.h
+    V3EmitOpenMP.h
     V3EmitPoplar.h
     V3EmitV.h
     V3EmitXml.h
@@ -209,9 +212,10 @@ set(COMMON_SOURCES
     V3BspDpi.cpp
     V3BspGraph.cpp
     V3BspHyperMerger.cpp
-    V3BspIpuDevicePartitioning.cpp
+    V3BspDevicePartitioning.cpp
     V3BspMerger.cpp
     V3BspModules.cpp
+    V3BspOpenMPProgram.cpp
     V3BspPliCheck.cpp
     V3BspPlusArgs.cpp
     V3BspPoplarProgram.cpp
@@ -257,6 +261,9 @@ set(COMMON_SOURCES
     V3EmitCMake.cpp
     V3EmitCModel.cpp
     V3EmitCSyms.cpp
+    V3EmitOpenMPMake.cpp
+    V3EmitOpenMPProgram.cpp
+    V3EmitOpenMPVertex.cpp
     V3EmitPoplarMake.cpp
     V3EmitPoplarProgram.cpp
     V3EmitPoplarStructs.cpp
@@ -370,9 +377,9 @@ configure_file(config_build.h.in config_build.h @ONLY)
 
 add_custom_command(
     OUTPUT V3Ast__gen_forward_class_decls.h V3Dfg__gen_forward_class_decls.h
-    DEPENDS ./V3Ast.h ./V3AstNodeOther.h ./V3AstNodeExpr.h ./V3AstNodePoplar.h ${ASTGEN}
+    DEPENDS ./V3Ast.h ./V3AstNodeOther.h ./V3AstNodeExpr.h ./V3AstNodeOpenMP.h ./V3AstNodePoplar.h ${ASTGEN}
     COMMAND ${PYTHON3} ARGS
-    ${ASTGEN} -I "${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --astdef V3AstNodePoplar.h --dfgdef V3DfgVertices.h --classes
+    ${ASTGEN} -I "${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --astdef V3AstNodeOpenMP.h --astdef V3AstNodePoplar.h --dfgdef V3DfgVertices.h --classes
 )
 list(APPEND GENERATED_FILES V3Ast__gen_forward_class_decls.h V3Dfg__gen_forward_class_decls.h)
 # Output used directly by the `verilator` target
@@ -458,7 +465,7 @@ foreach(astgen_name ${ASTGENERATED_NAMES})
         MAIN_DEPENDENCY ${astgen_name}.cpp
         DEPENDS ${ASTGEN} V3Ast.h
         COMMAND ${PYTHON3} ARGS
-            ${ASTGEN} -I"${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --astdef V3AstNodePoplar.h --dfgdef V3DfgVertices.h ${astgen_name}.cpp
+            ${ASTGEN} -I"${srcdir}" --astdef V3AstNodeDType.h --astdef V3AstNodeExpr.h --astdef V3AstNodeOther.h --astdef V3AstNodeOpenMP.h --astdef V3AstNodePoplar.h --dfgdef V3DfgVertices.h ${astgen_name}.cpp
     )
     list(APPEND GENERATED_FILES ${astgen_name}__gen.cpp)
 endforeach()

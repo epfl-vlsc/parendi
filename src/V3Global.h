@@ -44,7 +44,7 @@ class V3HierBlockPlan;
 // Object must be named, or it will not persist until end-of-scope.
 // Constructor needs () or GCC 4.8 false warning.
 #define VL_RESTORER(var) \
-    const VRestorer<typename std::decay<decltype(var)>::type> restorer_##var(var);
+    const VRestorer<typename std::decay<decltype(var)>::type> restorer_##var(var)
 
 // Object used by VL_RESTORER.  This object must be an auto variable, not
 // allocated on the heap or otherwise.

@@ -31,8 +31,8 @@
 // Number of VL_CONST_W_*X's in verilated.h (IE VL_CONST_W_8X is last)
 constexpr int EMITC_NUM_CONSTW = 8;
 
-//######################################################################
-// Emit lazy forward declarations
+// ######################################################################
+//  Emit lazy forward declarations
 
 class EmitCLazyDecls final : public VNVisitor {
     // NODE STATE/TYPES
@@ -354,14 +354,14 @@ public:
                    && !VN_IS(nodep->rhsp(), CMethodHard)  //
                    && !VN_IS(nodep->rhsp(), VarRef)  //
                    && !VN_IS(nodep->rhsp(), AssocSel)  //
-                   && !VN_IS(nodep->rhsp(), ArraySel) //
+                   && !VN_IS(nodep->rhsp(), ArraySel)  //
                    && !VN_IS(nodep->rhsp(), VarRefView)) {
             // Wide functions assign into the array directly, don't need separate assign statement
             m_wideTempRefp = VN_AS(nodep->lhsp(), VarRef);
             paren = false;
-        } else if (nodep->isWide() &&
-            !VN_IS(nodep->dtypep()->skipRefp(), UnpackArrayDType) &&
-            !(nodep->dtypep()->basicp() && nodep->dtypep()->basicp()->isIpuProfileTrace())) {
+        } else if (nodep->isWide() && !VN_IS(nodep->dtypep()->skipRefp(), UnpackArrayDType)
+                   && !(nodep->dtypep()->basicp()
+                        && nodep->dtypep()->basicp()->isIpuProfileTrace())) {
             putbs("VL_ASSIGN_W(");
             puts(cvtToStr(nodep->widthMin()) + ",");
             iterateAndNextNull(nodep->lhsp());
@@ -549,7 +549,8 @@ public:
         displayNode(nodep, nodep->fmtp()->scopeNamep(), text, nodep->fmtp()->exprsp(), false);
     }
     void visit(AstDelegate* nodep) override {
-        UASSERT(v3Global.opt.poplar(), "Invalid node type " << nodep << endl);
+        UASSERT((v3Global.opt.openmp()) || (v3Global.opt.poplar()),
+                "Invalid node type " << nodep << endl);
         puts("/* DELEGATED function from ");
         puts(nodep->fileline()->ascii());
         puts(" ");
@@ -699,10 +700,9 @@ public:
         uint32_t array_lo = 0;
         {
 
-
             const AstVarRef* const varrefp = [](AstNodeExpr* memp) {
                 if (auto viewp = VN_CAST(memp, VarRefView))
-                    return viewp->vrefp(); // should be under AstDelegate, need to check?
+                    return viewp->vrefp();  // should be under AstDelegate, need to check?
                 else
                     return VN_CAST(memp, VarRef);
             }(nodep->memp());
@@ -1099,7 +1099,7 @@ public:
             puts(")");
         }
     }
-    void visit(AstPredicatedStmt* nodep) {
+    void visit(AstPredicatedStmt* nodep) override {
         puts("/*predicated*/if (");
         iterateAndNextConstNull(nodep->condp());
         puts("){\n");
@@ -1226,19 +1226,29 @@ public:
         puts(nodep->varp()->nameProtect());
     }
     void visit(AstVarRefView* nodep) override {
-        // VN_IS won't work, need dynamic_cast to check.
-        UASSERT_OBJ(dynamic_cast<AstVarRef*>(nodep->vrefp()), nodep, "expected VarRef as op1!");
-        puts("VL_VIEW<");
-        if (nodep->vrefp()->access().isReadOnly()) {
-            puts("const ");
+        if (v3Global.opt.openmp()) {
+            if (nodep->vrefp()->varp()->bspFlag().hasLocal()) {
+                puts("this->");
+            } else if (nodep->vrefp()->access() == VAccess::READ) {
+                puts("memIn->");
+            } else {
+                puts("memOut->");
+            }
+            puts(nodep->vrefp()->name());
+        } else {
+            // VN_IS won't work, need dynamic_cast to check.
+            UASSERT_OBJ(dynamic_cast<AstVarRef*>(nodep->vrefp()), nodep,
+                        "expected VarRef as op1!");
+            puts("VL_VIEW<");
+            if (nodep->vrefp()->access().isReadOnly()) { puts("const "); }
+            puts(nodep->vrefp()->dtypep()->cType("", false, false));
+            puts(">(");
+            iterateChildren(nodep);
+            puts("/*");
+            puts(AstNode::dedotName(nodep->vrefp()->varp()->origName()));
+            puts("*/");
+            puts(")");
         }
-        puts(nodep->vrefp()->dtypep()->cType("", false, false));
-        puts(">(");
-        iterateChildren(nodep);
-        puts("/*");
-        puts(AstNode::dedotName(nodep->vrefp()->varp()->origName()));
-        puts("*/");
-        puts(")");
     }
     void visit(AstAddrOfCFunc* nodep) override {
         // Note: Can be thought to handle more, but this is all that is needed right now

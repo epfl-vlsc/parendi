@@ -447,6 +447,11 @@ void V3Options::poplarSet() {  // --poplar
     m_systemC = false;
     m_poplar = true;
 }
+void V3Options::openmpSet() {  // --openmp
+    m_outFormatOk = true;
+    m_systemC = false;
+    m_openmp = true;
+}
 //######################################################################
 // File searching
 
@@ -788,6 +793,9 @@ void V3Options::notify() {
     if (outFormatOk() && v3Global.opt.poplar() && timing().isTrue()) {
         v3fatal("verilator: --timing is not supported with --poplar");
     }
+    if (outFormatOk() && v3Global.opt.openmp() && timing().isTrue()) {
+        v3fatal("verilator: --timing is not supported with --openmp");
+    }
 
     if (cdc()) {
         cmdfl->v3warn(DEPRECATED, "Option --cdc is deprecated and is planned for removal");
@@ -1094,6 +1102,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-CFLAGS", CbVal, callStrSetter(&V3Options::addCFlags));
     DECL_OPTION("-cc", CbCall, [this]() { ccSet(); });
     DECL_OPTION("-poplar", CbCall, [this]() { poplarSet(); });
+    DECL_OPTION("-openmp", CbCall, [this]() { openmpSet(); });
     DECL_OPTION("-cdc", OnOff, &m_cdc);
     DECL_OPTION("-clk", CbVal, callStrSetter(&V3Options::addClocker));
     DECL_OPTION("-no-clk", CbVal, callStrSetter(&V3Options::addNoClocker));
@@ -1447,6 +1456,10 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
             m_threads = 1;
         }
     });
+    DECL_OPTION("-openmp_threads", CbVal, [this, fl](const char* valp) {
+        m_openmp_threads = std::atoi(valp);
+        if (m_openmp_threads < 0) fl->v3fatal("--openmp_threads must be >=0: " << valp);
+    });
     DECL_OPTION("-tiles", CbVal, [this, fl](const char* valp) {
         m_tiles = std::atoi(valp);
         if (m_tiles <= 0) fl->v3fatal("--tiles must be >= 0: " << valp);
@@ -1694,19 +1707,20 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
         m_xmlOnly = true;
     });
 
-    DECL_OPTION("-ipu-merge-strategy", CbVal, [this, fl](const char* valp) {
-        m_ipuMergeStrategy.setFrom(valp);
-        if (!m_ipuMergeStrategy.valid()) {
+    DECL_OPTION("-bsp-merge-strategy", CbVal, [this, fl](const char* valp) {
+        m_BspMergeStrategy.setFrom(valp);
+        if (!m_BspMergeStrategy.valid()) {
             fl->v3fatal("Invalid merge strategy \"" << valp << "\"! Strategies can be "
-                                                    << V3IpuMergeStrategyOption::list() << endl);
+                                                    << V3BspMergeStrategyOption::list() << endl);
         }
     });
-    DECL_OPTION("-ipu-merge-threshold", CbVal, [this, fl](const char* valp) {
+    DECL_OPTION("-bsp-merge-threshold", CbVal, [this, fl](const char* valp) {
         float th = std::atof(valp);
-        m_ipuMergeStrategy.threshold(th);
+        m_BspMergeStrategy.threshold(th);
     });
-    DECL_OPTION("-ipu-merge-minimize-tile-count", OnOff, &m_ipuMergeStrategy.minimizeTileCount());
-    DECL_OPTION("-ipu-merge-ignore-duplication-cost", OnOff, &m_ipuMergeStrategy.ignoreDupCost());
+    DECL_OPTION("-ipu-merge-minimize-tile-count", OnOff, &m_BspMergeStrategy.minimizeTileCount());
+    DECL_OPTION("-ipu-merge-ignore-duplication-cost", OnOff, &m_BspMergeStrategy.ignoreDupCost());
+    DECL_OPTION("-bsp-merge-ignore-duplication-cost", OnOff, &m_BspMergeStrategy.ignoreDupCost());
     DECL_OPTION("-y", CbVal, [this, &optdir](const char* valp) {
         addIncDirUser(parseFileArg(optdir, string(valp)));
     });

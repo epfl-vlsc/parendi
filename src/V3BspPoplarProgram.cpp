@@ -619,7 +619,7 @@ private:
     AstNodeStmt* m_stmtp = nullptr;  // enclosing statement
     PoplarComputeGraphBuilder& m_parent;  // the parent class that uses this visitor
 
-    void visit(AstMemberSel* memselp) {
+    void visit(AstMemberSel* memselp) override {
         UASSERT_OBJ(m_stmtp, memselp, "expected to be in a statement");
         UASSERT_OBJ(VN_IS(memselp->fromp(), VarRef), memselp,
                     "Expected simple VarRef but got \"" << memselp->fromp()->prettyTypeName()

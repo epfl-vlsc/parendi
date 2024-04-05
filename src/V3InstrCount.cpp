@@ -351,6 +351,7 @@ private:
         // debug prints to show local cost of each subtree, so we can see a
         // hierarchical view of the cost when in debug mode.
         const uint32_t savedCount = m_instrCount;
+        //ToDo-OpenMP: should we use IPU-like calculation of instructions likely executed and cost?
         m_instrCount
             = v3Global.opt.poplar() ? IpuInstrCountOverride::count(nodep) : nodep->instrCount();
         return savedCount;

@@ -67,12 +67,8 @@ public:
 };
 class HybridDfsBfsScheduler final {
 public:
-    static int numWays() {
-        return 4;
-    }
-    static bool splitFibers() {
-        return true;
-    }
+    static int numWays() { return 4; }
+    static bool splitFibers() { return true; }
 
     static std::unique_ptr<V3Graph> makeSchedGraphColored(DepGraph* const graphp, uint32_t color) {
         std::unique_ptr<V3Graph> schedGraphp{new V3Graph};
@@ -283,12 +279,14 @@ public:
         UASSERT(nodep.first && nodep.second, "expected non-null");
         m_sourcep = nodep;
     }
+
     void initp(const std::pair<AstVarScope*, AstVar*>& nodep) {
         UASSERT(!m_initp.first && !m_initp.second, "already init!");
         UASSERT(nodep.first && nodep.second, "should not be null");
         m_initp = nodep;
     }
     std::pair<AstVarScope*, AstVar*> initp() const { return m_initp; }
+    bool hasNoInitp() const { return m_initp.first == nullptr && m_initp.second == nullptr; }
 
     std::pair<AstVarScope*, AstVar*> sourcep() const { return m_sourcep; }
 
@@ -363,6 +361,14 @@ private:
         }
         return false;
     }
+
+    AstBasicDType* kwdToBasicDType(VBasicDTypeKwd kwd) {
+         AstBasicDType* const typep = new AstBasicDType{m_netlistp->fileline(), kwd, VSigning::UNSIGNED};
+         m_netlistp->typeTablep()->addTypesp(typep);
+         return typep;
+     }
+
+    AstBasicDType* m_computeMemType;
 
     // compute the references to each variable
     void computeReferences() {
@@ -521,7 +527,6 @@ private:
     }
 
     void makeBaseClasses() {
-
         auto clsAndTpe
             = newClass(new FileLine(FileLine::builtInFilename()), V3BspModules::builtinBaseClass,
                        V3BspModules::builtinBaseClassPkg);
@@ -556,7 +561,7 @@ private:
 
         if (m_vscpRefs(oldVscp).isClocked() && consumer) {
             newVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_INPUT));
-        } else {
+        } else if (m_vscpRefs(oldVscp).hasNoInitp()) {
             newVarp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
         }
 
@@ -633,6 +638,26 @@ private:
         return std::pair<AstNodeExpr*, AstAssign*>{condExprp, updatep};
     }
 
+    void optionallyAddMemArgs(AstCFunc* const funcp, AstClass* classp, AstScope* scopep) {
+        // OpenMP passes In/Out memory to pretty much everything
+        if (v3Global.opt.openmp()) {
+            // Add the mem args
+            AstVar* memInArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memIn", m_computeMemType};
+            memInArgp->funcLocal(true);
+            memInArgp->direction(VDirection::INPUT);
+            funcp->addArgsp(memInArgp);
+            AstVarScope* memInVscp = new AstVarScope{classp->fileline(), scopep, memInArgp};
+            scopep->addVarsp(memInVscp);
+
+            AstVar* memOutArgp = new AstVar{classp->fileline(), VVarType::MEMBER, "memOut", m_computeMemType};
+            memOutArgp->funcLocal(true);
+            memOutArgp->direction(VDirection::INPUT);
+            funcp->addArgsp(memOutArgp);
+            AstVarScope* memOutVscp = new AstVarScope{classp->fileline(), scopep, memOutArgp};
+            scopep->addVarsp(memOutVscp);
+        }
+    }
+
     // make the triggering function
     using TrigAtGen = std::function<AstNodeExpr*(AstVarScope*)>;
     std::pair<std::map<AstSenTree*, TrigAtGen>, AstCFunc*>
@@ -669,6 +694,7 @@ private:
         trigEvalFuncp->addStmtsp(thisTrigp);
         AstVarScope* const thisTrigVscp = new AstVarScope{classp->fileline(), scopep, thisTrigp};
         scopep->addVarsp(thisTrigVscp);
+        optionallyAddMemArgs(trigEvalFuncp, classp, scopep);
 
         AstCMethodHard* const trigClearp = new AstCMethodHard{
             classp->fileline(), new AstVarRef{classp->fileline(), thisTrigVscp, VAccess::WRITE},
@@ -781,7 +807,7 @@ private:
                         UASSERT_OBJ(!refInfo.isOwned(graphp), vscp,
                                     "Expected to be produced by another");
                         if (refInfo.isClocked() || refInfo.initp().first) {
-                            if (refInfo.isOwned(graphp)) {
+                            if (refInfo.isOwned(graphp) && refInfo.hasNoInitp()) {
                                 varp->bspFlag(VBspFlag{}.append(VBspFlag::MEMBER_LOCAL));
                                 V3Stats::addStatSum("BspModules, local variable", 1);
                             } else {
@@ -852,7 +878,7 @@ private:
         vscp->user3p(newVscp);
         if (supportedDType(vscp->dtypep())) {
 
-            if (refInfo.isOwned(graphp) && refInfo.isLocal()) {
+            if (refInfo.isOwned(graphp) && refInfo.isLocal() && refInfo.hasNoInitp()) {
                 // the variable is produced here and does not need
                 // to be sent out, however we should create a
                 // persistent class member for it to keep it alive
@@ -886,7 +912,7 @@ private:
                 // need to recieve it
                 refInfo.addTargetp(std::make_pair(instVscp, varp));
                 V3Stats::addStatSum("BspModules, input variable", 1);
-            } else if (refInfo.isActive()) {
+            } else if (refInfo.isActive() && refInfo.hasNoInitp()) {
                 // variable produced by the trigger function, but local otherwise
                 classp->addStmtsp(varp);
                 varp->bspFlag({VBspFlag::MEMBER_LOCAL});
@@ -917,11 +943,11 @@ private:
     /// @param graphp
     /// @return
     AstClass* makeClass(const std::unique_ptr<DepGraph>& graphp) {
-
         m_memberNames.reset();
         UASSERT(m_packagep, "need bsp package!");
         FileLine* fl = nullptr;
-        // get a better fileline
+
+        // Get a better fileline
         for (V3GraphVertex* itp = graphp->verticesBeginp(); itp; itp = itp->verticesNextp()) {
             if (CompVertex* vtxp = dynamic_cast<CompVertex*>(itp)) {
                 if (VN_IS(vtxp->nodep(), AlwaysPost) || VN_IS(vtxp->nodep(), AssignPost)) {
@@ -931,80 +957,85 @@ private:
                 }
             }
         }
-        // create a class for the the graph partition
+
+        // Create a class for the the graph partition
+        // This class will represent the code that runs on one core
         auto classAndTypep = newClass(fl, m_modNames.get("vtxCls"), m_modNames.get("vtxClsPkg"));
         AstClass* classp = classAndTypep.first;
         AstClassRefDType* classTypep = classAndTypep.second;
-
         AstVar* classInstp = new AstVar{fl, VVarType::VAR, m_modNames.get("vtxInst"), classTypep};
         classInstp->lifetime(VLifetime::STATIC);
-        // add the instance to the scope of the top module
+
+        // Add the instance to the scope of the top module
         AstVarScope* instVscp = new AstVarScope{classInstp->fileline(), m_topScopep, classInstp};
         m_topScopep->addVarsp(instVscp);
         m_topModp->addStmtsp(classInstp);
-        // this class will represent the code that runs on one core
         classp->level(4);  // lives under the BspPkg
         classp->flag(VClassFlag{}.append(VClassFlag::BSP_BUILTIN));
-        // create a scope for the class
+        // Create a scope for the class
         AstScope* scopep = new AstScope{fl, classp, m_scopePrefix + classp->name(),
                                         m_packageScopep, m_packageCellp};
-        // create member variables for the class
+
+        // Create member variables for the class
         // STATE
         // VarScope::user2   -> true if already processed
         // AstSenTree::user2 -> true if processesed
         // VarScope::user3p  -> new var scope inside the class
-
         VNUser2InUse user2InUse;
         VNUser3InUse user3InUse;
         AstNode::user2ClearTree();
         AstNode::user3ClearTree();
 
+        // Create nbaTop function:
+        // void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0)  or
+        // void nbaTop(const VlTriggerVec<1> &__VBspMember_trigArg__0, const MemoryContents* memIn, MemoryContents* memOut)
         AstCFunc* nbaTopp = new AstCFunc{fl, "nbaTop", scopep, "void"};
         nbaTopp->isMethod(true);
         nbaTopp->isInline(true);
         nbaTopp->dontCombine(true);
-        // add the function arg
 
+        // Add trigArg arg
         AstVar* const trigArgp
             = new AstVar{fl, VVarType::MEMBER, freshName("trigArg"), m_triggering.trigDTypep};
         trigArgp->funcLocal(true);
         trigArgp->direction(VDirection::CONSTREF);
         nbaTopp->addArgsp(trigArgp);
-        AstVarScope* const thisTrigVscp = new AstVarScope{classp->fileline(), scopep, trigArgp};
+        AstVarScope* const thisTrigVscp = new AstVarScope{fl, scopep, trigArgp};
         scopep->addVarsp(thisTrigVscp);
+        optionallyAddMemArgs(nbaTopp, classp, scopep);
 
         scopep->addBlocksp(nbaTopp);
 
-        // create class member or function local variable for every variable neeeded
+        // Create class member or function local variable for every variable neeeded
         // by the graphp computations
         makeClassMemberVars(graphp, scopep, classp, instVscp, nbaTopp, fl);
 
-        // create the trigger evaluation function
+        // Create the trigger evaluation function
         auto triggerFunctions = makeTriggerEvalFunc(graphp, classp, scopep, instVscp);
-        auto& triggerCheckGen = triggerFunctions.first;
         // triggerCheckGen can be used to create trigger.at(i) expression for each AstSenTree
+        auto& triggerCheckGen = triggerFunctions.first;
 
-        // add the computation
+        // Add the computation
         UINFO(5, "Ordering computation" << endl);
         // graphp->order();  // order the computation
 
-        std::vector<CompVertex*> orderedVtxps = HybridDfsBfsScheduler::schedule(graphp.get());
         // Go through the compute vertices in order and append them to nbaTopp.
-        // Each compute vertex has a domainp (nullptr if combinatiol) that
+        // Each compute vertex has a domainp (nullptr if combinatorial) that
         // determines whether the statement should fire or not. We keep track
         // of the active domains to avoid emitting unnecessary AstIf statements.
         // Alternatively, another pass could try to coalesce the AtsIfs.
+        std::vector<CompVertex*> orderedVtxps = HybridDfsBfsScheduler::schedule(graphp.get());
 
         struct {
             AstNode* firstp = nullptr;
             AstIf* lastp = nullptr;
             AstSenTree* domainp = nullptr;
         } currentActive;
-        // just add a comment to as firstp to make sure its not null
+
+        // Comment as firstp to make sure its not null
         currentActive.firstp = new AstComment{fl, "begin nba computation"};
 
         for (CompVertex* vtxp : orderedVtxps) {
-
             auto vtxDomp = vtxp->domainp();
             auto nodep = vtxp->nodep();
             UASSERT(nodep, "nullptr vertex");
@@ -1059,23 +1090,64 @@ private:
             }
             currentActive.domainp = vtxDomp;
         }
-
+        // Add statements
         nbaTopp->addStmtsp(currentActive.firstp);
-
         { ReplaceOldVarRefsVisitor{nbaTopp}; }
 
+        // Create compute function:
+        // void compute() or compute(const MemoryContents* memIn, MemoryContents* memOut)
         AstCFunc* cfuncp = new AstCFunc{fl, "compute", scopep, "void"};
         cfuncp->dontCombine(true);
         cfuncp->isMethod(true);
         cfuncp->isInline(true);
         scopep->addBlocksp(cfuncp);
 
-        // AstCMethodCall* const callp = new AstCMethodCall{}
-        AstCCall* const callTrigp = new AstCCall{fl, triggerFunctions.second};
-        callTrigp->dtypeFrom(thisTrigVscp);
-        AstCCall* const callNbap = new AstCCall{fl, nbaTopp, callTrigp};
+        AstCCall* callNbap = nullptr;
+        if (v3Global.opt.openmp()) {
+            // Add the mem args
+            AstVar* memInArgp = new AstVar{fl, VVarType::VAR, "memIn", m_computeMemType};
+            memInArgp->funcLocal(true);
+            memInArgp->direction(VDirection::INPUT);
+            cfuncp->addArgsp(memInArgp);
+            AstVarScope* const memInVscp = new AstVarScope{fl, scopep, memInArgp};
+            scopep->addVarsp(memInVscp);
+
+            AstVar* memOutArgp = new AstVar{fl, VVarType::VAR, "memOut", m_computeMemType};
+            memOutArgp->funcLocal(true);
+            memOutArgp->direction(VDirection::INPUT);
+            cfuncp->addArgsp(memOutArgp);
+            AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
+            scopep->addVarsp(memOutVscp);
+
+            // Body is call:
+            //     this->nbaTop(this->triggerEval(memIn, memOut), memIn, memOut);
+            AstVarRef* const innerFirstVal = new AstVarRef{fl, memInArgp, VAccess::READ};
+            innerFirstVal->varScopep(memInVscp);
+            AstVarRef* const innerSecondVal = new AstVarRef{fl, memOutArgp, VAccess::READWRITE};
+            innerSecondVal->varScopep(memOutVscp);
+            AstNodeExpr* innerArgList = innerFirstVal;
+            innerArgList->addNext(innerSecondVal);
+
+            AstCCall* outerFirstVal = new AstCCall{fl, triggerFunctions.second, innerArgList};
+            outerFirstVal->dtypeFrom(thisTrigVscp);
+            AstVarRef* const outerSecondVal = new AstVarRef{fl, memInArgp, VAccess::READ};
+            outerSecondVal->varScopep(memInVscp);
+            AstVarRef* const outerThirdVal = new AstVarRef{fl, memOutArgp, VAccess::READWRITE};
+            outerThirdVal->varScopep(memOutVscp);
+            AstNodeExpr* arglist = outerFirstVal;
+            arglist->addNext(outerSecondVal);
+            arglist->addNext(outerThirdVal);
+            callNbap = new AstCCall{fl, nbaTopp, arglist};
+        } else {
+            // Body is call:
+            //     this->nbaTop(this->triggerEval());
+            AstCCall* const callTrigp = new AstCCall{fl, triggerFunctions.second};
+            callTrigp->dtypeFrom(thisTrigVscp);
+            callNbap = new AstCCall{fl, nbaTopp, callTrigp};
+        }
         callNbap->dtypeSetVoid();
         cfuncp->addStmtsp(callNbap->makeStmt());
+
         classp->addStmtsp(scopep);
         return classp;
     }
@@ -1099,7 +1171,7 @@ private:
         });
         m_netlistp->foreach([this](AstClassPackage* classp) {
             if (classp->name() == V3BspModules::builtinBaseClassPkg) {
-                classp->v3fatalSrc("name classh with builtin base classpacakge "
+                classp->v3fatalSrc("name clash with builtin base classpacakge "
                                    << V3BspModules::builtinBaseClassPkg << endl);
             }
         });
@@ -1119,7 +1191,6 @@ private:
         AstCFunc* const initFuncp = new AstCFunc{m_netlistp->topModulep()->fileline(),
                                                  "initialize", m_topScopep, "void"};
 
-        initFuncp->slow(true);
         initFuncp->dontCombine(true);
         // go through all of the old variables and find their new producer and consumers
         // then create a assignments for updating them safely in an "exchange" function.
@@ -1261,6 +1332,17 @@ private:
         m_topScopep->addBlocksp(computeSetp);
     }
 
+    // NB This is not a good way to initialize for OpenMP. We keep using it to
+    // avoid redoing this complex function.
+    //
+    // The proper way to initialize is to add an "init" function to each codelet
+    // class and have it initialize both the class members as well as the shared
+    // variables owned by the class.
+    //
+    // This work-around continuing to use a separate initialization class and
+    // put all initialized variables in shared memory (hence the use of
+    // hasNoInitp to avoid making fields MEMBER_LOCAL).
+
     AstClass* makeInitial() {
         FileLine* fl = nullptr;
         if (!m_initials.empty()) {
@@ -1294,6 +1376,60 @@ private:
         cfuncp->dontCombine(true);
         cfuncp->isMethod(true);
         cfuncp->isInline(true);
+        if (v3Global.opt.openmp()) {
+            // Add the mem args
+            AstVar* memInArgp = new AstVar{fl, VVarType::VAR, "memIn", m_computeMemType};
+            memInArgp->funcLocal(true);
+            memInArgp->direction(VDirection::INPUT);
+            cfuncp->addArgsp(memInArgp);
+            AstVarScope* const memInVscp = new AstVarScope{fl, scopep, memInArgp};
+            scopep->addVarsp(memInVscp);
+
+            AstVar* memOutArgp = new AstVar{fl, VVarType::VAR, "memOut", m_computeMemType};
+            memOutArgp->funcLocal(true);
+            memOutArgp->direction(VDirection::INPUT);
+            cfuncp->addArgsp(memOutArgp);
+            AstVarScope* memOutVscp = new AstVarScope{fl, scopep, memOutArgp};
+            scopep->addVarsp(memOutVscp);
+
+            // Create other methods (empty) to override abstract virtual methods.
+            AstCFunc* nbaTopp = new AstCFunc{fl, "nbaTop", scopep, "void"};
+            nbaTopp->isMethod(true);
+            nbaTopp->isInline(true);
+            nbaTopp->dontCombine(true);
+    
+            // Add trigArg arg
+            AstVar* const trigArgp
+                = new AstVar{fl, VVarType::MEMBER, freshName("trigArg"), m_triggering.trigDTypep};
+            trigArgp->funcLocal(true);
+            trigArgp->direction(VDirection::CONSTREF);
+            nbaTopp->addArgsp(trigArgp);
+            AstVarScope* const thisTrigVscp = new AstVarScope{fl, scopep, trigArgp};
+            scopep->addVarsp(thisTrigVscp);
+            optionallyAddMemArgs(nbaTopp, classp, scopep);
+            scopep->addBlocksp(nbaTopp);
+
+            AstCFunc* const trigEvalFuncp = new AstCFunc{classp->fileline(), "triggerEval", scopep};
+            trigEvalFuncp->isMethod(true);
+            trigEvalFuncp->isInline(true);
+            trigEvalFuncp->dontCombine(true);
+            scopep->addBlocksp(trigEvalFuncp);
+    
+            AstVar* const thisTrigp = new AstVar{classp->fileline(), VVarType::MEMBER,
+                                                    freshName("actTrig"), m_triggering.trigDTypep};
+            trigEvalFuncp->rtnType(thisTrigp->dtypep()->cType("", false, false));
+            thisTrigp->funcLocal(true);
+            thisTrigp->funcReturn(true);
+            thisTrigp->lifetime(VLifetime::AUTOMATIC);
+            trigEvalFuncp->addStmtsp(thisTrigp);
+            AstVarScope* const thisTrigVscp2 = new AstVarScope{classp->fileline(), scopep, thisTrigp};
+            scopep->addVarsp(thisTrigVscp2);
+            optionallyAddMemArgs(trigEvalFuncp, classp, scopep);
+
+            // Return
+            trigEvalFuncp->addStmtsp(new AstCReturn{
+                        classp->fileline(), new AstVarRef{classp->fileline(), thisTrigVscp2, VAccess::READ}});
+        }
 
         // STATE
         //      AstVarScope::user3p  -> new var scope local to the class
@@ -1381,12 +1517,15 @@ public:
                                const V3Sched::LogicByScope& statics,
                                const V3Sched::LogicByScope& actives)
         : m_modNames{"__VBspCls"}
-        , m_memberNames{"__VBspMember"}  // reset on partition
+        , m_memberNames{""}  // reset on partition
         , m_netlistp{netlistp}
         , m_partitionsp{partitionsp}
         , m_initials{initials}
         , m_initialStatics{statics}
-        , m_actives{actives} {}
+        , m_actives{actives} {
+            m_computeMemType = kwdToBasicDType(VBasicDTypeKwd::OPENMP_MEMPTR);
+        }
+
     void go() {
         // do not reorder
         // 1. Determine producer and consumers

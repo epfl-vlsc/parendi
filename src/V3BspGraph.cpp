@@ -1,6 +1,6 @@
 // -*- mode: C++; c-file-style: "cc-mode" -*-
 //*************************************************************************
-// DESCRIPTION: Verilator: BSP fine-grained dependence grpah
+// DESCRIPTION: Verilator: BSP fine-grained dependence graph
 //
 // Code available from: https://verilator.org
 //
@@ -93,7 +93,7 @@ private:
     CompVertex* m_logicVtx = nullptr;  // enclosing logic vertex
     DepGraph* m_graphp = nullptr;
 
-    // create a Compertex for logic node and iterate children to connect the
+    // create a CompVertex for logic node and iterate children to connect the
     // to the corresponding ConstrVertex objects.
     void iterateLogic(AstNode* nodep) {
         UASSERT_OBJ(!m_logicVtx, nodep, "Nesting logic?");
@@ -210,7 +210,7 @@ private:
         if (!m_inClocked && alreadyDefined) { firstUse = false; }
 
         if (firstUse) {
-            // notify next iterations that edgs have been created
+            // notify next iterations that edges have been created
             vscp->user2(vscp->user2() | VR_USE);
             if (!m_inClocked) {
                 // combinational logic, all uses should be before INIT, i.e., before
@@ -445,13 +445,12 @@ std::unique_ptr<DepGraph> backwardTraverseAndCollect(const std::unique_ptr<DepGr
 
 //==============================================================================
 // Data structure for creating disjoint sets, not very optimized for performance..
-template <class Key, class Hash = std::hash<Key>, class KeyEqual = std::equal_to<Key>,
-          class Allocator = std::allocator<Key>>
+template <class Key, class Hash = std::hash<Key>, class KeyEqual = std::equal_to<Key>>
 class DisjointSets {
 private:
-    using SetType = std::unordered_set<Key, Hash, KeyEqual, Allocator>;
-    using MapType = std::unordered_map<Key, SetType, Hash, KeyEqual, Allocator>;
-    using LookupType = std::unordered_map<Key, Key, Hash, KeyEqual, Allocator>;
+    using SetType = std::unordered_set<Key, Hash, KeyEqual>;
+    using MapType = std::unordered_map<Key, SetType, Hash, KeyEqual>;
+    using LookupType = std::unordered_map<Key, Key, Hash, KeyEqual>;
 
     MapType m_sets;
     LookupType m_rep;

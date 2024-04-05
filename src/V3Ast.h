@@ -474,6 +474,9 @@ public:
         IPU_CYCLE,
         IPU_PROFILE_TRACE,
         IPU_PROFILE_TRACE_VEC,
+        // OpenMP types
+        OPENMP_MEMPTR,
+        OPENMP_CONTEXT,
         // Unsigned and two state; fundamental types
         UINT32,
         UINT64,
@@ -518,6 +521,8 @@ public:
                                             "VlIpuCycle",
                                             "VlIpuProfileTrace",
                                             "VlIpuProfileTraceVec",
+                                            "MemoryContents*",
+                                            "OpenMPContext",
                                             "IData",
                                             "QData",
                                             "LOGIC_IMPLICIT",
@@ -559,6 +564,8 @@ public:
                                             "%E-VlIpuCycle",
                                             "%E-VlIpuProfileTrace",
                                             "%E-VlIpuProfileTraceVec",
+                                            "%E-MemoryContents* ",
+                                            "%E-OpenMPContext",
                                             "IData",
                                             "QData",
                                             "%E-logic-implct",
@@ -2676,6 +2683,7 @@ AstNode* VNVisitor::iterateSubtreeReturnEdits(AstNode* nodep) {
 #include "V3AstNodeExpr.h"
 #include "V3AstNodeOther.h"
 #include "V3AstNodePoplar.h"
+#include "V3AstNodeOpenMP.h"
 // Inline function definitions need to go last
 #include "V3AstInlines.h"
 

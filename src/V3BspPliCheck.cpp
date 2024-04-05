@@ -23,7 +23,7 @@ class InstrPliChecker final : public VNVisitor {
 private:
     bool m_hasPli = false;
     inline void setPli() { m_hasPli = true; }
-    void visit(AstCCall* callp) {
+    void visit(AstCCall* callp) override {
         if (callp->funcp()->dpiImportWrapper()) { setPli(); }
         iterateChildren(callp);
     }
@@ -31,7 +31,7 @@ private:
     void visit(AstFinish* nodep) override { setPli(); }
     void visit(AstStop* nodep) override { setPli(); }
     void visit(AstNodeReadWriteMem* nodep) override { setPli(); }
-    void visit(AstNode* nodep) {
+    void visit(AstNode* nodep) override {
         if (!nodep->isPure()) {
             setPli();
             return;

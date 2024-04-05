@@ -1,6 +1,6 @@
 // -*- mode: C++; c-file-style: "cc-mode" -*-
 //*************************************************************************
-// DESCRIPTION: Verilator: Lower the program tree create a poplar program
+// DESCRIPTION: Verilator: Lower the program tree to create a poplar/openmp program
 //
 // Code available from: https://verilator.org
 //

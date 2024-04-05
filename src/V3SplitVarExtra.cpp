@@ -64,7 +64,7 @@ private:
         }
         return m_varVtxp[vscp];
     }
-    void visit(AstVarRef* vrefp) {
+    void visit(AstVarRef* vrefp) override {
         if (!m_logicVtxp) {
             // not in a place that concerns us
             return;
