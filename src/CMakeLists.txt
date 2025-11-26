@@ -45,6 +45,7 @@ set(HEADERS
     V3Begin.h
     V3Branch.h
     V3Broken.h
+    V3BspCudaProgram.h
     V3BspDifferential.h
     V3BspDpi.h
     V3BspGraph.h
@@ -93,6 +94,7 @@ set(HEADERS
     V3EmitCFunc.h
     V3EmitCMain.h
     V3EmitCMake.h
+    V3EmitCuda.h
     V3EmitMk.h
     V3EmitPoplar.h
     V3EmitV.h
@@ -205,6 +207,7 @@ set(COMMON_SOURCES
     V3Begin.cpp
     V3Branch.cpp
     V3Broken.cpp
+    V3BspCudaProgram.cpp
     V3BspDifferential.cpp
     V3BspDpi.cpp
     V3BspGraph.cpp
@@ -257,6 +260,7 @@ set(COMMON_SOURCES
     V3EmitCMake.cpp
     V3EmitCModel.cpp
     V3EmitCSyms.cpp
+    V3EmitCudaVertex.cpp
     V3EmitPoplarMake.cpp
     V3EmitPoplarProgram.cpp
     V3EmitPoplarStructs.cpp

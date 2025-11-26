@@ -48,6 +48,7 @@
 #include "V3EmitC.h"
 #include "V3EmitCMain.h"
 #include "V3EmitCMake.h"
+#include "V3EmitCuda.h"
 #include "V3EmitMk.h"
 #include "V3EmitPoplar.h"
 #include "V3EmitV.h"
@@ -428,7 +429,7 @@ static void process() {
         if (v3Global.opt.stats()) V3Stats::statsStageAll(v3Global.rootp(), "PreOrder");
 
         // Schedule the logic
-        if (v3Global.opt.poplar()) {
+        if (v3Global.opt.poplar() || v3Global.opt.cuda()) {
 
             // create classes represeting parallel computation
             V3BspSched::schedule(v3Global.rootp());
@@ -589,6 +590,8 @@ static void process() {
         // Statistics
         V3BspStraggler::report();
         reportStatsIfEnabled();
+    } else if (v3Global.opt.cuda()) {
+        V3EmitCuda::emitVertex();
     } else {
         if (!v3Global.opt.lintOnly() && !v3Global.opt.xmlOnly() && !v3Global.opt.dpiHdrOnly()) {
             // emitcInlines is first, as it may set needHInlines which other emitters read
@@ -778,7 +781,7 @@ static void execHierVerilation() {
     }
 }
 
-//######################################################################
+// ######################################################################
 
 int main(int argc, char** argv) {
     // General initialization

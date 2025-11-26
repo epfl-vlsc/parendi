@@ -31,7 +31,7 @@
 class V3OptionsImp;
 class FileLine;
 
-//######################################################################
+// ######################################################################
 
 class VOptionBool final {
     // Class to track options that are either not specified (and default
@@ -187,18 +187,14 @@ using V3HierBlockOptSet = std::map<const std::string, V3HierarchicalBlockOption>
 
 class V3IpuMergeStrategyOption final {
 public:
-    enum Strategy {
-        BottomUp = 0,
-        BottomUpTopDown = 1,
-        TopDown = 2,
-        Hypergraph = 3,
-        Invalid = 4
-    };
+    enum Strategy { BottomUp = 0, BottomUpTopDown = 1, TopDown = 2, Hypergraph = 3, Invalid = 4 };
+
 private:
     Strategy m_strategy = Strategy::BottomUp;
     float m_bottomUpThreshold = 0.7;
     bool m_minimizeTileCount = false;
     bool m_ignoreDupCost = false;
+
 public:
     bool bottomUp() const { return m_strategy == Strategy::BottomUp; }
     bool topDown() const { return m_strategy == Strategy::TopDown; }
@@ -213,15 +209,12 @@ public:
     bool& ignoreDupCost() { return m_ignoreDupCost; }
 
     const char* ascii() const {
-        static const char* const m_names[] = {
-            "BottomUp", "BottomUpTopDown", "TopDown", "Hypergraph", "Invalid"
-        };
+        static const char* const m_names[]
+            = {"BottomUp", "BottomUpTopDown", "TopDown", "Hypergraph", "Invalid"};
         return m_names[m_strategy];
     }
 
-    static std::string list() {
-        return "BottomUp, BottomUpTopDown, TopDown, or Hypergraph";
-    }
+    static std::string list() { return "BottomUp, BottomUpTopDown, TopDown, or Hypergraph"; }
 
     void setFrom(const std::string& n) {
         if (n == "BottomUp") {
@@ -236,10 +229,9 @@ public:
             m_strategy = Strategy::Invalid;
         }
     }
-
 };
-//######################################################################
-// V3Options - Command line options
+// ######################################################################
+//  V3Options - Command line options
 
 class V3Options final {
 public:
@@ -324,6 +316,7 @@ private:
     bool m_structsPacked = false;   // main switch: --structs-packed
     bool m_systemC = false;         // main switch: --sc: System C instead of simple C++
     bool m_poplar = false;          // main switch: --poplar generate code for IPU
+    bool m_cuda   = false;          // main switch: --cuda generate code for NVIDIA GPUs
     bool m_stats = false;           // main switch: --stats
     bool m_statsVars = false;       // main switch: --stats-vars
     bool m_threadsCoarsen = true;   // main switch: --threads-coarsen
@@ -494,6 +487,7 @@ public:
     bool available() const VL_MT_SAFE { return m_available; }
     void ccSet();
     void poplarSet();
+    void cudaSet();
     void notify();
 
     // ACCESSORS (options)
@@ -504,6 +498,7 @@ public:
     string flags() const { return m_flags; }
     bool systemC() const VL_MT_SAFE { return m_systemC; }
     bool poplar() const VL_MT_SAFE { return m_poplar; }
+    bool cuda() const VL_MT_SAFE { return m_cuda; }
     bool savable() const VL_MT_SAFE { return m_savable; }
     bool stats() const { return m_stats; }
     bool statsVars() const { return m_statsVars; }
@@ -785,6 +780,6 @@ public:
     static void throwSigsegv();
 };
 
-//######################################################################
+// ######################################################################
 
 #endif  // guard

@@ -59,8 +59,8 @@
 
 VL_DEFINE_DEBUG_FUNCTIONS;
 
-//######################################################################
-// V3 Internal state
+// ######################################################################
+//  V3 Internal state
 
 class V3OptionsImp final {
 public:
@@ -109,8 +109,8 @@ public:
     ~V3OptionsImp() = default;
 };
 
-//######################################################################
-// V3LangCode class functions
+// ######################################################################
+//  V3LangCode class functions
 
 V3LangCode::V3LangCode(const char* textp) {
     // Return code for given string, or ERROR, which is a bad code
@@ -124,8 +124,8 @@ V3LangCode::V3LangCode(const char* textp) {
     m_e = V3LangCode::L_ERROR;
 }
 
-//######################################################################
-// VTimescale class functions
+// ######################################################################
+//  VTimescale class functions
 
 VTimescale::VTimescale(const string& value, bool& badr)
     : m_e{VTimescale::NONE} {
@@ -141,8 +141,8 @@ VTimescale::VTimescale(const string& value, bool& badr)
     }
 }
 
-//######################################################################
-// V3HierarchicalBlockOption class functions
+// ######################################################################
+//  V3HierarchicalBlockOption class functions
 
 // Parse "--hierarchical-block orig_name,mangled_name,param0_name,param0_value,... " option.
 // The format of value is as same as -G option. (can be string literal surrounded by ")
@@ -227,8 +227,8 @@ V3HierarchicalBlockOption::V3HierarchicalBlockOption(const string& opts) {
     }
 }
 
-//######################################################################
-// V3Options class functions
+// ######################################################################
+//  V3Options class functions
 
 void VTimescale::parseSlashed(FileLine* fl, const char* textp, VTimescale& unitr,
                               VTimescale& precr, bool allowEmpty) {
@@ -282,8 +282,8 @@ void VTimescale::parseSlashed(FileLine* fl, const char* textp, VTimescale& unitr
     }
 }
 
-//######################################################################
-// V3Options class functions
+// ######################################################################
+//  V3Options class functions
 
 void V3Options::addIncDirUser(const string& incdir) { m_impp->addIncDirUser(incdir); }
 void V3Options::addIncDirFallback(const string& incdir) { m_impp->addIncDirFallback(incdir); }
@@ -446,9 +446,16 @@ void V3Options::poplarSet() {  // --poplar
     m_outFormatOk = true;
     m_systemC = false;
     m_poplar = true;
+    m_cuda = false;
 }
-//######################################################################
-// File searching
+void V3Options::cudaSet() {
+    m_outFormatOk = true;
+    m_systemC = false;
+    m_poplar = false;
+    m_cuda = true;
+}
+// ######################################################################
+//  File searching
 
 bool V3Options::fileStatNormal(const string& filename) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -620,8 +627,8 @@ V3LangCode V3Options::fileLanguage(const string& filename) {
     return m_defaultLanguage;
 }
 
-//######################################################################
-// Environment
+// ######################################################################
+//  Environment
 
 string V3Options::getenvBuiltins(const string& var) {
     // If update below, also update V3Options::showVersion()
@@ -773,8 +780,8 @@ bool V3Options::coroutineSupport() {
 #endif
 }
 
-//######################################################################
-// V3 Options notification methods
+// ######################################################################
+//  V3 Options notification methods
 
 void V3Options::notify() {
     // Notify that all arguments have been passed and final modification can be made.
@@ -785,7 +792,7 @@ void V3Options::notify() {
         v3fatal("verilator: Need --binary, --cc, --sc, --cdc, --dpi-hdr-only, --lint-only, "
                 "--xml-only or --E option");
     }
-    if (outFormatOk() && v3Global.opt.poplar() && timing().isTrue()) {
+    if (outFormatOk() && (v3Global.opt.cuda() || v3Global.opt.poplar()) && timing().isTrue()) {
         v3fatal("verilator: --timing is not supported with --poplar");
     }
 
@@ -885,8 +892,8 @@ void V3Options::notify() {
     if (timing().isSetTrue()) V3PreShell::defineCmdLine("VERILATOR_TIMING", "1");
 }
 
-//######################################################################
-// V3 Options accessors
+// ######################################################################
+//  V3 Options accessors
 
 string V3Options::version() {
     string ver = DTVERSION;
@@ -932,8 +939,8 @@ VTimescale V3Options::timeComputeUnit(const VTimescale& flag) const {
     }
 }
 
-//######################################################################
-// V3 Options utilities
+// ######################################################################
+//  V3 Options utilities
 
 string V3Options::argString(int argc, char** argv) {
     // Return list of arguments as simple string
@@ -945,8 +952,8 @@ string V3Options::argString(int argc, char** argv) {
     return opts;
 }
 
-//######################################################################
-// V3 Options Parsing
+// ######################################################################
+//  V3 Options Parsing
 
 void V3Options::parseOpts(FileLine* fl, int argc, char** argv) {
     // Parse all options
@@ -1094,6 +1101,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc, char
     DECL_OPTION("-CFLAGS", CbVal, callStrSetter(&V3Options::addCFlags));
     DECL_OPTION("-cc", CbCall, [this]() { ccSet(); });
     DECL_OPTION("-poplar", CbCall, [this]() { poplarSet(); });
+    DECL_OPTION("-cuda", CbCall, [this]() { cudaSet(); });
     DECL_OPTION("-cdc", OnOff, &m_cdc);
     DECL_OPTION("-clk", CbVal, callStrSetter(&V3Options::addClocker));
     DECL_OPTION("-no-clk", CbVal, callStrSetter(&V3Options::addNoClocker));

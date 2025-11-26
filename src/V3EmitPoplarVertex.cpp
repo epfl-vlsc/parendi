@@ -121,7 +121,8 @@ private:
                 // puts(vrefp->dtypep()->cType("", false, false));
                 // puts("> ");
                 puts(vrefp->nameProtect());
-                puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : " + vrefp->fileline()->ascii() + " */\n");
+                puts("; /* " + AstNode::dedotName(vrefp->origName()) + " : "
+                     + vrefp->fileline()->ascii() + " */\n");
             }
         }
 
@@ -193,7 +194,8 @@ public:
                     toEmitp.back().push_back(classp);
                     nodeCount += classp->nodeCount();
 
-                    if (v3Global.opt.outputSplit() && nodeCount >= v3Global.opt.outputSplit() * 10) {
+                    if (v3Global.opt.outputSplit()
+                        && nodeCount >= v3Global.opt.outputSplit() * 10) {
                         toEmitp.push_back({});
                         nodeCount = 0;
                     }
@@ -226,7 +228,6 @@ void V3EmitPoplar::emitVertex() {
     // Make parent module pointers available, enables user4
     const EmitCParentModule emitCParentModule;
     AstNetlist* netlistp = v3Global.rootp();
-
 
     EmitPoplarVertex::emitAllThreaded(netlistp);
     V3Stats::statsStage("emitVertex");
